@@ -37,6 +37,8 @@ pub fn build(b: *std.Build) void {
     });
 
     const prism_path = "prism/src";
+    //exe.addIncludePath(.{ .cwd_relative = "prism/include" });
+    exe.addIncludePath(b.path("prism/include"));
 
     var iter_dir = std.fs.cwd().openDir(
         prism_path,
@@ -60,7 +62,6 @@ pub fn build(b: *std.Build) void {
         exe.addCSourceFile(.{ .file = .{ .cwd_relative = fname } });
     }
 
-    exe.addIncludePath(.{ .cwd_relative = "prism/include" });
     exe.linkLibC();
 
     // This declares intent for the executable to be installed into the

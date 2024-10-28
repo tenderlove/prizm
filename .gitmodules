@@ -1,0 +1,3 @@
+[submodule "prism"]
+	path = prism
+	url = https://github.com/ruby/prism
