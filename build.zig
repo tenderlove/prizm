@@ -1,5 +1,40 @@
 const std = @import("std");
 
+pub fn addPrismSource(b: *std.Build,
+    exe: *std.Build.Step.Compile,
+    prism_path: []const u8) void
+{
+    var iter_dir = std.fs.cwd().openDir(
+        prism_path,
+        .{ .iterate = true },
+    ) catch return;
+
+    defer {
+        iter_dir.close();
+    }
+    var it = iter_dir.iterate();
+    while (it.next() catch return) |file| {
+        if (file.kind == .directory) {
+            const dirname = std.fs.path.join(b.allocator, &.{
+                prism_path,
+                file.name
+            }) catch return;
+            addPrismSource(b, exe, dirname);
+        }
+
+        if (file.kind != .file) {
+            continue;
+        }
+
+        const fname = std.fs.path.join(b.allocator, &.{
+            prism_path,
+            file.name
+        }) catch return;
+
+        exe.addCSourceFile(.{ .file = .{ .cwd_relative = fname } });
+    }
+}
+
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
 // runner.
@@ -36,31 +71,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const prism_path = "prism/src";
-    //exe.addIncludePath(.{ .cwd_relative = "prism/include" });
     exe.addIncludePath(b.path("prism/include"));
 
-    var iter_dir = std.fs.cwd().openDir(
-        prism_path,
-        .{ .iterate = true },
-    ) catch return;
-
-    defer {
-        iter_dir.close();
-    }
-    var it = iter_dir.iterate();
-    while (it.next() catch return) |file| {
-        if (file.kind != .file) {
-            continue;
-        }
-
-        const fname = std.fs.path.join(b.allocator, &.{
-            prism_path,
-            file.name
-        }) catch return;
-
-        exe.addCSourceFile(.{ .file = .{ .cwd_relative = fname } });
-    }
+    addPrismSource(b, exe, "prism/src");
 
     exe.linkLibC();
 
