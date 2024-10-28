@@ -2,6 +2,8 @@
 //! you are building an executable. If you are making a library, the convention
 //! is to delete this file and start with root.zig instead.
 const std = @import("std");
+const prism = @import("root.zig");
+const Allocator = std.mem.Allocator;
 
 const c = @cImport({
     @cInclude("prism.h");
@@ -30,10 +32,13 @@ pub fn main() !void {
 
         const parser = try allocator.alloc(c.pm_parser_t, 1);
         c.pm_parser_init(parser.ptr, src.ptr, file_size, null);
-        const root = c.pm_parse(parser.ptr);
-        std.debug.print("Node type {s}\n", .{ c.pm_node_type_to_str(root.*.type) });
-        //defer c.pm_node_destroy(parser.ptr, root);
-        //defer c.pm_parser_free(parser.ptr);
+        defer c.pm_parser_free(parser.ptr);
+
+        const root_node = c.pm_parse(parser.ptr);
+        var buf = std.ArrayList(u8).init(allocator);
+        try prism.prism_pp(&buf, parser.ptr, root_node);
+        std.debug.print("{s}", .{ try buf.toOwnedSlice() });
+        defer c.pm_node_destroy(parser.ptr, root_node);
     }
     else {
         std.debug.print("Prism version: {d}, {s}.\n", .{args.len, c.pm_version()});
