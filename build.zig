@@ -39,6 +39,15 @@ pub fn addPrismSource(b: *std.Build,
 // declaratively construct a build graph that will be executed by an external
 // runner.
 pub fn build(b: *std.Build) void {
+    const rake = b.addSystemCommand(&.{"rake"});
+    const prism_path = std.fs.path.join(b.allocator, &.{b.build_root.path orelse "",
+        "prism"
+    }) catch return;
+
+    rake.addArg("-C");
+    rake.addArg(prism_path);
+    rake.addArg("templates");
+
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -58,6 +67,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    lib.step.dependOn(&rake.step);
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
