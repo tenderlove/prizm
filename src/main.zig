@@ -8,34 +8,35 @@ const c = @cImport({
 });
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    const allocator = arena.allocator();
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    // Get the command line args
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
-    try bw.flush(); // Don't forget to flush!
-}
+    if (args.len == 2) {
+        var path_buffer: [std.fs.max_path_bytes]u8 = undefined;
+        const path = try std.fs.realpathZ(args.ptr[1], &path_buffer);
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+        const file = try std.fs.openFileAbsolute(path, .{});
+        const file_size = (try file.stat()).size;
+        std.debug.print("File: {s} {d}.\n", .{args.ptr[1], file_size});
+        defer file.close();
 
-test "fuzz example" {
-    const global = struct {
-        fn testOne(input: []const u8) anyerror!void {
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(global.testOne, .{});
+        const src = try file.readToEndAlloc(allocator, file_size);
+
+        const parser = try allocator.alloc(c.pm_parser_t, 1);
+        c.pm_parser_init(parser.ptr, src.ptr, file_size, null);
+        const root = c.pm_parse(parser.ptr);
+        std.debug.print("Node type {s}\n", .{ c.pm_node_type_to_str(root.*.type) });
+        //defer c.pm_node_destroy(parser.ptr, root);
+        //defer c.pm_parser_free(parser.ptr);
+    }
+    else {
+        std.debug.print("Prism version: {d}, {s}.\n", .{args.len, c.pm_version()});
+        return;
+    }
 }
