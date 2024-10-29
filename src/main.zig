@@ -38,6 +38,18 @@ pub fn main() !void {
         var buf = std.ArrayList(u8).init(allocator);
         try prism.prism_pp(&buf, parser.ptr, root_node);
         std.debug.print("{s}", .{ try buf.toOwnedSlice() });
+
+        const buffer = try allocator.alloc(c.pm_buffer_t, 1);
+        // defer c.pm_buffer_free(buffer.ptr);
+
+        if (c.pm_buffer_init(buffer.ptr)) {
+        c.pm_prettyprint(buffer.ptr, parser.ptr, root_node);
+        c.pm_buffer_append_byte(buffer.ptr, 0);
+        std.debug.print("hi mom\n", .{});
+
+        std.debug.print("{s}\n", .{ c.pm_buffer_value(buffer.ptr)[0..(c.pm_buffer_length(buffer.ptr))] });
+        }
+
         defer c.pm_node_destroy(parser.ptr, root_node);
     }
     else {

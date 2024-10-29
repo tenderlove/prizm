@@ -34,6 +34,23 @@ const PP = struct {
 
         try writer.print(":{s}", .{ msg });
     }
+
+    fn writeNodeName(pp: *PP, node: [*c] const c.pm_node_t) !void {
+        const name = switch (node.*.type) {
+            c.PM_CLASS_NODE => "@ ClassNode (location: ",
+            c.PM_PROGRAM_NODE => "@ ProgramNode (location: ",
+            c.PM_STATEMENTS_NODE => "@ StatementsNode (location: ",
+            c.PM_LOCAL_VARIABLE_WRITE_NODE => "@ LocalVariableWriteNode (location: ",
+            c.PM_CALL_NODE => "@ CallNode (location: ",
+            else => {
+                std.debug.print("unknown type {s}", .{ c.pm_node_type_to_str(node.*.type) });
+                return error.InvalidInput;
+            }
+        };
+        try pp.writer.print("{s}", .{ name });
+        try pp_location(pp, &(node.*.location));
+        try pp.writer.print(")\n", .{});
+    }
 };
 
 fn pp_location(pp: *PP, loc: *const c.pm_location_t) !void {
@@ -48,12 +65,28 @@ fn pp_location(pp: *PP, loc: *const c.pm_location_t) !void {
 fn pretty_print_node(pp: *PP, node: [*c] const c.pm_node_t) !void {
     const writer = pp.writer;
 
-    switch (node.*.type) {
-        c.PM_PROGRAM_NODE => {
-            try writer.print("@ ProgramNode (location: ", .{});
-            try pp_location(pp, &(node.*.location));
-            try writer.print(")\n", .{});
+    try pp.writeNodeName(node);
 
+    switch (node.*.type) {
+        c.PM_CLASS_NODE => {
+            const cast: [*c] const c.pm_class_node_t = @ptrCast(node);
+
+            // locals
+            try pp.flush_prefix();
+            try writer.print("+-- locals: [", .{});
+            const local_size = cast.*.locals.size;
+            const ids = cast.*.locals.ids[0..local_size];
+            for (ids, 0..local_size) |id, index| {
+                if (index != 0) {
+                    try writer.print(", ", .{});
+                }
+                try pp.pp_constant(id);
+            }
+            try writer.print("]\n", .{});
+
+            // TODO: continue
+        },
+        c.PM_PROGRAM_NODE => {
             // Locals
             try pp.flush_prefix();
             try writer.print("+-- locals: [", .{});
@@ -75,6 +108,33 @@ fn pretty_print_node(pp: *PP, node: [*c] const c.pm_node_t) !void {
             try pp.flush_prefix();
             try pretty_print_node(pp, @ptrCast(cast.*.statements));
             pp.pop_prefix();
+        },
+        c.PM_STATEMENTS_NODE => {
+            const cast: [*c] const c.pm_statements_node_t = @ptrCast(node);
+
+            // body
+            try pp.flush_prefix();
+            try writer.print("+-- body:", .{});
+            try writer.print(" (length: {d})\n", .{ cast.*.body.size });
+
+            const last_index = cast.*.body.size;
+
+            const nodes = cast.*.body.nodes[0..last_index];
+            for (nodes, 0..last_index) |child, idx| {
+                try pp.push_prefix("    ");
+                defer pp.pop_prefix();
+
+                try pp.flush_prefix();
+                try writer.print("+-- ", .{});
+                try pp.push_prefix(if (idx == (last_index - 1))
+                    "    "
+                else
+                    "|   "
+                );
+                defer pp.pop_prefix();
+
+                try pretty_print_node(pp, @ptrCast(child));
+            }
         },
         else => {
             std.debug.print("Need to handle node type: {s}\n", .{c.pm_node_type_to_str(node.*.type)});
