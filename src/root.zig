@@ -2,20 +2,22 @@
 //! you are making an executable, the convention is to delete this file and
 //! start with main.zig instead.
 const std = @import("std");
-const c = @cImport({ @cInclude("prism.h"); });
+const c = @cImport({
+    @cInclude("prism.h");
+});
 const Allocator = std.mem.Allocator;
 
 const PP = struct {
     writer: std.ArrayList(u8).Writer,
     prefix: std.ArrayList(u8),
     prefix_lengths: std.ArrayList(usize),
-    parser: [*c] const c.pm_parser_t,
+    parser: [*c]const c.pm_parser_t,
 
     fn flush_prefix(pp: *PP) !void {
-        try pp.writer.print("{s}", .{ pp.prefix.items });
+        try pp.writer.print("{s}", .{pp.prefix.items});
     }
 
-    fn push_prefix(pp: *PP, str: [] const u8) !void {
+    fn push_prefix(pp: *PP, str: []const u8) !void {
         try pp.prefix.appendSlice(str);
         try pp.prefix_lengths.append(str.len);
     }
@@ -24,7 +26,7 @@ const PP = struct {
         pp.prefix.items.len -= pp.prefix_lengths.pop();
     }
 
-    const bytelut_ruby = [_][]const u8 {
+    const bytelut_ruby = [_][]const u8{
         "\\a",
         "\\b",
         "\\t",
@@ -34,17 +36,15 @@ const PP = struct {
         "\\r",
     };
 
-    fn append_source(pp: *PP, start: [*c] const u8, len: usize) !void {
+    fn append_source(pp: *PP, start: [*c]const u8, len: usize) !void {
         const bytes = start[0..len];
         for (bytes) |byte| {
             if ((byte <= 0x06) or (byte >= 0x0E and byte <= 0x1F) or (byte >= 0x7F)) {
-                try pp.writer.print("{x:02}", .{ byte });
-            }
-            else {
+                try pp.writer.print("{x:02}", .{byte});
+            } else {
                 if (byte >= 7 and byte <= 13) {
-                    try pp.writer.print("{s}", .{ bytelut_ruby[byte - 7] });
-                }
-                else {
+                    try pp.writer.print("{s}", .{bytelut_ruby[byte - 7]});
+                } else {
                     switch (byte) {
                         '"' => try pp.writer.print("\\\"", .{}),
                         '#' => try pp.writer.writeByte('#'),
@@ -64,10 +64,10 @@ const PP = struct {
 
         const msg = constant.*.start[0..(constant.*.length)];
 
-        try writer.print(":{s}", .{ msg });
+        try writer.print(":{s}", .{msg});
     }
 
-    fn writeNodeName(pp: *PP, node: [*c] const c.pm_node_t) !void {
+    fn writeNodeName(pp: *PP, node: [*c]const c.pm_node_t) !void {
         const name = switch (node.*.type) {
             c.PM_CLASS_NODE => "@ ClassNode (location: ",
             c.PM_PROGRAM_NODE => "@ ProgramNode (location: ",
@@ -76,131 +76,129 @@ const PP = struct {
             c.PM_CALL_NODE => "@ CallNode (location: ",
             c.PM_CONSTANT_READ_NODE => "@ ConstantReadNode (location: ",
             else => {
-                std.debug.print("unknown type {s}\n", .{ c.pm_node_type_to_str(node.*.type) });
+                std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
                 return error.InvalidInput;
-            }
+            },
         };
-        try pp.writer.print("{s}", .{ name });
-        try pp_location(pp, &(node.*.location));
+        try pp.writer.print("{s}", .{name});
+        try pp.print_location(&(node.*.location));
         try pp.writer.print(")\n", .{});
+    }
+
+    fn print_node(pp: *PP, node: [*c]const c.pm_node_t) !void {
+        const writer = pp.writer;
+
+        try pp.writeNodeName(node);
+
+        switch (node.*.type) {
+            c.PM_CLASS_NODE => {
+                const cast: [*c]const c.pm_class_node_t = @ptrCast(node);
+
+                // locals
+                try pp.flush_prefix();
+                try writer.print("+-- locals: [", .{});
+                const local_size = cast.*.locals.size;
+                const ids = cast.*.locals.ids[0..local_size];
+                for (ids, 0..local_size) |id, index| {
+                    if (index != 0) {
+                        try writer.print(", ", .{});
+                    }
+                    try pp.pp_constant(id);
+                }
+                try writer.print("]\n", .{});
+
+                // class_keyword_loc
+                try pp.flush_prefix();
+                try writer.print("+-- class_keyword_loc: ", .{});
+                const location = cast.*.class_keyword_loc;
+                try pp.print_location(&location);
+                try writer.print(" = \"", .{});
+                const len = location.end - location.start;
+                try pp.append_source(location.start, len);
+                try writer.print("\"\n", .{});
+
+                // constant_path
+                try pp.flush_prefix();
+                try writer.print("+-- constant_path:\n", .{});
+                try pp.push_prefix("|   ");
+                defer pp.pop_prefix();
+                try pp.flush_prefix();
+                try pp.print_node(@ptrCast(cast.*.constant_path));
+            },
+            c.PM_PROGRAM_NODE => {
+                const cast: [*c]const c.pm_program_node_t = @ptrCast(node);
+
+                // Locals
+                try pp.flush_prefix();
+                try writer.print("+-- locals: [", .{});
+                const local_size = cast.*.locals.size;
+                const ids = cast.*.locals.ids[0..local_size];
+                for (ids, 0..local_size) |id, index| {
+                    if (index != 0) {
+                        try writer.print(", ", .{});
+                    }
+                    try pp.pp_constant(id);
+                }
+                try writer.print("]\n", .{});
+
+                // statements
+                try pp.flush_prefix();
+                try writer.print("+-- statements:\n", .{});
+                try pp.push_prefix("    ");
+                try pp.flush_prefix();
+                try pp.print_node(@ptrCast(cast.*.statements));
+                pp.pop_prefix();
+            },
+            c.PM_STATEMENTS_NODE => {
+                const cast: [*c]const c.pm_statements_node_t = @ptrCast(node);
+
+                // body
+                try pp.flush_prefix();
+                try writer.print("+-- body:", .{});
+                try writer.print(" (length: {d})\n", .{cast.*.body.size});
+
+                const last_index = cast.*.body.size;
+
+                const nodes = cast.*.body.nodes[0..last_index];
+                for (nodes, 0..last_index) |child, idx| {
+                    try pp.push_prefix("    ");
+                    defer pp.pop_prefix();
+
+                    try pp.flush_prefix();
+                    try writer.print("+-- ", .{});
+                    try pp.push_prefix(if (idx == (last_index - 1))
+                        "    "
+                    else
+                        "|   ");
+                    defer pp.pop_prefix();
+
+                    try pp.print_node(@ptrCast(child));
+                }
+            },
+            else => {
+                std.debug.print("Need to handle node type: {s}\n", .{c.pm_node_type_to_str(node.*.type)});
+            },
+        }
+        return;
+    }
+
+    fn print_location(pp: *PP, loc: *const c.pm_location_t) !void {
+        const writer = pp.writer;
+        const parser = pp.parser;
+
+        const start = c.pm_newline_list_line_column(&parser.*.newline_list, loc.*.start, parser.*.start_line);
+        const end = c.pm_newline_list_line_column(&parser.*.newline_list, loc.*.end, parser.*.start_line);
+        try writer.print("({d},{d})-({d},{d})", .{ start.line, start.column, end.line, end.column });
     }
 };
 
-fn pp_location(pp: *PP, loc: *const c.pm_location_t) !void {
-    const writer = pp.writer;
-    const parser = pp.parser;
-
-    const start = c.pm_newline_list_line_column(&parser.*.newline_list, loc.*.start, parser.*.start_line);
-    const end = c.pm_newline_list_line_column(&parser.*.newline_list, loc.*.end, parser.*.start_line);
-    try writer.print("({d},{d})-({d},{d})", .{ start.line, start.column, end.line, end.column });
-}
-
-fn pretty_print_node(pp: *PP, node: [*c] const c.pm_node_t) !void {
-    const writer = pp.writer;
-
-    try pp.writeNodeName(node);
-
-    switch (node.*.type) {
-        c.PM_CLASS_NODE => {
-            const cast: [*c] const c.pm_class_node_t = @ptrCast(node);
-
-            // locals
-            try pp.flush_prefix();
-            try writer.print("+-- locals: [", .{});
-            const local_size = cast.*.locals.size;
-            const ids = cast.*.locals.ids[0..local_size];
-            for (ids, 0..local_size) |id, index| {
-                if (index != 0) {
-                    try writer.print(", ", .{});
-                }
-                try pp.pp_constant(id);
-            }
-            try writer.print("]\n", .{});
-
-            // class_keyword_loc
-            try pp.flush_prefix();
-            try writer.print("+-- class_keyword_loc: ", .{});
-            const location = cast.*.class_keyword_loc;
-            try pp_location(pp, &location);
-            try writer.print(" = \"", .{});
-            const len = location.end - location.start;
-            try pp.append_source(location.start, len);
-            try writer.print("\"\n", .{});
-
-            // constant_path
-            try pp.flush_prefix();
-            try writer.print("+-- constant_path:\n", .{});
-            try pp.push_prefix("|   ");
-            defer pp.pop_prefix();
-            try pp.flush_prefix();
-            try pretty_print_node(pp, @ptrCast(cast.*.constant_path));
-
-        },
-        c.PM_PROGRAM_NODE => {
-            const cast: [*c] const c.pm_program_node_t = @ptrCast(node);
-
-            // Locals
-            try pp.flush_prefix();
-            try writer.print("+-- locals: [", .{});
-            const local_size = cast.*.locals.size;
-            const ids = cast.*.locals.ids[0..local_size];
-            for (ids, 0..local_size) |id, index| {
-                if (index != 0) {
-                    try writer.print(", ", .{});
-                }
-                try pp.pp_constant(id);
-            }
-            try writer.print("]\n", .{});
-
-            // statements
-            try pp.flush_prefix();
-            try writer.print("+-- statements:\n", .{});
-            try pp.push_prefix("    ");
-            try pp.flush_prefix();
-            try pretty_print_node(pp, @ptrCast(cast.*.statements));
-            pp.pop_prefix();
-        },
-        c.PM_STATEMENTS_NODE => {
-            const cast: [*c] const c.pm_statements_node_t = @ptrCast(node);
-
-            // body
-            try pp.flush_prefix();
-            try writer.print("+-- body:", .{});
-            try writer.print(" (length: {d})\n", .{ cast.*.body.size });
-
-            const last_index = cast.*.body.size;
-
-            const nodes = cast.*.body.nodes[0..last_index];
-            for (nodes, 0..last_index) |child, idx| {
-                try pp.push_prefix("    ");
-                defer pp.pop_prefix();
-
-                try pp.flush_prefix();
-                try writer.print("+-- ", .{});
-                try pp.push_prefix(if (idx == (last_index - 1))
-                    "    "
-                else
-                    "|   "
-                );
-                defer pp.pop_prefix();
-
-                try pretty_print_node(pp, @ptrCast(child));
-            }
-        },
-        else => {
-            std.debug.print("Need to handle node type: {s}\n", .{c.pm_node_type_to_str(node.*.type)});
-        }
-    }
-    return;
-}
-
-pub fn prism_pp(buf: *std.ArrayList(u8), parser: [*c] const c.pm_parser_t, node: [*c] const c.pm_node_t) !void {
-    var pp = PP {
+pub fn prism_pp(buf: *std.ArrayList(u8), parser: [*c]const c.pm_parser_t, node: [*c]const c.pm_node_t) !void {
+    var pp = PP{
         .writer = buf.writer(),
         .prefix = std.ArrayList(u8).init(buf.allocator),
         .prefix_lengths = std.ArrayList(usize).init(buf.allocator),
         .parser = parser,
     };
-    try pretty_print_node(&pp, node);
+    try pp.print_node(node);
     return;
 }
