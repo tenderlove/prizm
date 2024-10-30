@@ -172,12 +172,14 @@ const PP = struct {
         try pp.writer.print("\"\n", .{});
 
         // constant_path
-        try pp.flush_prefix();
-        try pp.writer.print("+-- constant_path:\n", .{});
-        try pp.push_prefix("|   ");
-        defer pp.pop_prefix();
-        try pp.flush_prefix();
-        try pp.print_node(@ptrCast(cast.*.constant_path));
+        {
+            try pp.flush_prefix();
+            try pp.writer.print("+-- constant_path:\n", .{});
+            try pp.push_prefix("|   ");
+            defer pp.pop_prefix();
+            try pp.flush_prefix();
+            try pp.print_node(@ptrCast(cast.*.constant_path));
+        }
     }
 
     fn print_location(pp: *PP, loc: *const c.pm_location_t) !void {
