@@ -24,6 +24,38 @@ const PP = struct {
         pp.prefix.items.len -= pp.prefix_lengths.pop();
     }
 
+    const bytelut_ruby = [_][]const u8 {
+        "\\a",
+        "\\b",
+        "\\t",
+        "\\n",
+        "\\v",
+        "\\f",
+        "\\r",
+    };
+
+    fn append_source(pp: *PP, start: [*c] const u8, len: usize) !void {
+        const bytes = start[0..len];
+        for (bytes) |byte| {
+            if ((byte <= 0x06) or (byte >= 0x0E and byte <= 0x1F) or (byte >= 0x7F)) {
+                try pp.writer.print("{x:02}", .{ byte });
+            }
+            else {
+                if (byte >= 7 and byte <= 13) {
+                    try pp.writer.print("{s}", .{ bytelut_ruby[byte - 7] });
+                }
+                else {
+                    switch (byte) {
+                        '"' => try pp.writer.print("\\\"", .{}),
+                        '#' => try pp.writer.writeByte('#'),
+                        '\\' => try pp.writer.print("\\\\", .{}),
+                        else => try pp.writer.writeByte(byte),
+                    }
+                }
+            }
+        }
+    }
+
     fn pp_constant(pp: *PP, constant_id: u32) !void {
         const writer = pp.writer;
         const parser = pp.parser;
@@ -42,8 +74,9 @@ const PP = struct {
             c.PM_STATEMENTS_NODE => "@ StatementsNode (location: ",
             c.PM_LOCAL_VARIABLE_WRITE_NODE => "@ LocalVariableWriteNode (location: ",
             c.PM_CALL_NODE => "@ CallNode (location: ",
+            c.PM_CONSTANT_READ_NODE => "@ ConstantReadNode (location: ",
             else => {
-                std.debug.print("unknown type {s}", .{ c.pm_node_type_to_str(node.*.type) });
+                std.debug.print("unknown type {s}\n", .{ c.pm_node_type_to_str(node.*.type) });
                 return error.InvalidInput;
             }
         };
@@ -84,13 +117,31 @@ fn pretty_print_node(pp: *PP, node: [*c] const c.pm_node_t) !void {
             }
             try writer.print("]\n", .{});
 
-            // TODO: continue
+            // class_keyword_loc
+            try pp.flush_prefix();
+            try writer.print("+-- class_keyword_loc: ", .{});
+            const location = cast.*.class_keyword_loc;
+            try pp_location(pp, &location);
+            try writer.print(" = \"", .{});
+            const len = location.end - location.start;
+            try pp.append_source(location.start, len);
+            try writer.print("\"\n", .{});
+
+            // constant_path
+            try pp.flush_prefix();
+            try writer.print("+-- constant_path:\n", .{});
+            try pp.push_prefix("|   ");
+            defer pp.pop_prefix();
+            try pp.flush_prefix();
+            try pretty_print_node(pp, @ptrCast(cast.*.constant_path));
+
         },
         c.PM_PROGRAM_NODE => {
+            const cast: [*c] const c.pm_program_node_t = @ptrCast(node);
+
             // Locals
             try pp.flush_prefix();
             try writer.print("+-- locals: [", .{});
-            const cast: [*c] const c.pm_program_node_t = @ptrCast(node);
             const local_size = cast.*.locals.size;
             const ids = cast.*.locals.ids[0..local_size];
             for (ids, 0..local_size) |id, index| {
