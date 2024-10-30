@@ -162,14 +162,16 @@ const PP = struct {
         try pp.writer.print("]\n", .{});
 
         // class_keyword_loc
-        try pp.flush_prefix();
-        try pp.writer.print("+-- class_keyword_loc: ", .{});
-        const location = cast.*.class_keyword_loc;
-        try pp.print_location(&location);
-        try pp.writer.print(" = \"", .{});
-        const len = location.end - location.start;
-        try pp.append_source(location.start, len);
-        try pp.writer.print("\"\n", .{});
+        {
+            try pp.flush_prefix();
+            try pp.writer.print("+-- class_keyword_loc: ", .{});
+            const location = cast.*.class_keyword_loc;
+            try pp.print_location(&location);
+            try pp.writer.print(" = \"", .{});
+            const len = location.end - location.start;
+            try pp.append_source(location.start, len);
+            try pp.writer.print("\"\n", .{});
+        }
 
         // constant_path
         {
@@ -179,6 +181,23 @@ const PP = struct {
             defer pp.pop_prefix();
             try pp.flush_prefix();
             try pp.print_node(@ptrCast(cast.*.constant_path));
+        }
+
+        // inheritance_operator_loc
+        {
+            try pp.flush_prefix();
+            try pp.writer.print("+-- inheritance_operator_loc:", .{});
+            const location = cast.*.inheritance_operator_loc;
+            if (location.start == null) {
+                try pp.writer.print(" nil\n", .{});
+            } else {
+                try pp.writer.print(" ", .{});
+                try pp.print_location(&location);
+                try pp.writer.print(" = \"", .{});
+                const len = location.end - location.start;
+                try pp.append_source(location.start, len);
+                try pp.writer.print("\"\n", .{});
+            }
         }
     }
 
