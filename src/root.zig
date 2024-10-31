@@ -76,6 +76,8 @@ const PP = struct {
             c.PM_LOCAL_VARIABLE_WRITE_NODE => "@ LocalVariableWriteNode (location: ",
             c.PM_PARAMETERS_NODE => "@ ParametersNode (location: ",
             c.PM_PROGRAM_NODE => "@ ProgramNode (location: ",
+            c.PM_REQUIRED_KEYWORD_PARAMETER_NODE => "@ RequiredKeywordParameterNode (location: ",
+            c.PM_REQUIRED_PARAMETER_NODE => "@ RequiredParameterNode (location: ",
             c.PM_STATEMENTS_NODE => "@ StatementsNode (location: ",
             else => {
                 std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
@@ -94,6 +96,7 @@ const PP = struct {
             c.PM_CLASS_NODE => try pp.visitClassNode(@ptrCast(node)),
             c.PM_CONSTANT_READ_NODE => try pp.visitConstantReadNode(@ptrCast(node)),
             c.PM_DEF_NODE => try pp.visitDefNode(@ptrCast(node)),
+            c.PM_PARAMETERS_NODE => try pp.visitParametersNode(@ptrCast(node)),
             c.PM_PROGRAM_NODE => try pp.visitProgramNode(@ptrCast(node)),
             c.PM_STATEMENTS_NODE => try pp.visitStatementsNode(@ptrCast(node)),
             else => {
@@ -101,51 +104,6 @@ const PP = struct {
             },
         }
         return;
-    }
-
-    fn visitProgramNode(pp: *PP, cast: [*c]const c.pm_program_node_t) !void {
-        // Locals
-        try pp.print_header("+-- locals: [");
-        const local_size = cast.*.locals.size;
-        const ids = cast.*.locals.ids[0..local_size];
-        for (ids, 0..local_size) |id, index| {
-            if (index != 0) {
-                try pp.writer.print(", ", .{});
-            }
-            try pp.pp_constant(id);
-        }
-        try pp.writer.print("]\n", .{});
-
-        // statements
-        try pp.print_header("+-- statements:\n");
-        try pp.push_prefix("    ");
-        defer pp.pop_prefix();
-        try pp.flush_prefix();
-        try pp.print_node(@ptrCast(cast.*.statements));
-    }
-
-    fn visitStatementsNode(pp: *PP, cast: [*c]const c.pm_statements_node_t) !void {
-        // body
-        try pp.print_header("+-- body:");
-        try pp.writer.print(" (length: {d})\n", .{cast.*.body.size});
-
-        const last_index = cast.*.body.size;
-
-        const nodes = cast.*.body.nodes[0..last_index];
-        for (nodes, 0..last_index) |child, idx| {
-            try pp.push_prefix("    ");
-            defer pp.pop_prefix();
-
-            try pp.flush_prefix();
-            try pp.writer.print("+-- ", .{});
-            try pp.push_prefix(if (idx == (last_index - 1))
-                "    "
-                else
-                "|   ");
-            defer pp.pop_prefix();
-
-            try pp.print_node(@ptrCast(child));
-        }
     }
 
     fn visitClassNode(pp: *PP, cast: [*c]const c.pm_class_node_t) !void {
@@ -247,9 +205,72 @@ const PP = struct {
         try pp.print_loc_with_source("+-- end_keyword_loc: ", &cast.*.end_keyword_loc);
     }
 
+    fn visitParametersNode(pp: *PP, cast: [*c]const c.pm_parameters_node_t) !void {
+        // requireds
+        try pp.print_header("+-- requireds:");
+        try pp.writer.print(" (length: {d})\n", .{cast.*.requireds.size});
+        try pp.print_node_list(cast.*.requireds.nodes, cast.*.requireds.size);
+
+        // optionals
+        try pp.print_header("+-- optionals:");
+        try pp.writer.print(" (length: {d})\n", .{cast.*.optionals.size});
+        try pp.print_node_list(cast.*.optionals.nodes, cast.*.optionals.size);
+
+        // rest
+        try pp.print_header("+-- rest:");
+        try pp.print_child_or_nil(cast.*.rest);
+
+        // posts
+        try pp.print_header("+-- posts:");
+        try pp.writer.print(" (length: {d})\n", .{cast.*.posts.size});
+        try pp.print_node_list(cast.*.posts.nodes, cast.*.posts.size);
+
+        // keywords
+        try pp.print_header("+-- keywords:");
+        try pp.writer.print(" (length: {d})\n", .{cast.*.keywords.size});
+        try pp.print_node_list(cast.*.keywords.nodes, cast.*.keywords.size);
+
+        // keyword_rest
+        try pp.print_header("+-- keyword_rest:");
+        try pp.print_child_or_nil(cast.*.keyword_rest);
+
+        // block
+        try pp.print_header("+-- block:");
+        try pp.print_child_or_nil(@ptrCast(cast.*.block));
+    }
+
+    fn visitProgramNode(pp: *PP, cast: [*c]const c.pm_program_node_t) !void {
+        // Locals
+        try pp.print_header("+-- locals: [");
+        const local_size = cast.*.locals.size;
+        const ids = cast.*.locals.ids[0..local_size];
+        for (ids, 0..local_size) |id, index| {
+            if (index != 0) {
+                try pp.writer.print(", ", .{});
+            }
+            try pp.pp_constant(id);
+        }
+        try pp.writer.print("]\n", .{});
+
+        // statements
+        try pp.print_header("+-- statements:\n");
+        try pp.push_prefix("    ");
+        defer pp.pop_prefix();
+        try pp.flush_prefix();
+        try pp.print_node(@ptrCast(cast.*.statements));
+    }
+
+    fn visitStatementsNode(pp: *PP, cast: [*c]const c.pm_statements_node_t) !void {
+        // body
+        try pp.print_header("+-- body:");
+        try pp.writer.print(" (length: {d})\n", .{cast.*.body.size});
+
+        try pp.print_node_list(cast.*.body.nodes, cast.*.body.size);
+    }
+
     fn print_child_or_nil(pp: *PP, node: ?*const c.pm_node_t) !void {
         if (node == null) {
-            try pp.writer.print("nil\n", .{});
+            try pp.writer.print(" nil\n", .{});
         } else {
             try pp.writer.print("\n", .{});
             try pp.push_prefix("|   ");
@@ -277,6 +298,26 @@ const PP = struct {
             const len = location.end - location.start;
             try pp.append_source(location.start, len);
             try pp.writer.print("\"\n", .{});
+        }
+    }
+
+    fn print_node_list(pp: *PP, list: [*c][*c]c.pm_node_t, length: usize) !void {
+        if (length == 0) {
+            return;
+        }
+
+        for (list[0..length], 0..length) |child, idx| {
+            try pp.push_prefix("|   ");
+            defer pp.pop_prefix();
+            try pp.flush_prefix();
+            try pp.writer.print("+-- ", .{});
+            try pp.push_prefix(if (idx == (length - 1))
+                "    "
+                else
+                "|   ");
+            defer pp.pop_prefix();
+
+            try pp.print_node(@ptrCast(child));
         }
     }
 
