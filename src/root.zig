@@ -74,6 +74,7 @@ const PP = struct {
             c.PM_CONSTANT_READ_NODE => "@ ConstantReadNode (location: ",
             c.PM_DEF_NODE => "@ DefNode (location: ",
             c.PM_LOCAL_VARIABLE_WRITE_NODE => "@ LocalVariableWriteNode (location: ",
+            c.PM_PARAMETERS_NODE => "@ ParametersNode (location: ",
             c.PM_PROGRAM_NODE => "@ ProgramNode (location: ",
             c.PM_STATEMENTS_NODE => "@ StatementsNode (location: ",
             else => {
@@ -92,6 +93,7 @@ const PP = struct {
         switch (node.*.type) {
             c.PM_CLASS_NODE => try pp.visitClassNode(@ptrCast(node)),
             c.PM_CONSTANT_READ_NODE => try pp.visitConstantReadNode(@ptrCast(node)),
+            c.PM_DEF_NODE => try pp.visitDefNode(@ptrCast(node)),
             c.PM_PROGRAM_NODE => try pp.visitProgramNode(@ptrCast(node)),
             c.PM_STATEMENTS_NODE => try pp.visitStatementsNode(@ptrCast(node)),
             else => {
@@ -149,13 +151,6 @@ const PP = struct {
         }
     }
 
-    fn visitConstantReadNode(pp: *PP, cast: [*c]const c.pm_constant_read_node_t) !void {
-        try pp.flush_prefix();
-        try pp.writer.print("+-- name: ", .{});
-        try pp.pp_constant(cast.*.name);
-        try pp.writer.print("\n", .{});
-    }
-
     fn visitClassNode(pp: *PP, cast: [*c]const c.pm_class_node_t) !void {
         // locals
         try pp.flush_prefix();
@@ -171,16 +166,7 @@ const PP = struct {
         try pp.writer.print("]\n", .{});
 
         // class_keyword_loc
-        {
-            try pp.flush_prefix();
-            try pp.writer.print("+-- class_keyword_loc: ", .{});
-            const location = cast.*.class_keyword_loc;
-            try pp.print_location(&location);
-            try pp.writer.print(" = \"", .{});
-            const len = location.end - location.start;
-            try pp.append_source(location.start, len);
-            try pp.writer.print("\"\n", .{});
-        }
+        try pp.print_loc_with_source("+-- class_keyword_loc: ", &cast.*.class_keyword_loc);
 
         // constant_path
         {
@@ -193,21 +179,7 @@ const PP = struct {
         }
 
         // inheritance_operator_loc
-        {
-            try pp.flush_prefix();
-            try pp.writer.print("+-- inheritance_operator_loc:", .{});
-            const location = cast.*.inheritance_operator_loc;
-            if (location.start == null) {
-                try pp.writer.print(" nil\n", .{});
-            } else {
-                try pp.writer.print(" ", .{});
-                try pp.print_location(&location);
-                try pp.writer.print(" = \"", .{});
-                const len = location.end - location.start;
-                try pp.append_source(location.start, len);
-                try pp.writer.print("\"\n", .{});
-            }
-        }
+        try pp.print_loc_with_source("+-- inheritance_operator_loc: ", &cast.*.inheritance_operator_loc);
 
         // superclass
         {
@@ -240,16 +212,7 @@ const PP = struct {
         }
 
         // end_keyword_loc
-        {
-            try pp.flush_prefix();
-            try pp.writer.print("+-- end_keyword_loc: ", .{});
-            const location = cast.*.end_keyword_loc;
-            try pp.print_location(&location);
-            try pp.writer.print(" = \"", .{});
-            const len = location.end - location.start;
-            try pp.append_source(location.start, len);
-            try pp.writer.print("\"\n", .{});
-        }
+        try pp.print_loc_with_source("+-- end_keyword_loc: ", &cast.*.end_keyword_loc);
 
         // name
         {
@@ -260,12 +223,84 @@ const PP = struct {
         }
     }
 
+    fn visitConstantReadNode(pp: *PP, cast: [*c]const c.pm_constant_read_node_t) !void {
+        try pp.flush_prefix();
+        try pp.writer.print("+-- name: ", .{});
+        try pp.pp_constant(cast.*.name);
+        try pp.writer.print("\n", .{});
+    }
+
+    fn visitDefNode(pp: *PP, cast: [*c]const c.pm_def_node_t) !void {
+        try pp.flush_prefix();
+
+        // name
+        try pp.writer.print("+-- name: ", .{});
+        try pp.pp_constant(cast.*.name);
+        try pp.writer.print("\n", .{});
+
+        // name_loc
+        try pp.print_loc_with_source("+-- name_loc: ", &cast.*.name_loc);
+
+        // receiver
+        try pp.flush_prefix();
+        try pp.writer.print("+-- receiver: ", .{});
+        if (cast.*.receiver == null) {
+            try pp.writer.print("nil\n", .{});
+        } else {
+            try pp.writer.print("\n", .{});
+            try pp.push_prefix("|   ");
+            defer pp.pop_prefix();
+            try pp.flush_prefix();
+            try pp.print_node(@ptrCast(cast.*.receiver));
+        }
+
+        // parameters
+        try pp.flush_prefix();
+        try pp.writer.print("+-- parameters: ", .{});
+        if (cast.*.parameters == null) {
+            try pp.writer.print("nil\n", .{});
+        } else {
+            try pp.writer.print("\n", .{});
+            try pp.push_prefix("|   ");
+            defer pp.pop_prefix();
+            try pp.flush_prefix();
+            try pp.print_node(@ptrCast(cast.*.parameters));
+        }
+
+        // body
+        try pp.flush_prefix();
+        try pp.writer.print("+-- body: ", .{});
+        if (cast.*.body == null) {
+            try pp.writer.print("nil\n", .{});
+        } else {
+            try pp.writer.print("\n", .{});
+            try pp.push_prefix("|   ");
+            defer pp.pop_prefix();
+            try pp.flush_prefix();
+            try pp.print_node(@ptrCast(cast.*.body));
+        }
+    }
+
     fn print_location(pp: *PP, loc: *const c.pm_location_t) !void {
         const parser = pp.parser;
 
         const start = c.pm_newline_list_line_column(&parser.*.newline_list, loc.*.start, parser.*.start_line);
         const end = c.pm_newline_list_line_column(&parser.*.newline_list, loc.*.end, parser.*.start_line);
         try pp.writer.print("({d},{d})-({d},{d})", .{ start.line, start.column, end.line, end.column });
+    }
+
+    fn print_loc_with_source(pp: *PP, name: []const u8, location: *const c.pm_location_t) !void{
+        try pp.flush_prefix();
+        try pp.writer.print("{s}", .{ name });
+        if (location.start == null) {
+            try pp.writer.print("nil\n", .{});
+        } else {
+            try pp.print_location(location);
+            try pp.writer.print(" = \"", .{});
+            const len = location.end - location.start;
+            try pp.append_source(location.start, len);
+            try pp.writer.print("\"\n", .{});
+        }
     }
 };
 
