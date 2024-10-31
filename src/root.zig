@@ -69,10 +69,12 @@ const PP = struct {
 
     fn writeNodeName(pp: *PP, node: [*c]const c.pm_node_t) error{NotImplementedError, OutOfMemory}!void {
         const name = switch (node.*.type) {
+            c.PM_ARGUMENTS_NODE => "@ ArgumentsNode (location: ",
             c.PM_CALL_NODE => "@ CallNode (location: ",
             c.PM_CLASS_NODE => "@ ClassNode (location: ",
             c.PM_CONSTANT_READ_NODE => "@ ConstantReadNode (location: ",
             c.PM_DEF_NODE => "@ DefNode (location: ",
+            c.PM_LOCAL_VARIABLE_READ_NODE => "@ LocalVariableReadNode (location: ",
             c.PM_LOCAL_VARIABLE_WRITE_NODE => "@ LocalVariableWriteNode (location: ",
             c.PM_PARAMETERS_NODE => "@ ParametersNode (location: ",
             c.PM_PROGRAM_NODE => "@ ProgramNode (location: ",
@@ -93,6 +95,7 @@ const PP = struct {
         try pp.writeNodeName(node);
 
         switch (node.*.type) {
+            c.PM_CALL_NODE => try pp.visitCallNode(@ptrCast(node)),
             c.PM_CLASS_NODE => try pp.visitClassNode(@ptrCast(node)),
             c.PM_CONSTANT_READ_NODE => try pp.visitConstantReadNode(@ptrCast(node)),
             c.PM_DEF_NODE => try pp.visitDefNode(@ptrCast(node)),
@@ -106,6 +109,65 @@ const PP = struct {
             },
         }
         return;
+    }
+
+    fn visitCallNode(pp: *PP, cast: [*c]const c.pm_call_node_t) !void {
+        // flags
+        const bits = [_]u8{
+            c.PM_CALL_NODE_FLAGS_SAFE_NAVIGATION,
+            c.PM_CALL_NODE_FLAGS_VARIABLE_CALL,
+            c.PM_CALL_NODE_FLAGS_ATTRIBUTE_WRITE,
+            c.PM_CALL_NODE_FLAGS_IGNORE_VISIBILITY};
+
+        const labels = [_][]const u8 {
+            " safe_navigation",
+            " variable_call",
+            " attribute_write",
+            " ignore_visibility",
+        };
+
+        var found = false;
+
+        try pp.print_header("+-- CallNodeFlags:");
+        for (bits, 0..bits.len) |item, index| {
+            if ((cast.*.base.flags & item) > 0) {
+                if (found) try pp.writer.print(",", .{});
+                try pp.writer.print("{s}", .{ labels[index] });
+                found = true;
+            }
+        }
+
+        if (!found) try pp.writer.print(" nil", .{});
+        try pp.writer.print("\n", .{});
+
+        // receiver
+        try pp.print_header("+-- receiver:");
+        try pp.print_child_or_nil(@ptrCast(cast.*.receiver));
+
+        // call_operator_loc
+        try pp.print_loc_with_source("+-- call_operator_loc: ", &cast.*.call_operator_loc);
+
+        // name
+        try pp.print_header("+-- name: ");
+        try pp.pp_constant(cast.*.name);
+        try pp.writer.print("\n", .{});
+
+        // message_loc
+        try pp.print_loc_with_source("+-- message_loc: ", &cast.*.message_loc);
+
+        // opening_loc
+        try pp.print_loc_with_source("+-- opening_loc: ", &cast.*.opening_loc);
+
+        // arguments
+        try pp.print_header("+-- arguments:");
+        try pp.print_child_or_nil(@ptrCast(cast.*.arguments));
+
+        // closing_loc
+        try pp.print_loc_with_source("+-- closing_loc: ", &cast.*.closing_loc);
+
+        // block
+        try pp.print_header("+-- block:");
+        try pp.print_child_or_nil(@ptrCast(cast.*.block));
     }
 
     fn visitClassNode(pp: *PP, cast: [*c]const c.pm_class_node_t) !void {
