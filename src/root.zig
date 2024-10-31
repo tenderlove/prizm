@@ -91,6 +91,7 @@ const PP = struct {
 
         switch (node.*.type) {
             c.PM_CLASS_NODE => try pp.visitClassNode(@ptrCast(node)),
+            c.PM_CONSTANT_READ_NODE => try pp.visitConstantReadNode(@ptrCast(node)),
             c.PM_PROGRAM_NODE => try pp.visitProgramNode(@ptrCast(node)),
             c.PM_STATEMENTS_NODE => try pp.visitStatementsNode(@ptrCast(node)),
             else => {
@@ -146,6 +147,13 @@ const PP = struct {
 
             try pp.print_node(@ptrCast(child));
         }
+    }
+
+    fn visitConstantReadNode(pp: *PP, cast: [*c]const c.pm_constant_read_node_t) !void {
+        try pp.flush_prefix();
+        try pp.writer.print("+-- name: ", .{});
+        try pp.pp_constant(cast.*.name);
+        try pp.writer.print("\n", .{});
     }
 
     fn visitClassNode(pp: *PP, cast: [*c]const c.pm_class_node_t) !void {
