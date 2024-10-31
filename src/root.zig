@@ -169,47 +169,22 @@ const PP = struct {
         try pp.print_loc_with_source("+-- class_keyword_loc: ", &cast.*.class_keyword_loc);
 
         // constant_path
-        {
-            try pp.flush_prefix();
-            try pp.writer.print("+-- constant_path:\n", .{});
-            try pp.push_prefix("|   ");
-            defer pp.pop_prefix();
-            try pp.flush_prefix();
-            try pp.print_node(@ptrCast(cast.*.constant_path));
-        }
+        try pp.flush_prefix();
+        try pp.writer.print("+-- constant_path:\n", .{});
+        try pp.print_child_or_nil(@ptrCast(cast.*.constant_path));
 
         // inheritance_operator_loc
         try pp.print_loc_with_source("+-- inheritance_operator_loc: ", &cast.*.inheritance_operator_loc);
 
         // superclass
-        {
-            try pp.flush_prefix();
-            try pp.writer.print("+-- superclass:", .{});
-            if (cast.*.superclass == null) {
-                try pp.writer.print(" nil\n", .{});
-            } else {
-                try pp.writer.print("\n", .{});
-                try pp.push_prefix("|   ");
-                defer pp.pop_prefix();
-                try pp.flush_prefix();
-                try pp.print_node(@ptrCast(cast.*.superclass));
-            }
-        }
+        try pp.flush_prefix();
+        try pp.writer.print("+-- superclass:", .{});
+        try pp.print_child_or_nil(@ptrCast(cast.*.superclass));
 
         // body
-        {
-            try pp.flush_prefix();
-            try pp.writer.print("+-- body:", .{});
-            if (cast.*.body == null) {
-                try pp.writer.print(" nil\n", .{});
-            } else {
-                try pp.writer.print("\n", .{});
-                try pp.push_prefix("|   ");
-                defer pp.pop_prefix();
-                try pp.flush_prefix();
-                try pp.print_node(@ptrCast(cast.*.body));
-            }
-        }
+        try pp.flush_prefix();
+        try pp.writer.print("+-- body:", .{});
+        try pp.print_child_or_nil(@ptrCast(cast.*.body));
 
         // end_keyword_loc
         try pp.print_loc_with_source("+-- end_keyword_loc: ", &cast.*.end_keyword_loc);
@@ -244,40 +219,28 @@ const PP = struct {
         // receiver
         try pp.flush_prefix();
         try pp.writer.print("+-- receiver: ", .{});
-        if (cast.*.receiver == null) {
-            try pp.writer.print("nil\n", .{});
-        } else {
-            try pp.writer.print("\n", .{});
-            try pp.push_prefix("|   ");
-            defer pp.pop_prefix();
-            try pp.flush_prefix();
-            try pp.print_node(@ptrCast(cast.*.receiver));
-        }
+        try pp.print_child_or_nil(@ptrCast(cast.*.receiver));
 
         // parameters
         try pp.flush_prefix();
         try pp.writer.print("+-- parameters: ", .{});
-        if (cast.*.parameters == null) {
-            try pp.writer.print("nil\n", .{});
-        } else {
-            try pp.writer.print("\n", .{});
-            try pp.push_prefix("|   ");
-            defer pp.pop_prefix();
-            try pp.flush_prefix();
-            try pp.print_node(@ptrCast(cast.*.parameters));
-        }
+        try pp.print_child_or_nil(@ptrCast(cast.*.parameters));
 
         // body
         try pp.flush_prefix();
         try pp.writer.print("+-- body: ", .{});
-        if (cast.*.body == null) {
+        try pp.print_child_or_nil(@ptrCast(cast.*.body));
+    }
+
+    fn print_child_or_nil(pp: *PP, node: ?*const c.pm_node_t) !void {
+        if (node == null) {
             try pp.writer.print("nil\n", .{});
         } else {
             try pp.writer.print("\n", .{});
             try pp.push_prefix("|   ");
             defer pp.pop_prefix();
             try pp.flush_prefix();
-            try pp.print_node(@ptrCast(cast.*.body));
+            try pp.print_node(node);
         }
     }
 
