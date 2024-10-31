@@ -244,6 +244,24 @@ const PP = struct {
             try pp.pp_constant(local);
         }
         try pp.writer.print("]\n", .{});
+
+        // def_keyword_loc
+        try pp.print_loc_with_source("+-- def_keyword_loc: ", &cast.*.def_keyword_loc);
+
+        // operator_loc
+        try pp.print_loc_with_source("+-- operator_loc: ", &cast.*.operator_loc);
+
+        // lparen_loc
+        try pp.print_loc_with_source("+-- lparen_loc: ", &cast.*.lparen_loc);
+
+        // rparen_loc
+        try pp.print_loc_with_source("+-- rparen_loc: ", &cast.*.rparen_loc);
+
+        // equal_loc
+        try pp.print_loc_with_source("+-- equal_loc: ", &cast.*.equal_loc);
+
+        // end_keyword_loc
+        try pp.print_loc_with_source("+-- end_keyword_loc: ", &cast.*.end_keyword_loc);
     }
 
     fn print_child_or_nil(pp: *PP, node: ?*const c.pm_node_t) !void {
