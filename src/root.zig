@@ -69,12 +69,13 @@ const PP = struct {
 
     fn writeNodeName(pp: *PP, node: [*c]const c.pm_node_t) error{NotImplementedError, OutOfMemory}!void {
         const name = switch (node.*.type) {
+            c.PM_CALL_NODE => "@ CallNode (location: ",
             c.PM_CLASS_NODE => "@ ClassNode (location: ",
+            c.PM_CONSTANT_READ_NODE => "@ ConstantReadNode (location: ",
+            c.PM_DEF_NODE => "@ DefNode (location: ",
+            c.PM_LOCAL_VARIABLE_WRITE_NODE => "@ LocalVariableWriteNode (location: ",
             c.PM_PROGRAM_NODE => "@ ProgramNode (location: ",
             c.PM_STATEMENTS_NODE => "@ StatementsNode (location: ",
-            c.PM_LOCAL_VARIABLE_WRITE_NODE => "@ LocalVariableWriteNode (location: ",
-            c.PM_CALL_NODE => "@ CallNode (location: ",
-            c.PM_CONSTANT_READ_NODE => "@ ConstantReadNode (location: ",
             else => {
                 std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
                 return error.NotImplementedError;
@@ -198,6 +199,56 @@ const PP = struct {
                 try pp.append_source(location.start, len);
                 try pp.writer.print("\"\n", .{});
             }
+        }
+
+        // superclass
+        {
+            try pp.flush_prefix();
+            try pp.writer.print("+-- superclass:", .{});
+            if (cast.*.superclass == null) {
+                try pp.writer.print(" nil\n", .{});
+            } else {
+                try pp.writer.print("\n", .{});
+                try pp.push_prefix("|   ");
+                defer pp.pop_prefix();
+                try pp.flush_prefix();
+                try pp.print_node(@ptrCast(cast.*.superclass));
+            }
+        }
+
+        // body
+        {
+            try pp.flush_prefix();
+            try pp.writer.print("+-- body:", .{});
+            if (cast.*.body == null) {
+                try pp.writer.print(" nil\n", .{});
+            } else {
+                try pp.writer.print("\n", .{});
+                try pp.push_prefix("|   ");
+                defer pp.pop_prefix();
+                try pp.flush_prefix();
+                try pp.print_node(@ptrCast(cast.*.body));
+            }
+        }
+
+        // end_keyword_loc
+        {
+            try pp.flush_prefix();
+            try pp.writer.print("+-- end_keyword_loc: ", .{});
+            const location = cast.*.end_keyword_loc;
+            try pp.print_location(&location);
+            try pp.writer.print(" = \"", .{});
+            const len = location.end - location.start;
+            try pp.append_source(location.start, len);
+            try pp.writer.print("\"\n", .{});
+        }
+
+        // name
+        {
+            try pp.flush_prefix();
+            try pp.writer.print("+-- name: ", .{});
+            try pp.pp_constant(cast.*.name);
+            try pp.writer.print("\n", .{});
         }
     }
 
