@@ -105,8 +105,7 @@ const PP = struct {
 
     fn visitProgramNode(pp: *PP, cast: [*c]const c.pm_program_node_t) !void {
         // Locals
-        try pp.flush_prefix();
-        try pp.writer.print("+-- locals: [", .{});
+        try pp.print_header("+-- locals: [");
         const local_size = cast.*.locals.size;
         const ids = cast.*.locals.ids[0..local_size];
         for (ids, 0..local_size) |id, index| {
@@ -118,18 +117,16 @@ const PP = struct {
         try pp.writer.print("]\n", .{});
 
         // statements
-        try pp.flush_prefix();
-        try pp.writer.print("+-- statements:\n", .{});
+        try pp.print_header("+-- statements:\n");
         try pp.push_prefix("    ");
+        defer pp.pop_prefix();
         try pp.flush_prefix();
         try pp.print_node(@ptrCast(cast.*.statements));
-        pp.pop_prefix();
     }
 
     fn visitStatementsNode(pp: *PP, cast: [*c]const c.pm_statements_node_t) !void {
         // body
-        try pp.flush_prefix();
-        try pp.writer.print("+-- body:", .{});
+        try pp.print_header("+-- body:");
         try pp.writer.print(" (length: {d})\n", .{cast.*.body.size});
 
         const last_index = cast.*.body.size;
@@ -153,8 +150,7 @@ const PP = struct {
 
     fn visitClassNode(pp: *PP, cast: [*c]const c.pm_class_node_t) !void {
         // locals
-        try pp.flush_prefix();
-        try pp.writer.print("+-- locals: [", .{});
+        try pp.print_header("+-- locals: [");
         const local_size = cast.*.locals.size;
         const ids = cast.*.locals.ids[0..local_size];
         for (ids, 0..local_size) |id, index| {
@@ -169,47 +165,38 @@ const PP = struct {
         try pp.print_loc_with_source("+-- class_keyword_loc: ", &cast.*.class_keyword_loc);
 
         // constant_path
-        try pp.flush_prefix();
-        try pp.writer.print("+-- constant_path:\n", .{});
+        try pp.print_header("+-- constant_path:");
         try pp.print_child_or_nil(@ptrCast(cast.*.constant_path));
 
         // inheritance_operator_loc
         try pp.print_loc_with_source("+-- inheritance_operator_loc: ", &cast.*.inheritance_operator_loc);
 
         // superclass
-        try pp.flush_prefix();
-        try pp.writer.print("+-- superclass:", .{});
+        try pp.print_header("+-- superclass:");
         try pp.print_child_or_nil(@ptrCast(cast.*.superclass));
 
         // body
-        try pp.flush_prefix();
-        try pp.writer.print("+-- body:", .{});
+        try pp.print_header("+-- body:");
         try pp.print_child_or_nil(@ptrCast(cast.*.body));
 
         // end_keyword_loc
         try pp.print_loc_with_source("+-- end_keyword_loc: ", &cast.*.end_keyword_loc);
 
         // name
-        {
-            try pp.flush_prefix();
-            try pp.writer.print("+-- name: ", .{});
-            try pp.pp_constant(cast.*.name);
-            try pp.writer.print("\n", .{});
-        }
+        try pp.print_header("+-- name:");
+        try pp.pp_constant(cast.*.name);
+        try pp.writer.print("\n", .{});
     }
 
     fn visitConstantReadNode(pp: *PP, cast: [*c]const c.pm_constant_read_node_t) !void {
-        try pp.flush_prefix();
-        try pp.writer.print("+-- name: ", .{});
+        try pp.print_header("+-- name:");
         try pp.pp_constant(cast.*.name);
         try pp.writer.print("\n", .{});
     }
 
     fn visitDefNode(pp: *PP, cast: [*c]const c.pm_def_node_t) !void {
-        try pp.flush_prefix();
-
         // name
-        try pp.writer.print("+-- name: ", .{});
+        try pp.print_header("+-- name: ");
         try pp.pp_constant(cast.*.name);
         try pp.writer.print("\n", .{});
 
@@ -217,23 +204,19 @@ const PP = struct {
         try pp.print_loc_with_source("+-- name_loc: ", &cast.*.name_loc);
 
         // receiver
-        try pp.flush_prefix();
-        try pp.writer.print("+-- receiver: ", .{});
+        try pp.print_header("+-- receiver: ");
         try pp.print_child_or_nil(@ptrCast(cast.*.receiver));
 
         // parameters
-        try pp.flush_prefix();
-        try pp.writer.print("+-- parameters: ", .{});
+        try pp.print_header("+-- parameters: ");
         try pp.print_child_or_nil(@ptrCast(cast.*.parameters));
 
         // body
-        try pp.flush_prefix();
-        try pp.writer.print("+-- body: ", .{});
+        try pp.print_header("+-- body: ");
         try pp.print_child_or_nil(@ptrCast(cast.*.body));
 
         // locals
-        try pp.flush_prefix();
-        try pp.writer.print("+-- locals: [", .{});
+        try pp.print_header("+-- locals: [");
 
         const len = cast.*.locals.size;
         const locals = cast.*.locals.ids[0..len];
@@ -285,8 +268,7 @@ const PP = struct {
     }
 
     fn print_loc_with_source(pp: *PP, name: []const u8, location: *const c.pm_location_t) !void{
-        try pp.flush_prefix();
-        try pp.writer.print("{s}", .{ name });
+        try pp.print_header(name);
         if (location.start == null) {
             try pp.writer.print("nil\n", .{});
         } else {
@@ -296,6 +278,11 @@ const PP = struct {
             try pp.append_source(location.start, len);
             try pp.writer.print("\"\n", .{});
         }
+    }
+
+    fn print_header(pp: *PP, str: []const u8) !void {
+        try pp.flush_prefix();
+        try pp.writer.print("{s}", .{ str });
     }
 };
 
