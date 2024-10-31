@@ -230,6 +230,20 @@ const PP = struct {
         try pp.flush_prefix();
         try pp.writer.print("+-- body: ", .{});
         try pp.print_child_or_nil(@ptrCast(cast.*.body));
+
+        // locals
+        try pp.flush_prefix();
+        try pp.writer.print("+-- locals: [", .{});
+
+        const len = cast.*.locals.size;
+        const locals = cast.*.locals.ids[0..len];
+        for (locals, 0..len) |local, idx| {
+            if (idx != 0) {
+                try pp.writer.print(", ", .{});
+            }
+            try pp.pp_constant(local);
+        }
+        try pp.writer.print("]\n", .{});
     }
 
     fn print_child_or_nil(pp: *PP, node: ?*const c.pm_node_t) !void {
