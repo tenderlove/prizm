@@ -98,6 +98,7 @@ const PP = struct {
             c.PM_DEF_NODE => try pp.visitDefNode(@ptrCast(node)),
             c.PM_PARAMETERS_NODE => try pp.visitParametersNode(@ptrCast(node)),
             c.PM_PROGRAM_NODE => try pp.visitProgramNode(@ptrCast(node)),
+            c.PM_REQUIRED_PARAMETER_NODE => try pp.visitRequiredParameterNode(@ptrCast(node)),
             c.PM_STATEMENTS_NODE => try pp.visitStatementsNode(@ptrCast(node)),
             else => {
                 std.debug.print("Need to handle node type: {s}\n", .{c.pm_node_type_to_str(node.*.type)});
@@ -258,6 +259,21 @@ const PP = struct {
         defer pp.pop_prefix();
         try pp.flush_prefix();
         try pp.print_node(@ptrCast(cast.*.statements));
+    }
+
+    fn visitRequiredParameterNode(pp: *PP, cast: [*c]const c.pm_required_parameter_node_t) !void {
+        // ParameterFlags
+        try pp.print_header("+-- ParameterFlags:");
+        if ((cast.*.base.flags & c.PM_PARAMETER_FLAGS_REPEATED_PARAMETER) > 0) {
+            try pp.writer.print(" repeated_parameter\n", .{});
+        } else {
+            try pp.writer.print(" nil\n", .{});
+        }
+
+        // name
+        try pp.print_header("+-- name: ");
+        try pp.pp_constant(cast.*.name);
+        try pp.writer.print("\n", .{});
     }
 
     fn visitStatementsNode(pp: *PP, cast: [*c]const c.pm_statements_node_t) !void {
