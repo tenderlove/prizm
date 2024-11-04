@@ -3,6 +3,7 @@
 //! is to delete this file and start with root.zig instead.
 const std = @import("std");
 const prism = @import("root.zig");
+const compiler = @import("compiler.zig");
 const Allocator = std.mem.Allocator;
 
 const c = @cImport({
@@ -35,22 +36,27 @@ pub fn main() !void {
         defer c.pm_parser_free(parser.ptr);
 
         const root_node = c.pm_parse(parser.ptr);
-        var buf = std.ArrayList(u8).init(allocator);
-        try prism.prism_pp(&buf, parser.ptr, root_node);
-        std.debug.print("{s}", .{ try buf.toOwnedSlice() });
-
-        const buffer = try allocator.alloc(c.pm_buffer_t, 1);
-        // defer c.pm_buffer_free(buffer.ptr);
-
-        if (c.pm_buffer_init(buffer.ptr)) {
-        c.pm_prettyprint(buffer.ptr, parser.ptr, root_node);
-        c.pm_buffer_append_byte(buffer.ptr, 0);
-        std.debug.print("hi mom\n", .{});
-
-        std.debug.print("{s}\n", .{ c.pm_buffer_value(buffer.ptr)[0..(c.pm_buffer_length(buffer.ptr))] });
-        }
-
         defer c.pm_node_destroy(parser.ptr, root_node);
+
+        var scope_node: prism.pm_scope_node_t = .{
+            .base = .{
+                .type = c.PM_SCOPE_NODE,
+            },
+            .previous = null,
+            .ast_node = null,
+            .parameters = null,
+            .body = null,
+            .locals = .{
+                .size = 0,
+                .capacity = 0,
+                .ids = null
+            }
+        };
+        try prism.scope_node_init(root_node, &scope_node, null);
+
+        const cc = try compiler.init(allocator, parser.ptr);
+        defer cc.deinit(allocator);
+        _ = try cc.compile(@ptrCast(&scope_node));
     }
     else {
         std.debug.print("Prism version: {d}, {s}.\n", .{args.len, c.pm_version()});

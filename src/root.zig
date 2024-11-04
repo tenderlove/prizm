@@ -7,6 +7,15 @@ const c = @cImport({
 });
 const Allocator = std.mem.Allocator;
 
+pub const pm_scope_node_t = extern struct {
+    base: c.pm_node_t,
+    previous: ?*const pm_scope_node_t,
+    ast_node: [*c]const c.pm_node_t,
+    parameters: [*c]const c.pm_node_t,
+    body: [*c]const c.pm_node_t,
+    locals: c.pm_constant_id_list_t,
+};
+
 const PP = struct {
     writer: std.ArrayList(u8).Writer,
     prefix: std.ArrayList(u8),
@@ -95,6 +104,7 @@ const PP = struct {
         try pp.writeNodeName(node);
 
         switch (node.*.type) {
+            c.PM_ARGUMENTS_NODE => try pp.visitArgumentsNode(@ptrCast(node)),
             c.PM_CALL_NODE => try pp.visitCallNode(@ptrCast(node)),
             c.PM_CLASS_NODE => try pp.visitClassNode(@ptrCast(node)),
             c.PM_CONSTANT_READ_NODE => try pp.visitConstantReadNode(@ptrCast(node)),
@@ -109,6 +119,11 @@ const PP = struct {
             },
         }
         return;
+    }
+
+    fn visitArgumentsNode(pp: *PP, cast: [*c]const c.pm_arguments_node_t) !void {
+        _ = pp;
+        _ = cast;
     }
 
     fn visitCallNode(pp: *PP, cast: [*c]const c.pm_call_node_t) !void {
@@ -433,4 +448,21 @@ pub fn prism_pp(buf: *std.ArrayList(u8), parser: [*c]const c.pm_parser_t, node: 
     };
     try pp.print_node(node);
     return;
+}
+
+pub fn scope_node_init(node: [*c]const c.pm_node_t, scope: *pm_scope_node_t, prev: ?*pm_scope_node_t) !void {
+    scope.*.previous = prev;
+    scope.*.ast_node = node;
+
+    switch (node.*.type) {
+        c.PM_PROGRAM_NODE => {
+            const cast: [*c]const c.pm_program_node_t = @ptrCast(node);
+            scope.*.body = @ptrCast(cast.*.statements);
+            scope.*.locals = cast.*.locals;
+        },
+        else => {
+            std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
+            return error.NotImplementedError;
+        }
+    }
 }
