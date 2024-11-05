@@ -60,14 +60,32 @@ pub const Compiler = struct {
         const constant = c.pm_constant_pool_id_to_constant(&cc.parser.*.constant_pool, node.*.name);
 
         const method_name = constant.*.start[0..(constant.*.length)];
-        std.debug.print("method name {s}\n", .{method_name});
+
         if (node.*.receiver == null) {
             return error.NotImplementedError;
-        }
-        else {
+        } else {
             const recv_op = try cc.compile(node.*.receiver);
-            return recv_op;
-            //_ = recv_op;
+            const arg_size = node.*.arguments.*.arguments.size;
+            const args = node.*.arguments.*.arguments.nodes[0..arg_size];
+
+            if (std.mem.eql(u8, method_name, "+") and arg_size == 1) {
+                const insn = try cc.allocator.create(InstructionList.Node);
+
+                insn.* = InstructionList.Node {
+                    .data = .{
+                        .insn = Instruction.Name.add,
+                        .out = try cc.newRegister(),
+                        .in1 = recv_op,
+                        .in2 = try cc.compile(args[0]),
+                    }
+                };
+
+                cc.scopes.first.?.data.insns.prepend(insn);
+
+                return insn.data.out;
+            } else {
+                return error.NotImplementedError;
+            }
         }
     }
 
