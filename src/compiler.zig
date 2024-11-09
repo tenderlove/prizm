@@ -128,17 +128,9 @@ pub const Compiler = struct {
         if (node != null) {
             return try cc.compileNode(node);
         } else {
-            const insn = try cc.allocator.create(InstructionList.Node);
-            insn.* = InstructionList.Node {
-                .data = Instruction {
-                    .getself = .{
-                        .out = try cc.newRegister(),
-                    }
-                }
-            };
-            cc.scopes.first.?.data.insns.append(insn);
-
-            return insn.data.getself.out;
+            const outreg = try cc.newRegister();
+            try cc.pushInsn(Instruction { .getself = .{ .out = outreg, } });
+            return outreg;
         }
     }
 
@@ -154,20 +146,17 @@ pub const Compiler = struct {
 
         if (std.mem.eql(u8, method_name, "+") and arg_size == 1) {
             const in2 = try cc.compileNode(args[0]);
+            const outreg = try cc.newRegister();
 
-            const insn = try cc.allocator.create(InstructionList.Node);
-            insn.* = InstructionList.Node {
-                .data = Instruction {
-                    .add = .{
-                        .out = try cc.newRegister(),
-                        .in1 = recv_op,
-                        .in2 = in2,
-                    }
+            try cc.pushInsn(Instruction {
+                .add = .{
+                    .out = outreg,
+                    .in1 = recv_op,
+                    .in2 = in2,
                 }
-            };
-            cc.scopes.first.?.data.insns.append(insn);
+            });
 
-            return insn.data.add.out;
+            return outreg;
         } else {
             return error.NotImplementedError;
         }
@@ -201,20 +190,16 @@ pub const Compiler = struct {
 
     fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t) !Register {
         if (node.*.value.values == null) {
-            const insn = try cc.allocator.create(InstructionList.Node);
+            const outreg = try cc.newRegister();
 
-            insn.* = InstructionList.Node {
-                .data = Instruction {
-                    .loadi = .{
-                        .out = try cc.newRegister(),
-                        .val = node.*.value.value,
-                    }
+            try cc.pushInsn(Instruction {
+                .loadi = .{
+                    .out = outreg,
+                    .val = node.*.value.value,
                 }
-            };
+            });
 
-            cc.scopes.first.?.data.insns.append(insn);
-
-            return insn.data.loadi.out;
+            return outreg;
         } else {
             return error.NotImplementedError;
         }
@@ -238,6 +223,12 @@ pub const Compiler = struct {
 
     pub fn deinit(self: *Compiler, allocator: std.mem.Allocator) void {
         allocator.destroy(self);
+    }
+
+    fn pushInsn(self: *Compiler, insn: Instruction) !void {
+        const node = try self.allocator.create(InstructionList.Node);
+        node.*.data = insn;
+        self.scopes.first.?.data.insns.append(node);
     }
 };
 
