@@ -1,5 +1,6 @@
 const std = @import("std");
 const prism = @import("root.zig");
+const vm = @import("vm.zig");
 
 const c = @cImport({
     @cInclude("prism.h");
@@ -10,20 +11,39 @@ const Register = struct {
 };
 
 pub const InstructionName = enum {
-    move,
-    loadi,
     add,
-    getself
+    call,
+    getmethod,
+    getself,
+    loadi,
+    move,
 };
 
 pub const InstructionSequence = struct {
     insns: []u32,
+    ccs: std.ArrayList(vm.CallCache),
 };
 
 const Instruction = union(InstructionName) {
-    move: struct {
+    add: struct {
         out: Register,
-        in: Register,
+        in1: Register,
+        in2: Register,
+    },
+
+    call: struct {
+        out: Register,
+        funcreg: Register,
+        params: std.ArrayList(Register),
+    },
+
+    getmethod: struct {
+        out: Register,
+        ccid: u32,
+    },
+
+    getself: struct {
+        out: Register,
     },
 
     loadi: struct {
@@ -31,15 +51,14 @@ const Instruction = union(InstructionName) {
         val: u32,
     },
 
-    add: struct {
+    move: struct {
         out: Register,
-        in1: Register,
-        in2: Register,
+        in: Register,
     },
 
-    getself: struct {
+    const Common = struct {
         out: Register,
-    },
+    };
 
     fn encode(self: Instruction) u32 {
         return switch (self) {
@@ -49,6 +68,12 @@ const Instruction = union(InstructionName) {
             // | out - 8 bit | in1 - 8 bit | in2 - 8 bit | insn 6 bit |
             .add => |v| v.out.number << (6 + 8 + 8) | v.in1.number << (6 + 8) | v.in2.number << 6 | @intFromEnum(InstructionName.add),
             .getself => |v| v.out.number << 6 | @intFromEnum(InstructionName.getself),
+            .getmethod => |v| {
+                v.ccid << (6 + 8) | v.out.number << 6 | @intFromEnum(InstructionName.getself);
+            },
+            .call => |v| {
+                v.ccid << (6 + 8) | v.out.number << 6 | @intFromEnum(InstructionName.getself);
+            },
         };
     }
 
@@ -82,6 +107,13 @@ const Scope = struct {
     reg_number: u32,
     scope_node: *const prism.pm_scope_node_t,
     insns: InstructionList,
+    ccs: std.ArrayList(vm.CallCache),
+
+    pub fn pushCallCache(self: *Scope, name: []const u8, argc: usize) !usize {
+        const ccid = self.ccs.items.len;
+        try self.ccs.append(.{ .method_name = name, .argc = argc }); 
+        return ccid;
+    }
 };
 
 const ScopeList = std.SinglyLinkedList(Scope);
@@ -90,6 +122,7 @@ pub const Compiler = struct {
     parser: [*c]const c.pm_parser_t,
     scopes: ScopeList,
     allocator: std.mem.Allocator,
+    vm: *vm.VM,
 
     pub fn encode(cc: *Compiler, insn: ?*InstructionList.Node) ![]u32 {
         var list = std.ArrayList(u32).init(cc.allocator);
@@ -158,7 +191,37 @@ pub const Compiler = struct {
 
             return outreg;
         } else {
-            return error.NotImplementedError;
+            const params = std.ArrayList(Register).init(cc.allocator);
+            for (args) |arg| {
+                params.append(try cc.compileNode(arg));
+            }
+            std.debug.print("inserting str {s} {d}\n", .{method_name, method_name.len});
+            // Get a pooled string that's owned by the VM
+            const name = try cc.vm.getString(method_name);
+
+            // Add an inline cache record
+            const ccid = try cc.scopes.first.?.data.pushCallCache(name, arg_size);
+
+            const funcreg = try cc.newRegister();
+
+            try cc.pushInsn(Instruction {
+                .getmethod = .{
+                    .out = funcreg,
+                    .ccid = ccid,
+                }
+            });
+
+            const outreg = try cc.newRegister();
+
+            try cc.pushInsn(Instruction {
+                .call = .{
+                    .out = outreg,
+                    .funcreg = funcreg,
+                    .params = params
+                }
+            });
+
+            return outreg;
         }
     }
 
@@ -168,10 +231,12 @@ pub const Compiler = struct {
         }
 
         const scope = try cc.allocator.create(ScopeList.Node);
+
         scope.* = ScopeList.Node {
             .data = .{
                 .reg_number = 0,
                 .scope_node = node,
+                .ccs = std.ArrayList(vm.CallCache).init(cc.allocator),
                 .insns = InstructionList { },
             }
         };
@@ -184,6 +249,7 @@ pub const Compiler = struct {
         const iseq = try cc.allocator.create(InstructionSequence);
         iseq.* = .{
             .insns = try cc.encode(scope.data.insns.first),
+            .ccs = scope.data.ccs,
         };
         return iseq;
     }
@@ -227,15 +293,18 @@ pub const Compiler = struct {
 
     fn pushInsn(self: *Compiler, insn: Instruction) !void {
         const node = try self.allocator.create(InstructionList.Node);
+        const out: *const Instruction.Common = @ptrCast(&insn);
+        std.debug.print("common field {d}\n", out.out.number);
         node.*.data = insn;
         self.scopes.first.?.data.insns.append(node);
     }
 };
 
-pub fn init(allocator: std.mem.Allocator, parser: [*c]const c.pm_parser_t) !*Compiler {
+pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: [*c]const c.pm_parser_t) !*Compiler {
     const cc = try allocator.create(Compiler);
     cc.* = Compiler {
         .parser = parser,
+        .vm = m,
         .allocator = allocator,
         .scopes = ScopeList { },
     };

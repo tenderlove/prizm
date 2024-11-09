@@ -55,13 +55,15 @@ pub fn main() !void {
         };
         try prism.scope_node_init(root_node, &scope_node, null);
 
-        const cc = try compiler.init(allocator, parser.ptr);
+        const machine = try vm.init(allocator);
+        defer machine.deinit(allocator);
+
+        const cc = try compiler.init(allocator, machine, parser.ptr);
         defer cc.deinit(allocator);
+
         const iseq = try cc.compile(@ptrCast(&scope_node));
 
-        const machine = try vm.init(allocator);
         try machine.eval(iseq);
-        defer machine.deinit(allocator);
 
     }
     else {
