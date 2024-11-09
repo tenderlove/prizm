@@ -60,7 +60,7 @@ pub fn main() !void {
         const iseq = try cc.compile(@ptrCast(&scope_node));
 
         const machine = try vm.init(allocator);
-        machine.eval(iseq);
+        try machine.eval(iseq);
         defer machine.deinit(allocator);
 
     }

@@ -12,7 +12,8 @@ const Register = struct {
 pub const InstructionName = enum {
     move,
     loadi,
-    add
+    add,
+    getself
 };
 
 pub const InstructionSequence = struct {
@@ -36,6 +37,10 @@ const Instruction = union(InstructionName) {
         in2: Register,
     },
 
+    getself: struct {
+        out: Register,
+    },
+
     fn encode(self: Instruction) u32 {
         return switch (self) {
             // | out - 13 bit | in1 - 13 bit | insn 6 bit |
@@ -43,6 +48,7 @@ const Instruction = union(InstructionName) {
             .loadi => |v| v.out.number << 19 | v.val << 6 | @intFromEnum(InstructionName.loadi),
             // | out - 8 bit | in1 - 8 bit | in2 - 8 bit | insn 6 bit |
             .add => |v| v.out.number << (6 + 8 + 8) | v.in1.number << (6 + 8) | v.in2.number << 6 | @intFromEnum(InstructionName.add),
+            .getself => |v| v.out.number << 6 | @intFromEnum(InstructionName.getself),
         };
     }
 
@@ -52,13 +58,16 @@ const Instruction = union(InstructionName) {
         const node = self.?.data;
         switch(node) {
             .move => |v| {
-                std.debug.print("move {d} {d}\n", .{ v.out.number, v.in.number });
+                std.debug.print("move    {d} {d}\n", .{ v.out.number, v.in.number });
             },
             .loadi => |v| {
-                std.debug.print("loadi {d} {d}\n", .{ v.out.number, v.val });
+                std.debug.print("loadi   {d} {d}\n", .{ v.out.number, v.val });
             },
             .add => |v| {
-                std.debug.print("add   {d} {d} {d}\n", .{ v.out.number, v.in1.number, v.in2.number });
+                std.debug.print("add     {d} {d} {d}\n", .{ v.out.number, v.in1.number, v.in2.number });
+            },
+            .getself => |v| {
+                std.debug.print("getself {d}\n", .{ v.out.number });
             },
         }
 
@@ -115,38 +124,52 @@ pub const Compiler = struct {
         return Register { .number = reg, };
     }
 
+    fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t) !Register {
+        if (node != null) {
+            return try cc.compileNode(node);
+        } else {
+            const insn = try cc.allocator.create(InstructionList.Node);
+            insn.* = InstructionList.Node {
+                .data = Instruction {
+                    .getself = .{
+                        .out = try cc.newRegister(),
+                    }
+                }
+            };
+            cc.scopes.first.?.data.insns.append(insn);
+
+            return insn.data.getself.out;
+        }
+    }
+
     fn compileCallNode(cc: *Compiler, node: *const c.pm_call_node_t) !Register {
         const constant = c.pm_constant_pool_id_to_constant(&cc.parser.*.constant_pool, node.*.name);
 
         const method_name = constant.*.start[0..(constant.*.length)];
 
-        if (node.*.receiver == null) {
-            return error.NotImplementedError;
-        } else {
-            const recv_op = try cc.compileNode(node.*.receiver);
-            const arg_size = node.*.arguments.*.arguments.size;
-            const args = node.*.arguments.*.arguments.nodes[0..arg_size];
+        const recv_op = try cc.compileRecv(node.*.receiver);
 
-            if (std.mem.eql(u8, method_name, "+") and arg_size == 1) {
-                const insn = try cc.allocator.create(InstructionList.Node);
-                const in2 = try cc.compileNode(args[0]);
+        const arg_size = node.*.arguments.*.arguments.size;
+        const args = node.*.arguments.*.arguments.nodes[0..arg_size];
 
-                insn.* = InstructionList.Node {
-                    .data = Instruction {
-                        .add = .{
-                            .out = try cc.newRegister(),
-                            .in1 = recv_op,
-                            .in2 = in2,
-                        }
+        if (std.mem.eql(u8, method_name, "+") and arg_size == 1) {
+            const in2 = try cc.compileNode(args[0]);
+
+            const insn = try cc.allocator.create(InstructionList.Node);
+            insn.* = InstructionList.Node {
+                .data = Instruction {
+                    .add = .{
+                        .out = try cc.newRegister(),
+                        .in1 = recv_op,
+                        .in2 = in2,
                     }
-                };
+                }
+            };
+            cc.scopes.first.?.data.insns.append(insn);
 
-                cc.scopes.first.?.data.insns.append(insn);
-
-                return insn.data.add.out;
-            } else {
-                return error.NotImplementedError;
-            }
+            return insn.data.add.out;
+        } else {
+            return error.NotImplementedError;
         }
     }
 
