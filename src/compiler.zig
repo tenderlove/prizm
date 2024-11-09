@@ -9,21 +9,25 @@ const Register = struct {
     number: u32,
 };
 
-const InstructionName = enum {
+pub const InstructionName = enum {
     move,
     loadi,
     add
 };
 
+pub const InstructionSequence = struct {
+    insns: []u32,
+};
+
 const Instruction = union(InstructionName) {
     move: struct {
         out: Register,
-        in1: Register,
+        in: Register,
     },
 
     loadi: struct {
         out: Register,
-        val: u64,
+        val: u32,
     },
 
     add: struct {
@@ -32,13 +36,23 @@ const Instruction = union(InstructionName) {
         in2: Register,
     },
 
+    fn encode(self: Instruction) u32 {
+        return switch (self) {
+            // | out - 13 bit | in1 - 13 bit | insn 6 bit |
+            .move => |v| v.out.number << 19 | v.in.number << 6 | @intFromEnum(InstructionName.move),
+            .loadi => |v| v.out.number << 19 | v.val << 6 | @intFromEnum(InstructionName.loadi),
+            // | out - 8 bit | in1 - 8 bit | in2 - 8 bit | insn 6 bit |
+            .add => |v| v.out.number << (6 + 8 + 8) | v.in1.number << (6 + 8) | v.in2.number << 6 | @intFromEnum(InstructionName.add),
+        };
+    }
+
     fn printNode(self: ?*InstructionList.Node) void {
         if (self == null) { return; }
 
         const node = self.?.data;
         switch(node) {
             .move => |v| {
-                std.debug.print("move {d} {d}\n", .{ v.out.number, v.in1.number });
+                std.debug.print("move {d} {d}\n", .{ v.out.number, v.in.number });
             },
             .loadi => |v| {
                 std.debug.print("loadi {d} {d}\n", .{ v.out.number, v.val });
@@ -68,16 +82,25 @@ pub const Compiler = struct {
     scopes: ScopeList,
     allocator: std.mem.Allocator,
 
-    pub fn compile(cc: *Compiler, node: [*c]const c.pm_node_t) error{NotImplementedError, OutOfMemory}!Register {
-        const reg = compileNode(cc, node);
-        return reg;
+    pub fn encode(cc: *Compiler, insn: ?*InstructionList.Node) ![]u32 {
+        var list = std.ArrayList(u32).init(cc.allocator);
+        var cursor = insn;
+        while (cursor) |val| {
+            try list.append(val.data.encode());
+            cursor = val.next;
+        }
+        return list.toOwnedSlice();
+    }
+
+    pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{NotImplementedError, OutOfMemory}!*InstructionSequence {
+        return compileScopeNode(cc, node);
     }
 
     pub fn compileNode(cc: *Compiler, node: [*c]const c.pm_node_t) error{NotImplementedError, OutOfMemory}!Register {
         return switch (node.*.type) {
             c.PM_CALL_NODE => try cc.compileCallNode(@ptrCast(node)),
             c.PM_INTEGER_NODE => try cc.compileIntegerNode(@ptrCast(node)),
-            c.PM_SCOPE_NODE => try cc.compileScopeNode(@constCast(@ptrCast(node))),
+            c.PM_SCOPE_NODE => return error.NotImplementedError,
             c.PM_STATEMENTS_NODE => try cc.compileStatementsNode(@ptrCast(node)),
             else => {
                 std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
@@ -127,7 +150,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileScopeNode(cc: *Compiler, node: *prism.pm_scope_node_t) !Register {
+    fn compileScopeNode(cc: *Compiler, node: *prism.pm_scope_node_t) !*InstructionSequence {
         if (node.*.parameters != null) {
             return error.NotImplementedError;
         }
@@ -142,16 +165,19 @@ pub const Compiler = struct {
         };
         cc.scopes.prepend(scope);
 
-        const reg = try cc.compileNode(node.*.body);
+        _ = try cc.compileNode(node.*.body);
 
         Instruction.printNode(scope.data.insns.first);
 
-        return reg;
+        const iseq = try cc.allocator.create(InstructionSequence);
+        iseq.* = .{
+            .insns = try cc.encode(scope.data.insns.first),
+        };
+        return iseq;
     }
 
     fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t) !Register {
         if (node.*.value.values == null) {
-            std.debug.print("integer {d}\n", .{ node.*.value.value });
             const insn = try cc.allocator.create(InstructionList.Node);
 
             insn.* = InstructionList.Node {
@@ -191,13 +217,6 @@ pub const Compiler = struct {
         allocator.destroy(self);
     }
 };
-
-// pub const Instructions = struct {
-//     fn init(allocator: std.mem.Allocator) !*Instructions {
-//         const insns = try allocator.create(Instructions);
-//         return insns;
-//     }
-// };
 
 pub fn init(allocator: std.mem.Allocator, parser: [*c]const c.pm_parser_t) !*Compiler {
     const cc = try allocator.create(Compiler);

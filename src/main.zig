@@ -4,6 +4,7 @@
 const std = @import("std");
 const prism = @import("root.zig");
 const compiler = @import("compiler.zig");
+const vm = @import("vm.zig");
 const Allocator = std.mem.Allocator;
 
 const c = @cImport({
@@ -56,7 +57,12 @@ pub fn main() !void {
 
         const cc = try compiler.init(allocator, parser.ptr);
         defer cc.deinit(allocator);
-        _ = try cc.compile(@ptrCast(&scope_node));
+        const iseq = try cc.compile(@ptrCast(&scope_node));
+
+        const machine = try vm.init(allocator);
+        machine.eval(iseq);
+        defer machine.deinit(allocator);
+
     }
     else {
         std.debug.print("Prism version: {d}, {s}.\n", .{args.len, c.pm_version()});
