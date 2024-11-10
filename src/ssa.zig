@@ -77,10 +77,10 @@ pub const Instruction = union(InstructionName) {
     }
 
     pub fn printNode(self: *InstructionList.Node) void {
-        //if (self == null) { return; }
-
         const node = self.data;
 
+        // Calculate the maximum width of the instruction name at comptime
+        // so we can use it to pad the name when printing
         comptime var maxlen: usize = 0;
         comptime for (@typeInfo(InstructionName).@"enum".fields) |field| {
             const name_len = field.name.len;
@@ -111,9 +111,6 @@ pub const Instruction = union(InstructionName) {
                 std.debug.print("{d}\n", .{ v.out.number });
             },
         }
-
-        //printNode(self.?.next);
-
     }
 };
 

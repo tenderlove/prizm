@@ -63,7 +63,8 @@ pub fn main() !void {
 
         const iseq = try cc.compile(@ptrCast(&scope_node));
 
-        try machine.eval(iseq);
+        _ = iseq;
+        // try machine.eval(iseq);
 
     }
     else {
