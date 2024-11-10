@@ -1,15 +1,9 @@
-//! By convention, main.zig is where your main function lives in the case that
-//! you are building an executable. If you are making a library, the convention
-//! is to delete this file and start with root.zig instead.
 const std = @import("std");
-const prism = @import("root.zig");
+const prism = @import("prism.zig");
 const compiler = @import("compiler.zig");
 const vm = @import("vm.zig");
+const ssa = @import("ssa.zig");
 const Allocator = std.mem.Allocator;
-
-const c = @cImport({
-    @cInclude("prism.h");
-});
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -32,33 +26,19 @@ pub fn main() !void {
 
         const src = try file.readToEndAlloc(allocator, file_size);
 
-        const parser = try allocator.alloc(c.pm_parser_t, 1);
-        c.pm_parser_init(parser.ptr, src.ptr, file_size, null);
-        defer c.pm_parser_free(parser.ptr);
+        const parser = try prism.newParserCtx(allocator);
+        prism.initParser(parser, src, file_size, null);
+        defer prism.parserDealloc(parser);
 
-        const root_node = c.pm_parse(parser.ptr);
-        defer c.pm_node_destroy(parser.ptr, root_node);
+        const root_node = prism.pmParse(parser);
+        defer prism.pmNodeDestroy(parser, root_node);
 
-        var scope_node: prism.pm_scope_node_t = .{
-            .base = .{
-                .type = c.PM_SCOPE_NODE,
-            },
-            .previous = null,
-            .ast_node = null,
-            .parameters = null,
-            .body = null,
-            .locals = .{
-                .size = 0,
-                .capacity = 0,
-                .ids = null
-            }
-        };
-        try prism.scope_node_init(root_node, &scope_node, null);
+        var scope_node = try prism.pmNewScopeNode(root_node);
 
         const machine = try vm.init(allocator);
         defer machine.deinit(allocator);
 
-        const cc = try compiler.init(allocator, machine, parser.ptr);
+        const cc = try compiler.init(allocator, machine, parser);
         defer cc.deinit(allocator);
 
         const iseq = try cc.compile(@ptrCast(&scope_node));
@@ -68,7 +48,10 @@ pub fn main() !void {
 
     }
     else {
-        std.debug.print("Prism version: {d}, {s}.\n", .{args.len, c.pm_version()});
         return;
     }
+}
+
+test {
+    @import("std").testing.refAllDecls(@This());
 }

@@ -2,9 +2,23 @@ const std = @import("std");
 
 pub const InstructionList = std.DoublyLinkedList(Instruction);
 
-pub const BasicBlock = struct {
-    out: ?*BasicBlock,
-    out2: ?*BasicBlock,
+const BasicBlockType = enum {
+    NULL,
+    twoProng,
+};
+
+pub const BasicBlock = union(BasicBlockType) {
+    NULL: struct {
+        name: u64,
+    },
+
+    twoProng: struct {
+        name: u64,
+        start: *InstructionList.Node,
+        finish: *InstructionList.Node,
+        out: ?*BasicBlock,
+        out2: ?*BasicBlock,
+    },
 };
 
 pub const Register = struct {
@@ -52,6 +66,23 @@ pub const Instruction = union(InstructionName) {
         out: Register,
         in: Register,
     },
+
+    fn isJump(self: Instruction) bool {
+        _ = self;
+        return false;
+    }
+
+    fn isReturn(self: Instruction) bool {
+        _ = self;
+        return false;
+    }
+
+    fn isCall(self: Instruction) bool {
+        return switch(self) {
+            .call, .add => true,
+            else => false
+        };
+    }
 
     pub const Common = struct {
         out: Register,
@@ -114,17 +145,50 @@ pub const Instruction = union(InstructionName) {
     }
 };
 
-//pub fn compileCFG(bb: BasicBlock) []const u32 {
 pub fn compileCFG(bb: BasicBlock) []const u32 {
     _ = bb;
     return &[5]u32{1, 2, 3, 4, 5};
 }
 
-pub fn buildCFG(insns: InstructionList) BasicBlock {
+pub fn buildCFG(insns: InstructionList) !BasicBlock {
     var node = insns.first;
-    while (node) |n| {
-        Instruction.printNode(n);
-        node = n.next;
+    var block_name: usize = 0;
+
+    if (node) |unwrap| {
+        const first_block = BasicBlock {
+            .twoProng = .{
+                .name = block_name,
+                .start = unwrap,
+                .finish = unwrap,
+                .out = null,
+                .out2 = null,
+            },
+        };
+        block_name += 1;
+
+        while (node) |n| {
+            // var start = n;
+            var finish = node;
+
+            Instruction.printNode(n);
+
+            while (finish) |finish_insn| {
+                if (finish_insn.data.isJump()) {
+                    break;
+                }
+                finish = finish_insn.next;
+            }
+            node = n.next;
+        }
+        return first_block;
+    } else {
+        return .{ .NULL = .{ .name = block_name } };
     }
-    return BasicBlock { .out = null, .out2 = null, };
+}
+
+test "empty basic block" {
+    const list = InstructionList { };
+    const bb = buildCFG(list);
+    std.debug.print("hello\n", .{});
+    std.testing.expectEqual(BasicBlock.NULL, bb);
 }

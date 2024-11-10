@@ -1,6 +1,3 @@
-//! By convention, root.zig is the root source file when making a library. If
-//! you are making an executable, the convention is to delete this file and
-//! start with main.zig instead.
 const std = @import("std");
 const c = @cImport({
     @cInclude("prism.h");
@@ -465,4 +462,44 @@ pub fn scope_node_init(node: [*c]const c.pm_node_t, scope: *pm_scope_node_t, pre
             return error.NotImplementedError;
         }
     }
+}
+
+pub fn newParserCtx(allocator: std.mem.Allocator) ![*c]c.pm_parser_t {
+    const parser = try allocator.alloc(c.pm_parser_t, 1);
+    return parser.ptr;
+}
+
+pub fn initParser(parser: [*c]c.pm_parser_t, src: []const u8, file_size: usize, opts: [*c]const c.pm_options_t) void {
+    c.pm_parser_init(parser, src.ptr, file_size, opts);
+}
+
+pub fn parserDealloc(parser: [*c]c.pm_parser_t) void {
+    c.pm_parser_free(parser);
+}
+
+pub fn pmParse(parser: [*c]c.pm_parser_t) [*c]c.pm_node_t {
+    return c.pm_parse(parser);
+}
+
+pub fn pmNodeDestroy(parser: [*c]c.pm_parser_t, node: [*c]c.pm_node_t) void {
+    c.pm_node_destroy(parser, node);
+}
+
+pub fn pmNewScopeNode(node: [*c]c.pm_node_t) !pm_scope_node_t {
+    var scope_node: pm_scope_node_t = .{
+        .base = .{
+            .type = c.PM_SCOPE_NODE,
+        },
+        .previous = null,
+        .ast_node = null,
+        .parameters = null,
+        .body = null,
+        .locals = .{
+            .size = 0,
+            .capacity = 0,
+            .ids = null
+        }
+    };
+    try scope_node_init(node, &scope_node, null);
+    return scope_node;
 }

@@ -1,5 +1,5 @@
 const std = @import("std");
-const prism = @import("root.zig");
+const prism = @import("prism.zig");
 const vm = @import("vm.zig");
 const ssa = @import("ssa.zig");
 
@@ -132,7 +132,7 @@ pub const Compiler = struct {
 
         _ = try cc.compileNode(node.*.body);
 
-        const cfg = ssa.buildCFG(scope.data.insns);
+        const cfg = try ssa.buildCFG(scope.data.insns);
         const iseq = try cc.allocator.create(InstructionSequence);
         iseq.* = .{
             .insns = ssa.compileCFG(cfg),
