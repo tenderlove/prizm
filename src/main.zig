@@ -19,13 +19,14 @@ pub fn main() !void {
         var path_buffer: [std.fs.max_path_bytes]u8 = undefined;
         const path = try std.fs.realpathZ(args.ptr[1], &path_buffer);
 
+        // Read the file in
         const file = try std.fs.openFileAbsolute(path, .{});
         const file_size = (try file.stat()).size;
-        std.debug.print("File: {s} {d}.\n", .{args.ptr[1], file_size});
         defer file.close();
 
         const src = try file.readToEndAlloc(allocator, file_size);
 
+        // Parse the file
         const parser = try prism.newParserCtx(allocator);
         prism.initParser(parser, src, file_size, null);
         defer prism.parserDealloc(parser);
@@ -35,13 +36,14 @@ pub fn main() !void {
 
         var scope_node = try prism.pmNewScopeNode(root_node);
 
+        // Create a new VM
         const machine = try vm.init(allocator);
         defer machine.deinit(allocator);
 
+        // Compile the parse tree
         const cc = try compiler.init(allocator, machine, parser);
         defer cc.deinit(allocator);
-
-        const iseq = try cc.compile(@ptrCast(&scope_node));
+        const iseq = try cc.compile(&scope_node);
 
         _ = iseq;
         // try machine.eval(iseq);
