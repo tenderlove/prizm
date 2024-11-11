@@ -38,7 +38,7 @@ const Scope = struct {
 const ScopeList = std.SinglyLinkedList(Scope);
 
 pub const Compiler = struct {
-    parser: [*c]const c.pm_parser_t,
+    parser: *const c.pm_parser_t,
     scopes: ScopeList,
     allocator: std.mem.Allocator,
     vm: *vm.VM,
@@ -47,7 +47,7 @@ pub const Compiler = struct {
         return compileScopeNode(cc, node);
     }
 
-    pub fn compileNode(cc: *Compiler, node: [*c]const c.pm_node_t) error{NotImplementedError, OutOfMemory}!ssa.Register {
+    pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!ssa.Register {
         return switch (node.*.type) {
             c.PM_CALL_NODE => try cc.compileCallNode(@ptrCast(node)),
             c.PM_INTEGER_NODE => try cc.compileIntegerNode(@ptrCast(node)),
@@ -67,8 +67,8 @@ pub const Compiler = struct {
     }
 
     fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t) !ssa.Register {
-        if (node != null) {
-            return try cc.compileNode(node);
+        if (node) |n| {
+            return try cc.compileNode(n);
         } else {
             const outreg = try cc.newRegister();
             return try cc.pushInsn(.{ .getself = .{ .out = outreg, } });
@@ -130,7 +130,9 @@ pub const Compiler = struct {
         };
         cc.scopes.prepend(scope);
 
-        _ = try cc.compileNode(node.*.body);
+        if (node.*.body) |body| {
+            _ = try cc.compileNode(body);
+        }
 
         const cfg = try ssa.buildCFG(cc.allocator, scope.data.insns);
         const iseq = try cc.allocator.create(InstructionSequence);
@@ -181,10 +183,10 @@ pub const Compiler = struct {
     }
 };
 
-pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: [*c]const c.pm_parser_t) !*Compiler {
+pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: *prism.Prism) !*Compiler {
     const cc = try allocator.create(Compiler);
     cc.* = Compiler {
-        .parser = parser,
+        .parser = parser.parser,
         .vm = m,
         .allocator = allocator,
         .scopes = ScopeList { },

@@ -464,26 +464,43 @@ pub fn scope_node_init(node: *const c.pm_node_t, scope: *pm_scope_node_t, prev: 
     }
 }
 
-pub fn newParserCtx(allocator: std.mem.Allocator) !*c.pm_parser_t {
-    const parser = try allocator.alloc(c.pm_parser_t, 1);
-    return @ptrCast(parser.ptr);
-}
+pub const Prism = struct {
+    parser: *c.pm_parser_t,
+    initialized: bool,
+    allocator: std.mem.Allocator,
 
-pub fn initParser(parser: *c.pm_parser_t, src: []const u8, file_size: usize, opts: ?*const c.pm_options_t) void {
-    c.pm_parser_init(parser, src.ptr, file_size, opts);
-}
+    pub fn newParserCtx(allocator: std.mem.Allocator) !*Prism {
+        const self = try allocator.create(Prism);
+        const parser = try allocator.create(c.pm_parser_t);
+        self.* = .{
+            .parser = parser,
+            .initialized = false,
+            .allocator = allocator,
+        };
+        return self;
+    }
 
-pub fn parserDealloc(parser: *c.pm_parser_t) void {
-    c.pm_parser_free(parser);
-}
+    pub fn init(self: *Prism, src: []const u8, file_size: usize, opts: ?*const c.pm_options_t) void {
+        c.pm_parser_init(self.parser, src.ptr, file_size, opts);
+        self.initialized = true;
+    }
 
-pub fn pmParse(parser: *c.pm_parser_t) *c.pm_node_t {
-    return c.pm_parse(parser);
-}
+    pub fn parse(self: *Prism) *c.pm_node_t {
+        return c.pm_parse(self.parser);
+    }
 
-pub fn pmNodeDestroy(parser: *c.pm_parser_t, node: *c.pm_node_t) void {
-    c.pm_node_destroy(parser, node);
-}
+    pub fn deinit(self: *Prism) void {
+        if (self.initialized) {
+            c.pm_parser_free(self.parser);
+        }
+        self.allocator.destroy(self.parser);
+        self.allocator.destroy(self);
+    }
+
+    pub fn nodeDestroy(self: *Prism, node: *c.pm_node_t) void {
+        c.pm_node_destroy(self.parser, node);
+    }
+};
 
 pub fn pmNewScopeNode(node: *c.pm_node_t) !pm_scope_node_t {
     var scope_node: pm_scope_node_t = .{
@@ -504,9 +521,18 @@ pub fn pmNewScopeNode(node: *c.pm_node_t) !pm_scope_node_t {
     return scope_node;
 }
 
-test "hello world" {
-    const parser = try newParserCtx(std.testing.allocator);
-    defer std.testing.allocator.destroy(parser);
-    //defer parserDealloc(parser);
-    //try std.testing.expectEqual(1, 1);
+test "parse nothing" {
+    // Make sure there's no memory leak
+    const parser = try Prism.newParserCtx(std.testing.allocator);
+    defer parser.deinit();
+}
+
+test "parse something" {
+    const parser = try Prism.newParserCtx(std.testing.allocator);
+    defer parser.deinit();
+    const code = "5 + 7";
+    parser.init(code, code.len, null);
+    const root = parser.parse();
+    defer parser.nodeDestroy(root);
+    try std.testing.expectEqual(root.type, c.PM_PROGRAM_NODE);
 }

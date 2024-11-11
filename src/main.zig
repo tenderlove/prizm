@@ -27,12 +27,12 @@ pub fn main() !void {
         const src = try file.readToEndAlloc(allocator, file_size);
 
         // Parse the file
-        const parser = try prism.newParserCtx(allocator);
-        prism.initParser(parser, src, file_size, null);
-        defer prism.parserDealloc(parser);
+        const parser = try prism.Prism.newParserCtx(allocator);
+        parser.init(src, file_size, null);
+        defer parser.deinit();
 
-        const root_node = prism.pmParse(parser);
-        defer prism.pmNodeDestroy(parser, root_node);
+        const root_node = parser.parse();
+        defer parser.nodeDestroy(root_node);
 
         var scope_node = try prism.pmNewScopeNode(root_node);
 
