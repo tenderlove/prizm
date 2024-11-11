@@ -2,23 +2,20 @@ const std = @import("std");
 
 pub const InstructionList = std.DoublyLinkedList(Instruction);
 
-const BasicBlockType = enum {
-    NULL,
-    twoProng,
-};
+pub const BasicBlock = struct {
+    name: u64,
+    start: *InstructionList.Node,
+    finish: *InstructionList.Node,
+    out: ?*BasicBlock,
+    out2: ?*BasicBlock,
 
-pub const BasicBlock = union(BasicBlockType) {
-    NULL: struct {
-        name: u64,
-    },
-
-    twoProng: struct {
-        name: u64,
-        start: *InstructionList.Node,
-        finish: *InstructionList.Node,
-        out: ?*BasicBlock,
-        out2: ?*BasicBlock,
-    },
+    fn addInstruction(self: *BasicBlock, insn: *InstructionList.Node) void {
+        std.debug.print("adding ", .{});
+        Instruction.printNode(insn);
+        self.finish = insn;
+        std.debug.print("added ", .{});
+        Instruction.printNode(self.finish);
+    }
 };
 
 pub const Register = struct {
@@ -145,50 +142,105 @@ pub const Instruction = union(InstructionName) {
     }
 };
 
-pub fn compileCFG(bb: BasicBlock) []const u32 {
+pub fn compileCFG(bb: *const BasicBlock) []const u32 {
     _ = bb;
     return &[5]u32{1, 2, 3, 4, 5};
 }
 
-pub fn buildCFG(insns: InstructionList) !BasicBlock {
+pub const CompileError = error {
+    EmptyInstructionSequence,
+};
+
+pub fn buildCFG(allocator: std.mem.Allocator, insns: InstructionList) !* const BasicBlock {
     var node = insns.first;
     var block_name: usize = 0;
 
     if (node) |unwrap| {
-        const first_block = BasicBlock {
-            .twoProng = .{
-                .name = block_name,
-                .start = unwrap,
-                .finish = unwrap,
-                .out = null,
-                .out2 = null,
-            },
+        var current_block = try allocator.create(BasicBlock);
+
+        current_block.* = .{
+            .name = block_name,
+            .start = unwrap,
+            .finish = unwrap,
+            .out = null,
+            .out2 = null,
         };
+        const first_block = current_block;
         block_name += 1;
 
         while (node) |n| {
-            // var start = n;
             var finish = node;
 
             Instruction.printNode(n);
 
             while (finish) |finish_insn| {
+                current_block.addInstruction(finish_insn);
+
                 if (finish_insn.data.isJump()) {
                     break;
                 }
                 finish = finish_insn.next;
             }
-            node = n.next;
+
+            if (finish) |fin| {
+                node = fin.next;
+            } else {
+                break;
+            }
         }
+        std.debug.print("finish ", .{});
+        Instruction.printNode(first_block.finish);
         return first_block;
     } else {
-        return .{ .NULL = .{ .name = block_name } };
+        return CompileError.EmptyInstructionSequence;
     }
+}
+
+test {
+    @import("std").testing.refAllDecls(@This());
 }
 
 test "empty basic block" {
     const list = InstructionList { };
-    const bb = buildCFG(list);
-    std.debug.print("hello\n", .{});
-    std.testing.expectEqual(BasicBlock.NULL, bb);
+    try std.testing.expectError(error.EmptyInstructionSequence, buildCFG(std.testing.allocator, list));
+}
+
+test "basic block one instruction" {
+    var list = InstructionList { };
+    var one = InstructionList.Node {
+        .data = .{ .getself = .{ .out = .{ .number = 0 }}}
+    };
+    list.append(&one);
+    const bb = try buildCFG(std.testing.allocator, list);
+    defer std.testing.allocator.destroy(bb);
+
+    try std.testing.expectEqual(&one, bb.start);
+    try std.testing.expectEqual(&one, bb.finish);
+    try std.testing.expectEqual(null, bb.out);
+    try std.testing.expectEqual(null, bb.out2);
+}
+
+test "basic block two instruction" {
+    var list = InstructionList { };
+    var one = InstructionList.Node {
+        .data = .{ .getself = .{ .out = .{ .number = 0 }}}
+    };
+    list.append(&one);
+
+    var two = InstructionList.Node {
+        .data = .{ .getmethod = .{
+            .out = .{ .number = 0 },
+            .recv = .{ .number = 0 },
+            .ccid = 123,
+        }}
+    };
+    list.append(&two);
+    const bb = try buildCFG(std.testing.allocator, list);
+    defer std.testing.allocator.destroy(bb);
+
+    try std.testing.expectEqual(&one, bb.start);
+    try std.testing.expectEqual(&two, bb.finish);
+    try std.testing.expectEqual(&two, list.last);
+    try std.testing.expectEqual(null, bb.out);
+    try std.testing.expectEqual(null, bb.out2);
 }

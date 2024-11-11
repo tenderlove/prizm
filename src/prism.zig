@@ -7,9 +7,9 @@ const Allocator = std.mem.Allocator;
 pub const pm_scope_node_t = extern struct {
     base: c.pm_node_t,
     previous: ?*const pm_scope_node_t,
-    ast_node: [*c]const c.pm_node_t,
-    parameters: [*c]const c.pm_node_t,
-    body: [*c]const c.pm_node_t,
+    ast_node: ?*const c.pm_node_t,
+    parameters: ?*const c.pm_node_t,
+    body: ?*const c.pm_node_t,
     locals: c.pm_constant_id_list_t,
 };
 
@@ -17,7 +17,7 @@ const PP = struct {
     writer: std.ArrayList(u8).Writer,
     prefix: std.ArrayList(u8),
     prefix_lengths: std.ArrayList(usize),
-    parser: [*c]const c.pm_parser_t,
+    parser: *const c.pm_parser_t,
 
     fn flush_prefix(pp: *PP) !void {
         try pp.writer.print("{s}", .{pp.prefix.items});
@@ -73,7 +73,7 @@ const PP = struct {
         try writer.print(":{s}", .{msg});
     }
 
-    fn writeNodeName(pp: *PP, node: [*c]const c.pm_node_t) error{NotImplementedError, OutOfMemory}!void {
+    fn writeNodeName(pp: *PP, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!void {
         const name = switch (node.*.type) {
             c.PM_ARGUMENTS_NODE => "@ ArgumentsNode (location: ",
             c.PM_CALL_NODE => "@ CallNode (location: ",
@@ -97,7 +97,7 @@ const PP = struct {
         try pp.writer.print(")\n", .{});
     }
 
-    fn print_node(pp: *PP, node: [*c]const c.pm_node_t) error{NotImplementedError, OutOfMemory}!void {
+    fn print_node(pp: *PP, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!void {
         try pp.writeNodeName(node);
 
         switch (node.*.type) {
@@ -118,12 +118,12 @@ const PP = struct {
         return;
     }
 
-    fn visitArgumentsNode(pp: *PP, cast: [*c]const c.pm_arguments_node_t) !void {
+    fn visitArgumentsNode(pp: *PP, cast: *const c.pm_arguments_node_t) !void {
         _ = pp;
         _ = cast;
     }
 
-    fn visitCallNode(pp: *PP, cast: [*c]const c.pm_call_node_t) !void {
+    fn visitCallNode(pp: *PP, cast: *const c.pm_call_node_t) !void {
         // flags
         const bits = [_]u8{
             c.PM_CALL_NODE_FLAGS_SAFE_NAVIGATION,
@@ -182,7 +182,7 @@ const PP = struct {
         try pp.print_child_or_nil(@ptrCast(cast.*.block));
     }
 
-    fn visitClassNode(pp: *PP, cast: [*c]const c.pm_class_node_t) !void {
+    fn visitClassNode(pp: *PP, cast: *const c.pm_class_node_t) !void {
         // locals
         try pp.print_header("+-- locals: [");
         const local_size = cast.*.locals.size;
@@ -222,13 +222,13 @@ const PP = struct {
         try pp.writer.print("\n", .{});
     }
 
-    fn visitConstantReadNode(pp: *PP, cast: [*c]const c.pm_constant_read_node_t) !void {
+    fn visitConstantReadNode(pp: *PP, cast: *const c.pm_constant_read_node_t) !void {
         try pp.print_header("+-- name:");
         try pp.pp_constant(cast.*.name);
         try pp.writer.print("\n", .{});
     }
 
-    fn visitDefNode(pp: *PP, cast: [*c]const c.pm_def_node_t) !void {
+    fn visitDefNode(pp: *PP, cast: *const c.pm_def_node_t) !void {
         // name
         try pp.print_header("+-- name: ");
         try pp.pp_constant(cast.*.name);
@@ -281,7 +281,7 @@ const PP = struct {
         try pp.print_loc_with_source("+-- end_keyword_loc: ", &cast.*.end_keyword_loc);
     }
 
-    fn visitParametersNode(pp: *PP, cast: [*c]const c.pm_parameters_node_t) !void {
+    fn visitParametersNode(pp: *PP, cast: *const c.pm_parameters_node_t) !void {
         // requireds
         try pp.print_header("+-- requireds:");
         try pp.writer.print(" (length: {d})\n", .{cast.*.requireds.size});
@@ -315,7 +315,7 @@ const PP = struct {
         try pp.print_child_or_nil(@ptrCast(cast.*.block));
     }
 
-    fn visitProgramNode(pp: *PP, cast: [*c]const c.pm_program_node_t) !void {
+    fn visitProgramNode(pp: *PP, cast: *const c.pm_program_node_t) !void {
         // Locals
         try pp.print_header("+-- locals: [");
         const local_size = cast.*.locals.size;
@@ -336,7 +336,7 @@ const PP = struct {
         try pp.print_node(@ptrCast(cast.*.statements));
     }
 
-    fn visitRequiredKeywordParameterNode(pp: *PP, cast: [*c]const c.pm_required_keyword_parameter_node_t) !void {
+    fn visitRequiredKeywordParameterNode(pp: *PP, cast: *const c.pm_required_keyword_parameter_node_t) !void {
         // ParameterFlags
         try pp.print_header("+-- ParameterFlags:");
         if ((cast.*.base.flags & c.PM_PARAMETER_FLAGS_REPEATED_PARAMETER) > 0) {
@@ -354,7 +354,7 @@ const PP = struct {
         try pp.print_loc_with_source("+-- name_loc: ", &cast.*.name_loc);
     }
 
-    fn visitRequiredParameterNode(pp: *PP, cast: [*c]const c.pm_required_parameter_node_t) !void {
+    fn visitRequiredParameterNode(pp: *PP, cast: *const c.pm_required_parameter_node_t) !void {
         // ParameterFlags
         try pp.print_header("+-- ParameterFlags:");
         if ((cast.*.base.flags & c.PM_PARAMETER_FLAGS_REPEATED_PARAMETER) > 0) {
@@ -369,7 +369,7 @@ const PP = struct {
         try pp.writer.print("\n", .{});
     }
 
-    fn visitStatementsNode(pp: *PP, cast: [*c]const c.pm_statements_node_t) !void {
+    fn visitStatementsNode(pp: *PP, cast: *const c.pm_statements_node_t) !void {
         // body
         try pp.print_header("+-- body:");
         try pp.writer.print(" (length: {d})\n", .{cast.*.body.size});
@@ -436,7 +436,7 @@ const PP = struct {
     }
 };
 
-pub fn prism_pp(buf: *std.ArrayList(u8), parser: [*c]const c.pm_parser_t, node: [*c]const c.pm_node_t) !void {
+pub fn prism_pp(buf: *std.ArrayList(u8), parser: *const c.pm_parser_t, node: *const c.pm_node_t) !void {
     var pp = PP{
         .writer = buf.writer(),
         .prefix = std.ArrayList(u8).init(buf.allocator),
@@ -447,13 +447,13 @@ pub fn prism_pp(buf: *std.ArrayList(u8), parser: [*c]const c.pm_parser_t, node: 
     return;
 }
 
-pub fn scope_node_init(node: [*c]const c.pm_node_t, scope: *pm_scope_node_t, prev: ?*pm_scope_node_t) !void {
+pub fn scope_node_init(node: *const c.pm_node_t, scope: *pm_scope_node_t, prev: ?*pm_scope_node_t) !void {
     scope.*.previous = prev;
     scope.*.ast_node = node;
 
     switch (node.*.type) {
         c.PM_PROGRAM_NODE => {
-            const cast: [*c]const c.pm_program_node_t = @ptrCast(node);
+            const cast: *const c.pm_program_node_t = @ptrCast(node);
             scope.*.body = @ptrCast(cast.*.statements);
             scope.*.locals = cast.*.locals;
         },
@@ -464,28 +464,28 @@ pub fn scope_node_init(node: [*c]const c.pm_node_t, scope: *pm_scope_node_t, pre
     }
 }
 
-pub fn newParserCtx(allocator: std.mem.Allocator) ![*c]c.pm_parser_t {
+pub fn newParserCtx(allocator: std.mem.Allocator) !*c.pm_parser_t {
     const parser = try allocator.alloc(c.pm_parser_t, 1);
-    return parser.ptr;
+    return @ptrCast(parser.ptr);
 }
 
-pub fn initParser(parser: [*c]c.pm_parser_t, src: []const u8, file_size: usize, opts: [*c]const c.pm_options_t) void {
+pub fn initParser(parser: *c.pm_parser_t, src: []const u8, file_size: usize, opts: ?*const c.pm_options_t) void {
     c.pm_parser_init(parser, src.ptr, file_size, opts);
 }
 
-pub fn parserDealloc(parser: [*c]c.pm_parser_t) void {
+pub fn parserDealloc(parser: *c.pm_parser_t) void {
     c.pm_parser_free(parser);
 }
 
-pub fn pmParse(parser: [*c]c.pm_parser_t) [*c]c.pm_node_t {
+pub fn pmParse(parser: *c.pm_parser_t) *c.pm_node_t {
     return c.pm_parse(parser);
 }
 
-pub fn pmNodeDestroy(parser: [*c]c.pm_parser_t, node: [*c]c.pm_node_t) void {
+pub fn pmNodeDestroy(parser: *c.pm_parser_t, node: *c.pm_node_t) void {
     c.pm_node_destroy(parser, node);
 }
 
-pub fn pmNewScopeNode(node: [*c]c.pm_node_t) !pm_scope_node_t {
+pub fn pmNewScopeNode(node: *c.pm_node_t) !pm_scope_node_t {
     var scope_node: pm_scope_node_t = .{
         .base = .{
             .type = c.PM_SCOPE_NODE,
@@ -502,4 +502,11 @@ pub fn pmNewScopeNode(node: [*c]c.pm_node_t) !pm_scope_node_t {
     };
     try scope_node_init(node, &scope_node, null);
     return scope_node;
+}
+
+test "hello world" {
+    const parser = try newParserCtx(std.testing.allocator);
+    defer std.testing.allocator.destroy(parser);
+    //defer parserDealloc(parser);
+    //try std.testing.expectEqual(1, 1);
 }

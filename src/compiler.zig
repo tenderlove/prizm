@@ -43,7 +43,7 @@ pub const Compiler = struct {
     allocator: std.mem.Allocator,
     vm: *vm.VM,
 
-    pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{NotImplementedError, OutOfMemory}!*InstructionSequence {
+    pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{EmptyInstructionSequence, NotImplementedError, OutOfMemory}!*InstructionSequence {
         return compileScopeNode(cc, node);
     }
 
@@ -132,7 +132,7 @@ pub const Compiler = struct {
 
         _ = try cc.compileNode(node.*.body);
 
-        const cfg = try ssa.buildCFG(scope.data.insns);
+        const cfg = try ssa.buildCFG(cc.allocator, scope.data.insns);
         const iseq = try cc.allocator.create(InstructionSequence);
         iseq.* = .{
             .insns = ssa.compileCFG(cfg),
@@ -190,4 +190,12 @@ pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: [*c]const c.pm_pars
         .scopes = ScopeList { },
     };
     return cc;
+}
+
+test {
+    @import("std").testing.refAllDecls(@This());
+}
+
+test "hello world" {
+    try std.testing.expectEqual(1, 1);
 }

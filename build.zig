@@ -85,7 +85,6 @@ pub fn build(b: *std.Build) void {
 
     exe.addIncludePath(b.path("prism/include"));
     addPrismSource(b, exe, "prism/src");
-
     exe.linkLibC();
 
     // This declares intent for the executable to be installed into the
@@ -124,8 +123,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    lib_unit_tests.step.dependOn(&rake.step);
     lib_unit_tests.addIncludePath(b.path("prism/include"));
     addPrismSource(b, lib_unit_tests, "prism/src");
+    lib_unit_tests.linkLibC();
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
@@ -136,8 +137,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    exe_unit_tests.step.dependOn(&rake.step);
     exe_unit_tests.addIncludePath(b.path("prism/include"));
-
+    addPrismSource(b, exe_unit_tests, "prism/src");
     exe_unit_tests.linkLibC();
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
