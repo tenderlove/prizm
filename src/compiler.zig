@@ -7,19 +7,22 @@ const c = @cImport({
     @cInclude("prism.h");
 });
 
-pub const InstructionSequence = struct {
-    insns: []const u32,
-    ccs: std.ArrayList(vm.CallCache),
-};
-
 const Scope = struct {
     reg_number: u32,
-    scope_node: *const prism.pm_scope_node_t,
     insns: ssa.InstructionList,
+    parent: ?*Scope,
+    children: std.ArrayList(Scope),
     ccs: std.ArrayList(vm.CallCache),
+    allocator: std.mem.Allocator,
 
-    pub fn pushInsn(self: *Scope, allocator: std.mem.Allocator, insn: ssa.Instruction) !ssa.Register {
-        const node = try allocator.create(ssa.InstructionList.Node);
+    pub fn newRegister(self: *Scope) ssa.Register {
+        const reg = self.reg_number;
+        self.reg_number += 1;
+        return .{ .number = reg, };
+    }
+
+    pub fn pushInsn(self: *Scope, insn: ssa.Instruction) !ssa.Register {
+        const node = try self.allocator.create(ssa.InstructionList.Node);
         node.*.data = insn;
         self.insns.append(node);
 
@@ -35,15 +38,13 @@ const Scope = struct {
     }
 };
 
-const ScopeList = std.SinglyLinkedList(Scope);
-
 pub const Compiler = struct {
     parser: *const c.pm_parser_t,
-    scopes: ScopeList,
+    scope: ?*Scope,
     allocator: std.mem.Allocator,
     vm: *vm.VM,
 
-    pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{EmptyInstructionSequence, NotImplementedError, OutOfMemory}!*InstructionSequence {
+    pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{EmptyInstructionSequence, NotImplementedError, OutOfMemory}!*Scope {
         return compileScopeNode(cc, node);
     }
 
@@ -61,9 +62,7 @@ pub const Compiler = struct {
     }
 
     fn newRegister(cc: *Compiler) !ssa.Register {
-        const reg = cc.scopes.first.?.data.reg_number;
-        cc.scopes.first.?.data.reg_number += 1;
-        return .{ .number = reg, };
+        return cc.scope.?.newRegister();
     }
 
     fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t) !ssa.Register {
@@ -95,7 +94,7 @@ pub const Compiler = struct {
         const name = try cc.vm.getString(method_name);
 
         // Add an inline cache record
-        const ccid = try cc.scopes.first.?.data.pushCallCache(name, arg_size);
+        const ccid = try cc.scope.?.pushCallCache(name, arg_size);
 
         return try cc.pushInsn(.{
             .call = .{
@@ -113,34 +112,31 @@ pub const Compiler = struct {
         });
     }
 
-    fn compileScopeNode(cc: *Compiler, node: *prism.pm_scope_node_t) !*InstructionSequence {
+    fn compileScopeNode(cc: *Compiler, node: *prism.pm_scope_node_t) !*Scope {
         if (node.*.parameters != null) {
             return error.NotImplementedError;
         }
 
-        const scope = try cc.allocator.create(ScopeList.Node);
+        const scope = try cc.allocator.create(Scope);
 
-        scope.* = ScopeList.Node {
-            .data = .{
-                .reg_number = 0,
-                .scope_node = node,
-                .insns = ssa.InstructionList { },
-                .ccs = std.ArrayList(vm.CallCache).init(cc.allocator),
-            }
+        scope.* = Scope {
+            .reg_number = 0,
+            .insns = ssa.InstructionList { },
+            .parent = cc.scope,
+            .children = std.ArrayList(Scope).init(cc.allocator),
+            .ccs = std.ArrayList(vm.CallCache).init(cc.allocator),
+            .allocator = cc.allocator,
         };
-        cc.scopes.prepend(scope);
+
+        cc.scope = scope;
 
         if (node.*.body) |body| {
             _ = try cc.compileNode(body);
         }
 
-        const cfg = try ssa.buildCFG(cc.allocator, scope.data.insns);
-        const iseq = try cc.allocator.create(InstructionSequence);
-        iseq.* = .{
-            .insns = ssa.compileCFG(cfg),
-            .ccs = scope.data.ccs,
-        };
-        return iseq;
+        cc.scope = scope.parent;
+
+        return scope;
     }
 
     fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t) !ssa.Register {
@@ -179,7 +175,7 @@ pub const Compiler = struct {
     }
 
     fn pushInsn(self: *Compiler, insn: ssa.Instruction) !ssa.Register {
-        return try self.scopes.first.?.data.pushInsn(self.allocator, insn);
+        return try self.scope.?.pushInsn(insn);
     }
 };
 
@@ -189,7 +185,7 @@ pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: *prism.Prism) !*Com
         .parser = parser.parser,
         .vm = m,
         .allocator = allocator,
-        .scopes = ScopeList { },
+        .scope = null,
     };
     return cc;
 }
