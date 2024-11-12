@@ -174,7 +174,6 @@ pub const Compiler = struct {
                 _ = i;
                 return error.NotImplementedError;
             }
-            std.debug.print("len {d}\n", .{body.*.size});
             return try cc.compileNode(body.*.nodes[body.*.size - 1]);
         } else {
             return error.NotImplementedError;
@@ -222,4 +221,10 @@ test "compile math" {
     defer cc.deinit(allocator);
     const scope = try cc.compile(&scope_node);
     defer scope.deinit();
+
+    try std.testing.expectEqual(null, scope.parent);
+    const insn = scope.insns.first;
+    try std.testing.expect(insn != null);
+    const thing: ssa.InstructionName = insn.?.data;
+    try std.testing.expectEqual(ssa.InstructionName.loadi, thing);
 }

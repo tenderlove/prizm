@@ -10,11 +10,7 @@ pub const BasicBlock = struct {
     out2: ?*BasicBlock,
 
     fn addInstruction(self: *BasicBlock, insn: *InstructionList.Node) void {
-        std.debug.print("adding ", .{});
-        Instruction.printNode(insn);
         self.finish = insn;
-        std.debug.print("added ", .{});
-        Instruction.printNode(self.finish);
     }
 };
 
@@ -175,10 +171,8 @@ pub fn buildCFG(allocator: std.mem.Allocator, insns: InstructionList) !* const B
         const first_block = current_block;
         block_name += 1;
 
-        while (node) |n| {
+        while (node) |_| {
             var finish = node;
-
-            Instruction.printNode(n);
 
             while (finish) |finish_insn| {
                 current_block.addInstruction(finish_insn);
@@ -195,8 +189,6 @@ pub fn buildCFG(allocator: std.mem.Allocator, insns: InstructionList) !* const B
                 break;
             }
         }
-        std.debug.print("finish ", .{});
-        Instruction.printNode(first_block.finish);
         return first_block;
     } else {
         return CompileError.EmptyInstructionSequence;
