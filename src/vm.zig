@@ -35,6 +35,10 @@ pub const VM = struct {
         pub fn getReg(self: *Frame, reg: u32) usize {
             return self.reg_stack.items[self.reg_start + reg];
         }
+
+        pub fn deinit(self: Frame) void {
+            self.reg_stack.deinit();
+        }
     };
 
     allocator: std.mem.Allocator,
@@ -87,6 +91,13 @@ pub const VM = struct {
     }
 
     pub fn deinit(self: *VM, allocator: std.mem.Allocator) void {
+        var it = self.strings.valueIterator();
+        while (it.next()) |val| {
+            allocator.free(val.*);
+        }
+        self.strings.deinit(allocator);
+        self.top_frame.deinit();
+        allocator.destroy(self.top_frame);
         allocator.destroy(self);
     }
 

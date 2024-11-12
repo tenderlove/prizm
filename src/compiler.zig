@@ -36,6 +36,17 @@ const Scope = struct {
         try self.ccs.append(.{ .method_name = name, .argc = argc }); 
         return ccid;
     }
+
+    pub fn deinit(self: *Scope) void {
+        self.ccs.deinit();
+        var it = self.insns.first;
+        while (it) |insn| {
+            it = insn.next;
+            insn.data.deinit();
+            self.allocator.destroy(insn);
+        }
+        self.allocator.destroy(self);
+    }
 };
 
 pub const Compiler = struct {
@@ -188,4 +199,27 @@ pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: *prism.Prism) !*Com
         .scope = null,
     };
     return cc;
+}
+
+test "compile math" {
+    const allocator = std.testing.allocator;
+
+    const parser = try prism.Prism.newParserCtx(allocator);
+    defer parser.deinit();
+    const code = "5 + 7";
+    parser.init(code, code.len, null);
+    const root = parser.parse();
+    defer parser.nodeDestroy(root);
+
+    var scope_node = try prism.pmNewScopeNode(root);
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    // Compile the parse tree
+    const cc = try init(allocator, machine, parser);
+    defer cc.deinit(allocator);
+    const scope = try cc.compile(&scope_node);
+    defer scope.deinit();
 }

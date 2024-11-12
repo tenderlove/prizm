@@ -81,6 +81,13 @@ pub const Instruction = union(InstructionName) {
         };
     }
 
+    pub fn deinit(self: Instruction) void {
+        switch(self) {
+            .call => |x| x.params.deinit(),
+            else  => {}
+        }
+    }
+
     pub const Common = struct {
         out: Register,
     };
