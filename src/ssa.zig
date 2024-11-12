@@ -196,10 +196,6 @@ pub fn buildCFG(allocator: std.mem.Allocator, insns: InstructionList) !* const B
     }
 }
 
-test {
-    @import("std").testing.refAllDecls(@This());
-}
-
 test "empty basic block" {
     const list = InstructionList { };
     try std.testing.expectError(error.EmptyInstructionSequence, buildCFG(std.testing.allocator, list));

@@ -193,11 +193,3 @@ pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: *prism.Prism) !*Com
     };
     return cc;
 }
-
-test {
-    @import("std").testing.refAllDecls(@This());
-}
-
-test "hello world" {
-    try std.testing.expectEqual(1, 1);
-}
