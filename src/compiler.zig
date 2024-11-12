@@ -315,6 +315,12 @@ test "compile local set" {
     const scope = try cc.compile(&scope_node);
     defer scope.deinit();
 
-    const insn = scope.insns.first;
+    var insn = scope.insns.first;
     try expectInstructionType(ssa.Instruction.loadi, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ssa.Instruction.setlocal, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ssa.Instruction.getlocal, insn.?.data);
 }
