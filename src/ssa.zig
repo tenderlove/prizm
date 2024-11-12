@@ -2,18 +2,6 @@ const std = @import("std");
 
 pub const InstructionList = std.DoublyLinkedList(Instruction);
 
-pub const BasicBlock = struct {
-    name: u64,
-    start: *InstructionList.Node,
-    finish: *InstructionList.Node,
-    out: ?*BasicBlock,
-    out2: ?*BasicBlock,
-
-    fn addInstruction(self: *BasicBlock, insn: *InstructionList.Node) void {
-        self.finish = insn;
-    }
-};
-
 pub const Register = struct {
     number: u32,
 };
@@ -21,10 +9,12 @@ pub const Register = struct {
 pub const InstructionName = enum {
     add,
     call,
+    getlocal,
     getmethod,
     getself,
     loadi,
     move,
+    setlocal,
 };
 
 pub const Instruction = union(InstructionName) {
@@ -38,6 +28,11 @@ pub const Instruction = union(InstructionName) {
         out: Register,
         funcreg: Register,
         params: std.ArrayList(Register),
+    },
+
+    getlocal: struct {
+        out: Register,
+        in: Register,
     },
 
     getmethod: struct {
@@ -60,17 +55,22 @@ pub const Instruction = union(InstructionName) {
         in: Register,
     },
 
-    fn isJump(self: Instruction) bool {
+    setlocal: struct {
+        out: Register,
+        in: Register,
+    },
+
+    pub fn isJump(self: Instruction) bool {
         _ = self;
         return false;
     }
 
-    fn isReturn(self: Instruction) bool {
+    pub fn isReturn(self: Instruction) bool {
         _ = self;
         return false;
     }
 
-    fn isCall(self: Instruction) bool {
+    pub fn isCall(self: Instruction) bool {
         return switch(self) {
             .call, .add => true,
             else => false
@@ -144,98 +144,3 @@ pub const Instruction = union(InstructionName) {
         }
     }
 };
-
-pub fn compileCFG(bb: *const BasicBlock) []const u32 {
-    _ = bb;
-    return &[5]u32{1, 2, 3, 4, 5};
-}
-
-pub const CompileError = error {
-    EmptyInstructionSequence,
-};
-
-pub fn buildCFG(allocator: std.mem.Allocator, insns: InstructionList) !* const BasicBlock {
-    var node = insns.first;
-    var block_name: usize = 0;
-
-    if (node) |unwrap| {
-        var current_block = try allocator.create(BasicBlock);
-
-        current_block.* = .{
-            .name = block_name,
-            .start = unwrap,
-            .finish = unwrap,
-            .out = null,
-            .out2 = null,
-        };
-        const first_block = current_block;
-        block_name += 1;
-
-        while (node) |_| {
-            var finish = node;
-
-            while (finish) |finish_insn| {
-                current_block.addInstruction(finish_insn);
-
-                if (finish_insn.data.isJump()) {
-                    break;
-                }
-                finish = finish_insn.next;
-            }
-
-            if (finish) |fin| {
-                node = fin.next;
-            } else {
-                break;
-            }
-        }
-        return first_block;
-    } else {
-        return CompileError.EmptyInstructionSequence;
-    }
-}
-
-test "empty basic block" {
-    const list = InstructionList { };
-    try std.testing.expectError(error.EmptyInstructionSequence, buildCFG(std.testing.allocator, list));
-}
-
-test "basic block one instruction" {
-    var list = InstructionList { };
-    var one = InstructionList.Node {
-        .data = .{ .getself = .{ .out = .{ .number = 0 }}}
-    };
-    list.append(&one);
-    const bb = try buildCFG(std.testing.allocator, list);
-    defer std.testing.allocator.destroy(bb);
-
-    try std.testing.expectEqual(&one, bb.start);
-    try std.testing.expectEqual(&one, bb.finish);
-    try std.testing.expectEqual(null, bb.out);
-    try std.testing.expectEqual(null, bb.out2);
-}
-
-test "basic block two instruction" {
-    var list = InstructionList { };
-    var one = InstructionList.Node {
-        .data = .{ .getself = .{ .out = .{ .number = 0 }}}
-    };
-    list.append(&one);
-
-    var two = InstructionList.Node {
-        .data = .{ .getmethod = .{
-            .out = .{ .number = 0 },
-            .recv = .{ .number = 0 },
-            .ccid = 123,
-        }}
-    };
-    list.append(&two);
-    const bb = try buildCFG(std.testing.allocator, list);
-    defer std.testing.allocator.destroy(bb);
-
-    try std.testing.expectEqual(&one, bb.start);
-    try std.testing.expectEqual(&two, bb.finish);
-    try std.testing.expectEqual(&two, list.last);
-    try std.testing.expectEqual(null, bb.out);
-    try std.testing.expectEqual(null, bb.out2);
-}

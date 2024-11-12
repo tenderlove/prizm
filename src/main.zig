@@ -3,6 +3,7 @@ const prism = @import("prism.zig");
 const compiler = @import("compiler.zig");
 const vm = @import("vm.zig");
 const ssa = @import("ssa.zig");
+const CFG = @import("cfg.zig");
 const Allocator = std.mem.Allocator;
 
 pub fn main() !void {
@@ -43,9 +44,11 @@ pub fn main() !void {
         // Compile the parse tree
         const cc = try compiler.init(allocator, machine, parser);
         defer cc.deinit(allocator);
-        const iseq = try cc.compile(&scope_node);
 
-        _ = iseq;
+        const scope = try cc.compile(&scope_node);
+        const cfg = try CFG.buildCFG(allocator, scope.insns);
+
+        _ = cfg;
         // try machine.eval(iseq);
 
     }

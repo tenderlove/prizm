@@ -12,8 +12,30 @@ const Scope = struct {
     insns: ssa.InstructionList,
     parent: ?*Scope,
     children: std.ArrayList(Scope),
+    locals: std.StringHashMapUnmanaged(LocalInfo),
     ccs: std.ArrayList(vm.CallCache),
     allocator: std.mem.Allocator,
+
+    const LocalInfo = struct {
+        name: []const u8,
+        reg: ssa.Register,
+    };
+
+    pub fn registerLocal(self: *Scope, name: []const u8, reg: ssa.Register) !void {
+        const info = self.locals.get(name);
+        if (info == null) {
+            try self.locals.put(self.allocator, name, .{ .name = name, .reg = reg });
+        }
+    }
+
+    pub fn getLocalRegister(self: *Scope, name: []const u8) ?ssa.Register {
+        const info = self.locals.get(name);
+        if (info) |v| {
+            return v.reg;
+        } else {
+            return null;
+        }
+    }
 
     pub fn newRegister(self: *Scope) ssa.Register {
         const reg = self.reg_number;
@@ -45,6 +67,7 @@ const Scope = struct {
             insn.data.deinit();
             self.allocator.destroy(insn);
         }
+        self.locals.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 };
@@ -60,9 +83,12 @@ pub const Compiler = struct {
     }
 
     pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!ssa.Register {
+        std.debug.print("compiling type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
         return switch (node.*.type) {
             c.PM_CALL_NODE => try cc.compileCallNode(@ptrCast(node)),
             c.PM_INTEGER_NODE => try cc.compileIntegerNode(@ptrCast(node)),
+            c.PM_LOCAL_VARIABLE_READ_NODE => try cc.compileLocalVariableReadNode(@ptrCast(node)),
+            c.PM_LOCAL_VARIABLE_WRITE_NODE => try cc.compileLocalVariableWriteNode(@ptrCast(node)),
             c.PM_SCOPE_NODE => return error.NotImplementedError,
             c.PM_STATEMENTS_NODE => try cc.compileStatementsNode(@ptrCast(node)),
             else => {
@@ -134,6 +160,7 @@ pub const Compiler = struct {
             .reg_number = 0,
             .insns = ssa.InstructionList { },
             .parent = cc.scope,
+            .locals = std.StringHashMapUnmanaged(Scope.LocalInfo){},
             .children = std.ArrayList(Scope).init(cc.allocator),
             .ccs = std.ArrayList(vm.CallCache).init(cc.allocator),
             .allocator = cc.allocator,
@@ -165,19 +192,48 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t) !ssa.Register {
-        const body = &node.*.body;
-        if (body.*.size > 0) {
-            const list = body.*.nodes[0..body.*.size - 1];
-            for (list, 0..body.*.size - 1) |item, i| {
-                _ = item;
-                _ = i;
-                return error.NotImplementedError;
-            }
-            return try cc.compileNode(body.*.nodes[body.*.size - 1]);
+    fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ssa.Register {
+        const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        const inreg = cc.scope.?.getLocalRegister(lvar_name);
+
+        if (inreg) |v| {
+            return try cc.pushInsn(.{
+                .getlocal = .{
+                    .out = try cc.newRegister(),
+                    .in = v,
+                }
+            });
         } else {
+            // Probably getupvalue (from scope above us)
             return error.NotImplementedError;
         }
+    }
+
+    fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ssa.Register {
+        const inreg = try cc.compileNode(node.*.value);
+
+        const outreg = try cc.pushInsn(.{
+            .setlocal = .{
+                .out = try cc.newRegister(),
+                .in = inreg,
+            }
+        });
+
+        const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+
+        try cc.scope.?.registerLocal(lvar_name, outreg);
+
+        return outreg;
+    }
+
+    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t) !ssa.Register {
+        const body = &node.*.body;
+        const list = body.*.nodes[0..body.*.size];
+        var reg: ?ssa.Register = null;
+        for (list) |item| {
+            reg = try cc.compileNode(item);
+        }
+        return reg orelse error.NotImplementedError;
     }
 
     pub fn deinit(self: *Compiler, allocator: std.mem.Allocator) void {
@@ -186,6 +242,11 @@ pub const Compiler = struct {
 
     fn pushInsn(self: *Compiler, insn: ssa.Instruction) !ssa.Register {
         return try self.scope.?.pushInsn(insn);
+    }
+
+    fn stringFromId(cc: *Compiler, id: c.pm_constant_id_t) []const u8 {
+        const constant = c.pm_constant_pool_id_to_constant(&cc.parser.*.constant_pool, id);
+        return constant.*.start[0..(constant.*.length)];
     }
 };
 
@@ -225,6 +286,35 @@ test "compile math" {
     try std.testing.expectEqual(null, scope.parent);
     const insn = scope.insns.first;
     try std.testing.expect(insn != null);
-    const thing: ssa.InstructionName = insn.?.data;
-    try std.testing.expectEqual(ssa.InstructionName.loadi, thing);
+    try expectInstructionType(ssa.Instruction.loadi, insn.?.data);
+}
+
+fn expectInstructionType(expected: ssa.InstructionName, actual: ssa.InstructionName) !void {
+    try std.testing.expectEqual(expected, actual);
+}
+
+test "compile local set" {
+    const allocator = std.testing.allocator;
+
+    const parser = try prism.Prism.newParserCtx(allocator);
+    defer parser.deinit();
+    const code = "foo = 5; foo";
+    parser.init(code, code.len, null);
+    const root = parser.parse();
+    defer parser.nodeDestroy(root);
+
+    var scope_node = try prism.pmNewScopeNode(root);
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    // Compile the parse tree
+    const cc = try init(allocator, machine, parser);
+    defer cc.deinit(allocator);
+    const scope = try cc.compile(&scope_node);
+    defer scope.deinit();
+
+    const insn = scope.insns.first;
+    try expectInstructionType(ssa.Instruction.loadi, insn.?.data);
 }
