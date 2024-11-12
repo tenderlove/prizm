@@ -72,8 +72,10 @@ pub const Instruction = union(InstructionName) {
     }
 
     pub fn isReturn(self: Instruction) bool {
-        _ = self;
-        return false;
+        return switch(self) {
+            .leave => true,
+            else => false
+        };
     }
 
     pub fn isCall(self: Instruction) bool {
