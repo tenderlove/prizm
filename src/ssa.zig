@@ -12,6 +12,7 @@ pub const InstructionName = enum {
     getlocal,
     getmethod,
     getself,
+    leave,
     loadi,
     move,
     setlocal,
@@ -43,6 +44,11 @@ pub const Instruction = union(InstructionName) {
 
     getself: struct {
         out: Register,
+    },
+
+    leave: struct {
+        out: Register,
+        in: Register,
     },
 
     loadi: struct {

@@ -89,6 +89,7 @@ pub const Compiler = struct {
             c.PM_INTEGER_NODE => try cc.compileIntegerNode(@ptrCast(node)),
             c.PM_LOCAL_VARIABLE_READ_NODE => try cc.compileLocalVariableReadNode(@ptrCast(node)),
             c.PM_LOCAL_VARIABLE_WRITE_NODE => try cc.compileLocalVariableWriteNode(@ptrCast(node)),
+            c.PM_RETURN_NODE => try cc.compileReturnNode(@ptrCast(node)),
             c.PM_SCOPE_NODE => return error.NotImplementedError,
             c.PM_STATEMENTS_NODE => try cc.compileStatementsNode(@ptrCast(node)),
             else => {
@@ -226,6 +227,25 @@ pub const Compiler = struct {
         return outreg;
     }
 
+    fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t) !ssa.Register {
+        const arg_size = node.*.arguments.*.arguments.size;
+        const args = node.*.arguments.*.arguments.nodes[0..arg_size];
+
+        if (arg_size > 1) {
+            // need to make a new array
+            return error.NotImplementedError;
+        } else {
+            if (arg_size == 0) {
+                // need to return nil
+                return error.NotImplementedError;
+            } else {
+                const inreg = try cc.compileNode(args[0]);
+                const outreg = try cc.newRegister();
+                return try cc.pushInsn(.{ .leave = .{ .out = outreg, .in = inreg } });
+            }
+        }
+    }
+
     fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t) !ssa.Register {
         const body = &node.*.body;
         const list = body.*.nodes[0..body.*.size];
@@ -299,6 +319,38 @@ test "compile local set" {
     const parser = try prism.Prism.newParserCtx(allocator);
     defer parser.deinit();
     const code = "foo = 5; foo";
+    parser.init(code, code.len, null);
+    const root = parser.parse();
+    defer parser.nodeDestroy(root);
+
+    var scope_node = try prism.pmNewScopeNode(root);
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    // Compile the parse tree
+    const cc = try init(allocator, machine, parser);
+    defer cc.deinit(allocator);
+    const scope = try cc.compile(&scope_node);
+    defer scope.deinit();
+
+    var insn = scope.insns.first;
+    try expectInstructionType(ssa.Instruction.loadi, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ssa.Instruction.setlocal, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ssa.Instruction.getlocal, insn.?.data);
+}
+
+test "compile local get w/ return" {
+    const allocator = std.testing.allocator;
+
+    const parser = try prism.Prism.newParserCtx(allocator);
+    defer parser.deinit();
+    const code = "foo = 5; return foo";
     parser.init(code, code.len, null);
     const root = parser.parse();
     defer parser.nodeDestroy(root);
