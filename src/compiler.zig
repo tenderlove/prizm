@@ -165,7 +165,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileStatementsNode(cc: *Compiler, node: [*c]const c.pm_statements_node_t) !ssa.Register {
+    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t) !ssa.Register {
         const body = &node.*.body;
         if (body.*.size > 0) {
             const list = body.*.nodes[0..body.*.size - 1];
