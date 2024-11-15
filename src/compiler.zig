@@ -345,6 +345,11 @@ test "compile local set" {
     try expectInstructionType(ssa.Instruction.getlocal, insn.?.data);
 }
 
+fn compile(machine: *vm.VM, code: []const u8) !*Scope {
+    _ = code;
+    _ = machine;
+}
+
 test "compile local get w/ return" {
     const allocator = std.testing.allocator;
 
