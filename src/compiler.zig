@@ -43,13 +43,17 @@ const Scope = struct {
         return .{ .number = reg, };
     }
 
-    pub fn pushInsn(self: *Scope, insn: ssa.Instruction) !ssa.Register {
+    fn pushInsn(self: *Scope, insn: ssa.Instruction) !ssa.Register {
         const node = try self.allocator.create(ssa.InstructionList.Node);
         node.*.data = insn;
         self.insns.append(node);
 
         return switch (insn) {
-            inline else => |payload| payload.out,
+            inline else => |payload| blk: {
+                var reg = payload.out;
+                reg.origin = node;
+                break :blk reg;
+            },
         };
     }
 
@@ -100,6 +104,22 @@ const Scope = struct {
         const ccid = self.ccs.items.len;
         try self.ccs.append(.{ .method_name = name, .argc = argc }); 
         return ccid;
+    }
+
+    pub fn init(alloc: std.mem.Allocator, parent: ?*Scope) !*Scope {
+        const scope = try alloc.create(Scope);
+
+        scope.* = Scope {
+            .reg_number = 0,
+            .insns = ssa.InstructionList { },
+            .parent = parent,
+            .locals = std.StringHashMapUnmanaged(Scope.LocalInfo){},
+            .children = std.ArrayList(Scope).init(alloc),
+            .ccs = std.ArrayList(vm.CallCache).init(alloc),
+            .allocator = alloc,
+        };
+
+        return scope;
     }
 
     pub fn deinit(self: *Scope) void {
@@ -181,17 +201,7 @@ pub const Compiler = struct {
             return error.NotImplementedError;
         }
 
-        const scope = try cc.allocator.create(Scope);
-
-        scope.* = Scope {
-            .reg_number = 0,
-            .insns = ssa.InstructionList { },
-            .parent = cc.scope,
-            .locals = std.StringHashMapUnmanaged(Scope.LocalInfo){},
-            .children = std.ArrayList(Scope).init(cc.allocator),
-            .ccs = std.ArrayList(vm.CallCache).init(cc.allocator),
-            .allocator = cc.allocator,
-        };
+        const scope = try Scope.init(cc.allocator, cc.scope);
 
         cc.scope = scope;
 
@@ -411,4 +421,18 @@ test "compile local get w/ return" {
 
     insn = insn.?.next;
     try expectInstructionType(ssa.Instruction.getlocal, insn.?.data);
+}
+
+test "pushing instruction links origin to outreg" {
+    const allocator = std.testing.allocator;
+
+    const scope = try Scope.init(allocator, null);
+    defer scope.deinit();
+
+    const reg = try scope.pushLoadi(123);
+    try std.testing.expectEqual(1, scope.insns.len);
+
+    const insn = scope.insns.first.?;
+    try std.testing.expectEqual(insn, reg.origin.?);
+    try std.testing.expectEqual(123, insn.data.loadi.val);
 }

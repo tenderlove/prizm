@@ -4,6 +4,7 @@ pub const InstructionList = std.DoublyLinkedList(Instruction);
 
 pub const Register = struct {
     number: u32,
+    origin: ?*const InstructionList.Node = null,
 };
 
 pub const InstructionName = enum {
