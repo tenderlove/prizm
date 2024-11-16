@@ -1,15 +1,15 @@
 const std = @import("std");
 const prism = @import("prism.zig");
 const vm = @import("vm.zig");
-const ssa = @import("ssa.zig");
+const ir = @import("ir.zig");
 
 const c = @cImport({
     @cInclude("prism.h");
 });
 
 const Scope = struct {
-    reg_number: u32,
-    insns: ssa.InstructionList,
+    tmpname: u32,
+    insns: ir.InstructionList,
     parent: ?*Scope,
     children: std.ArrayList(Scope),
     locals: std.StringHashMapUnmanaged(LocalInfo),
@@ -18,47 +18,47 @@ const Scope = struct {
 
     const LocalInfo = struct {
         name: []const u8,
-        reg: ssa.Register,
+        irname: ir.Name,
     };
 
-    pub fn registerLocal(self: *Scope, name: []const u8, reg: ssa.Register) !void {
-        const info = self.locals.get(name);
-        if (info == null) {
-            try self.locals.put(self.allocator, name, .{ .name = name, .reg = reg });
-        }
-    }
-
-    pub fn getLocalRegister(self: *Scope, name: []const u8) ?ssa.Register {
+    pub fn getLocalName(self: *Scope, name: []const u8) !ir.Name {
         const info = self.locals.get(name);
         if (info) |v| {
-            return v.reg;
+            return v.irname;
         } else {
-            return null;
+            const lname: ir.Name = .{
+                .local = .{
+                    .name = self.tmpname,
+                }
+            };
+            const li: LocalInfo = .{
+                .name = name,
+                .irname = lname,
+            };
+            self.tmpname += 1;
+            try self.locals.put(self.allocator, name, li);
+            return lname;
         }
     }
 
-    fn newRegister(self: *Scope) ssa.Register {
-        const reg = self.reg_number;
-        self.reg_number += 1;
-        return .{ .number = reg, };
+    fn newTempName(self: *Scope) ir.Name {
+        const name = self.tmpname;
+        self.tmpname += 1;
+        return .{ .temp = .{ .name = name } };
     }
 
-    fn pushInsn(self: *Scope, insn: ssa.Instruction) !ssa.Register {
-        const node = try self.allocator.create(ssa.InstructionList.Node);
+    fn pushInsn(self: *Scope, insn: ir.Instruction) !ir.Name {
+        const node = try self.allocator.create(ir.InstructionList.Node);
         node.*.data = insn;
         self.insns.append(node);
 
         return switch (insn) {
-            inline else => |payload| blk: {
-                var reg = payload.out;
-                reg.origin = node;
-                break :blk reg;
-            },
+            inline else => |payload| payload.out
         };
     }
 
-    pub fn pushCall(self: *Scope, func: ssa.Register, params: std.ArrayList(ssa.Register)) !ssa.Register {
-        const outreg = self.newRegister();
+    pub fn pushCall(self: *Scope, func: ir.Name, params: std.ArrayList(ir.Name)) !ir.Name {
+        const outreg = self.newTempName();
         return try self.pushInsn(.{ .call = .{
             .out = outreg,
             .funcreg = func,
@@ -66,13 +66,13 @@ const Scope = struct {
         } });
     }
 
-    pub fn pushGetLocal(self: *Scope, in: ssa.Register) !ssa.Register {
-        const outreg = self.newRegister();
+    pub fn pushGetLocal(self: *Scope, in: ir.Name) !ir.Name {
+        const outreg = self.newTempName();
         return try self.pushInsn(.{ .getlocal = .{ .out = outreg, .in = in } });
     }
 
-    pub fn pushGetMethod(self: *Scope, recv: ssa.Register, ccid: usize) !ssa.Register {
-        const outreg = self.newRegister();
+    pub fn pushGetMethod(self: *Scope, recv: ir.Name, ccid: usize) !ir.Name {
+        const outreg = self.newTempName();
         return try self.pushInsn(.{ .getmethod = .{
             .out = outreg,
             .recv = recv,
@@ -80,29 +80,29 @@ const Scope = struct {
         } });
     }
 
-    pub fn pushGetself(self: *Scope) !ssa.Register {
-        const outreg = self.newRegister();
+    pub fn pushGetself(self: *Scope) !ir.Name {
+        const outreg = self.newTempName();
         return try self.pushInsn(.{ .getself = .{ .out = outreg } });
     }
 
-    pub fn pushLeave(self: *Scope, in: ssa.Register) !ssa.Register {
-        const outreg = self.newRegister();
+    pub fn pushLeave(self: *Scope, in: ir.Name) !ir.Name {
+        const outreg = self.newTempName();
         return try self.pushInsn(.{ .leave = .{ .out = outreg, .in = in } });
     }
 
-    pub fn pushLoadi(self: *Scope, val: u64) !ssa.Register {
-        const outreg = self.newRegister();
+    pub fn pushLoadi(self: *Scope, val: u64) !ir.Name {
+        const outreg = self.newTempName();
         return try self.pushInsn(.{ .loadi = .{ .out = outreg, .val = val } });
     }
 
-    pub fn pushLoadNil(self: *Scope) !ssa.Register {
-        const outreg = self.newRegister();
+    pub fn pushLoadNil(self: *Scope) !ir.Name {
+        const outreg = self.newTempName();
         return try self.pushInsn(.{ .loadnil = .{ .out = outreg } });
     }
 
-    pub fn pushSetLocal(self: *Scope, in: ssa.Register) !ssa.Register {
-        const outreg = self.newRegister();
-        return try self.pushInsn(.{ .setlocal = .{ .out = outreg, .in = in } });
+    pub fn pushSetLocal(self: *Scope, name: ir.Name, val: ir.Name) !ir.Name {
+        const outreg = self.newTempName();
+        return try self.pushInsn(.{ .setlocal = .{ .out = outreg, .name = name, .val = val } });
     }
 
     pub fn pushCallCache(self: *Scope, name: []const u8, argc: usize) !usize {
@@ -115,8 +115,8 @@ const Scope = struct {
         const scope = try alloc.create(Scope);
 
         scope.* = Scope {
-            .reg_number = 0,
-            .insns = ssa.InstructionList { },
+            .tmpname = 0,
+            .insns = ir.InstructionList { },
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(Scope.LocalInfo){},
             .children = std.ArrayList(Scope).init(alloc),
@@ -150,10 +150,11 @@ pub const Compiler = struct {
         return compileScopeNode(cc, node);
     }
 
-    pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!ssa.Register {
+    pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!ir.Name {
         std.debug.print("compiling type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
         return switch (node.*.type) {
             c.PM_CALL_NODE => try cc.compileCallNode(@ptrCast(node)),
+            c.PM_IF_NODE => try cc.compileIfNode(@ptrCast(node)),
             c.PM_INTEGER_NODE => try cc.compileIntegerNode(@ptrCast(node)),
             c.PM_LOCAL_VARIABLE_READ_NODE => try cc.compileLocalVariableReadNode(@ptrCast(node)),
             c.PM_LOCAL_VARIABLE_WRITE_NODE => try cc.compileLocalVariableWriteNode(@ptrCast(node)),
@@ -167,7 +168,7 @@ pub const Compiler = struct {
         };
     }
 
-    fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t) !ssa.Register {
+    fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t) !ir.Name {
         if (node) |n| {
             return try cc.compileNode(n);
         } else {
@@ -175,7 +176,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileCallNode(cc: *Compiler, node: *const c.pm_call_node_t) !ssa.Register {
+    fn compileCallNode(cc: *Compiler, node: *const c.pm_call_node_t) !ir.Name {
         const constant = c.pm_constant_pool_id_to_constant(&cc.parser.*.constant_pool, node.*.name);
 
         const method_name = constant.*.start[0..(constant.*.length)];
@@ -185,7 +186,7 @@ pub const Compiler = struct {
         const arg_size = node.*.arguments.*.arguments.size;
         const args = node.*.arguments.*.arguments.nodes[0..arg_size];
 
-        var params = std.ArrayList(ssa.Register).init(cc.allocator);
+        var params = std.ArrayList(ir.Name).init(cc.allocator);
 
         for (args) |arg| {
             try params.append(try cc.compileNode(arg));
@@ -219,7 +220,13 @@ pub const Compiler = struct {
         return scope;
     }
 
-    fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t) !ssa.Register {
+    fn compileIfNode(cc: *Compiler, node: *const c.pm_if_node_t) !ir.Name {
+        _ = cc;
+        _ = node;
+        return error.NotImplementedError;
+    }
+
+    fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t) !ir.Name {
         if (node.*.value.values == null) {
             return try cc.pushLoadi(node.*.value.value);
         } else {
@@ -227,30 +234,21 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ssa.Register {
+    fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ir.Name {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
-        const inreg = cc.scope.?.getLocalRegister(lvar_name);
-
-        if (inreg) |v| {
-            return try cc.pushGetLocal(v);
-        } else {
-            // Probably getupvalue (from scope above us)
-            return error.NotImplementedError;
-        }
+        const inreg = try cc.scope.?.getLocalName(lvar_name);
+        return try cc.pushGetLocal(inreg);
     }
 
-    fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ssa.Register {
+    fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ir.Name {
         const inreg = try cc.compileNode(node.*.value);
-
-        const outreg = try cc.pushSetLocal(inreg);
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        const name = try cc.scope.?.getLocalName(lvar_name);
 
-        try cc.scope.?.registerLocal(lvar_name, outreg);
-
-        return outreg;
+        return try cc.pushSetLocal(name, inreg);
     }
 
-    fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t) !ssa.Register {
+    fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t) !ir.Name {
         const arguments = node.*.arguments;
 
         if (arguments) |arg| {
@@ -269,10 +267,10 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t) !ssa.Register {
+    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t) !ir.Name {
         const body = &node.*.body;
         const list = body.*.nodes[0..body.*.size];
-        var reg: ?ssa.Register = null;
+        var reg: ?ir.Name = null;
         for (list) |item| {
             reg = try cc.compileNode(item);
         }
@@ -283,36 +281,36 @@ pub const Compiler = struct {
         allocator.destroy(self);
     }
 
-    fn pushCall(self: *Compiler, func: ssa.Register, params: std.ArrayList(ssa.Register)) !ssa.Register {
+    fn pushCall(self: *Compiler, func: ir.Name, params: std.ArrayList(ir.Name)) !ir.Name {
         return try self.scope.?.pushCall(func, params);
     }
 
-    fn pushGetLocal(self: *Compiler, in: ssa.Register) !ssa.Register {
+    fn pushGetLocal(self: *Compiler, in: ir.Name) !ir.Name {
         return try self.scope.?.pushGetLocal(in);
     }
 
-    fn pushGetMethod(self: *Compiler, recv: ssa.Register, ccid: usize) !ssa.Register {
+    fn pushGetMethod(self: *Compiler, recv: ir.Name, ccid: usize) !ir.Name {
         return try self.scope.?.pushGetMethod(recv, ccid);
     }
 
-    fn pushGetself(self: *Compiler) !ssa.Register {
+    fn pushGetself(self: *Compiler) !ir.Name {
         return try self.scope.?.pushGetself();
     }
 
-    fn pushLeave(self: *Compiler, in: ssa.Register) !ssa.Register {
+    fn pushLeave(self: *Compiler, in: ir.Name) !ir.Name {
         return try self.scope.?.pushLeave(in);
     }
 
-    fn pushLoadi(self: *Compiler, val: u64) !ssa.Register {
+    fn pushLoadi(self: *Compiler, val: u64) !ir.Name {
         return try self.scope.?.pushLoadi(val);
     }
 
-    fn pushLoadNil(self: *Compiler) !ssa.Register {
+    fn pushLoadNil(self: *Compiler) !ir.Name {
         return try self.scope.?.pushLoadNil();
     }
 
-    fn pushSetLocal(self: *Compiler, in: ssa.Register) !ssa.Register {
-        return try self.scope.?.pushSetLocal(in);
+    fn pushSetLocal(self: *Compiler, name: ir.Name, val: ir.Name) !ir.Name {
+        return try self.scope.?.pushSetLocal(name, val);
     }
 
     fn stringFromId(cc: *Compiler, id: c.pm_constant_id_t) []const u8 {
@@ -358,10 +356,10 @@ test "compile math" {
     try std.testing.expectEqual(null, scope.parent);
     const insn = scope.insns.first;
     try std.testing.expect(insn != null);
-    try expectInstructionType(ssa.Instruction.loadi, insn.?.data);
+    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
 }
 
-fn expectInstructionType(expected: ssa.InstructionName, actual: ssa.InstructionName) !void {
+fn expectInstructionType(expected: ir.InstructionName, actual: ir.InstructionName) !void {
     try std.testing.expectEqual(expected, actual);
 }
 
@@ -376,13 +374,13 @@ test "compile local set" {
     defer scope.deinit();
 
     var insn = scope.insns.first;
-    try expectInstructionType(ssa.Instruction.loadi, insn.?.data);
+    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
 
     insn = insn.?.next;
-    try expectInstructionType(ssa.Instruction.setlocal, insn.?.data);
+    try expectInstructionType(ir.Instruction.setlocal, insn.?.data);
 
     insn = insn.?.next;
-    try expectInstructionType(ssa.Instruction.getlocal, insn.?.data);
+    try expectInstructionType(ir.Instruction.getlocal, insn.?.data);
 }
 
 test "compile local get w/ return" {
@@ -396,26 +394,25 @@ test "compile local get w/ return" {
     defer scope.deinit();
 
     var insn = scope.insns.first;
-    try expectInstructionType(ssa.Instruction.loadi, insn.?.data);
+    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
 
     insn = insn.?.next;
-    try expectInstructionType(ssa.Instruction.setlocal, insn.?.data);
+    try expectInstructionType(ir.Instruction.setlocal, insn.?.data);
 
     insn = insn.?.next;
-    try expectInstructionType(ssa.Instruction.getlocal, insn.?.data);
+    try expectInstructionType(ir.Instruction.getlocal, insn.?.data);
 }
 
-test "pushing instruction links origin to outreg" {
+test "pushing instruction adds value" {
     const allocator = std.testing.allocator;
 
     const scope = try Scope.init(allocator, null);
     defer scope.deinit();
 
-    const reg = try scope.pushLoadi(123);
+    _ = try scope.pushLoadi(123);
     try std.testing.expectEqual(1, scope.insns.len);
 
     const insn = scope.insns.first.?;
-    try std.testing.expectEqual(insn, reg.origin.?);
     try std.testing.expectEqual(123, insn.data.loadi.val);
 }
 
@@ -430,14 +427,37 @@ test "compile local get w/ nil return" {
     defer scope.deinit();
 
     var insn = scope.insns.first;
-    try expectInstructionType(ssa.Instruction.loadi, insn.?.data);
+    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
 
     insn = insn.?.next;
-    try expectInstructionType(ssa.Instruction.setlocal, insn.?.data);
+    try expectInstructionType(ir.Instruction.setlocal, insn.?.data);
 
     insn = insn.?.next;
-    try expectInstructionType(ssa.Instruction.loadnil, insn.?.data);
+    try expectInstructionType(ir.Instruction.loadnil, insn.?.data);
 
     insn = insn.?.next;
-    try expectInstructionType(ssa.Instruction.leave, insn.?.data);
+    try expectInstructionType(ir.Instruction.leave, insn.?.data);
 }
+
+// test "compile if statement" {
+//     const allocator = std.testing.allocator;
+// 
+//     // Create a new VM
+//     const machine = try vm.init(allocator);
+//     defer machine.deinit(allocator);
+// 
+//     const scope = try compileScope(allocator, machine, "5 < 7 ? 123 : 456");
+//     defer scope.deinit();
+// 
+//     var insn = scope.insns.first;
+//     try expectInstructionType(ir.Instruction.loadi, insn.?.data);
+// 
+//     insn = insn.?.next;
+//     try expectInstructionType(ir.Instruction.setlocal, insn.?.data);
+// 
+//     insn = insn.?.next;
+//     try expectInstructionType(ir.Instruction.loadnil, insn.?.data);
+// 
+//     insn = insn.?.next;
+//     try expectInstructionType(ir.Instruction.leave, insn.?.data);
+// }

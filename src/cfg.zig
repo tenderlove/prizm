@@ -1,17 +1,18 @@
 const std = @import("std");
 const ssa = @import("ssa.zig");
+const ir = @import("ir.zig");
 const prism = @import("prism.zig");
 const vm = @import("vm.zig");
 const compiler = @import("compiler.zig");
 
 pub const BasicBlock = struct {
     name: u64,
-    start: *ssa.InstructionList.Node,
-    finish: *ssa.InstructionList.Node,
+    start: *ir.InstructionList.Node,
+    finish: *ir.InstructionList.Node,
     out: ?*BasicBlock,
     out2: ?*BasicBlock,
 
-    fn addInstruction(self: *BasicBlock, insn: *ssa.InstructionList.Node) void {
+    fn addInstruction(self: *BasicBlock, insn: *ir.InstructionList.Node) void {
         self.finish = insn;
     }
 };
@@ -20,7 +21,7 @@ pub const CompileError = error {
     EmptyInstructionSequence,
 };
 
-pub fn buildCFG(allocator: std.mem.Allocator, insns: ssa.InstructionList) !* const BasicBlock {
+pub fn buildCFG(allocator: std.mem.Allocator, insns: ir.InstructionList) !* const BasicBlock {
     var node = insns.first;
     var block_name: usize = 0;
 
@@ -62,14 +63,14 @@ pub fn buildCFG(allocator: std.mem.Allocator, insns: ssa.InstructionList) !* con
 }
 
 test "empty basic block" {
-    const list = ssa.InstructionList { };
+    const list = ir.InstructionList { };
     try std.testing.expectError(error.EmptyInstructionSequence, buildCFG(std.testing.allocator, list));
 }
 
 test "basic block one instruction" {
-    var list = ssa.InstructionList { };
-    var one = ssa.InstructionList.Node {
-        .data = .{ .getself = .{ .out = .{ .number = 0 }}}
+    var list = ir.InstructionList { };
+    var one = ir.InstructionList.Node {
+        .data = .{ .getself = .{ .out = .{ .temp = .{ .name = 0 }}} }
     };
     list.append(&one);
     const bb = try buildCFG(std.testing.allocator, list);
@@ -82,16 +83,16 @@ test "basic block one instruction" {
 }
 
 test "basic block two instruction" {
-    var list = ssa.InstructionList { };
-    var one = ssa.InstructionList.Node {
-        .data = .{ .getself = .{ .out = .{ .number = 0 }}}
+    var list = ir.InstructionList { };
+    var one = ir.InstructionList.Node {
+        .data = .{ .getself = .{ .out = .{ .temp = .{ .name = 0 }}} }
     };
     list.append(&one);
 
-    var two = ssa.InstructionList.Node {
+    var two = ir.InstructionList.Node {
         .data = .{ .getmethod = .{
-            .out = .{ .number = 0 },
-            .recv = .{ .number = 0 },
+            .out = .{ .temp = .{ .name = 0 } },
+            .recv = .{ .temp = .{ .name = 0 } },
             .ccid = 123,
         }}
     };
@@ -130,9 +131,9 @@ test "CFG from compiler" {
 
     const cfg = try buildCFG(allocator, scope.insns);
     defer allocator.destroy(cfg);
-    const start_type: ssa.InstructionName = cfg.start.data;
-    try std.testing.expectEqual(ssa.InstructionName.loadi, start_type);
+    const start_type: ir.InstructionName = cfg.start.data;
+    try std.testing.expectEqual(ir.InstructionName.loadi, start_type);
 
-    const finish_type: ssa.InstructionName = cfg.finish.data;
-    try std.testing.expectEqual(ssa.InstructionName.call, finish_type);
+    const finish_type: ir.InstructionName = cfg.finish.data;
+    try std.testing.expectEqual(ir.InstructionName.call, finish_type);
 }
