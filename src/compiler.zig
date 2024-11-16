@@ -37,7 +37,7 @@ const Scope = struct {
         }
     }
 
-    pub fn newRegister(self: *Scope) ssa.Register {
+    fn newRegister(self: *Scope) ssa.Register {
         const reg = self.reg_number;
         self.reg_number += 1;
         return .{ .number = reg, };
@@ -51,6 +51,49 @@ const Scope = struct {
         return switch (insn) {
             inline else => |payload| payload.out,
         };
+    }
+
+    pub fn pushCall(self: *Scope, func: ssa.Register, params: std.ArrayList(ssa.Register)) !ssa.Register {
+        const outreg = self.newRegister();
+        return try self.pushInsn(.{ .call = .{
+            .out = outreg,
+            .funcreg = func,
+            .params = params,
+        } });
+    }
+
+    pub fn pushGetLocal(self: *Scope, in: ssa.Register) !ssa.Register {
+        const outreg = self.newRegister();
+        return try self.pushInsn(.{ .getlocal = .{ .out = outreg, .in = in } });
+    }
+
+    pub fn pushGetMethod(self: *Scope, recv: ssa.Register, ccid: usize) !ssa.Register {
+        const outreg = self.newRegister();
+        return try self.pushInsn(.{ .getmethod = .{
+            .out = outreg,
+            .recv = recv,
+            .ccid = ccid,
+        } });
+    }
+
+    pub fn pushGetself(self: *Scope) !ssa.Register {
+        const outreg = self.newRegister();
+        return try self.pushInsn(.{ .getself = .{ .out = outreg } });
+    }
+
+    pub fn pushLeave(self: *Scope, in: ssa.Register) !ssa.Register {
+        const outreg = self.newRegister();
+        return try self.pushInsn(.{ .leave = .{ .out = outreg, .in = in } });
+    }
+
+    pub fn pushLoadi(self: *Scope, val: u64) !ssa.Register {
+        const outreg = self.newRegister();
+        return try self.pushInsn(.{ .loadi = .{ .out = outreg, .val = val } });
+    }
+
+    pub fn pushSetLocal(self: *Scope, in: ssa.Register) !ssa.Register {
+        const outreg = self.newRegister();
+        return try self.pushInsn(.{ .setlocal = .{ .out = outreg, .in = in } });
     }
 
     pub fn pushCallCache(self: *Scope, name: []const u8, argc: usize) !usize {
@@ -99,16 +142,11 @@ pub const Compiler = struct {
         };
     }
 
-    fn newRegister(cc: *Compiler) !ssa.Register {
-        return cc.scope.?.newRegister();
-    }
-
     fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t) !ssa.Register {
         if (node) |n| {
             return try cc.compileNode(n);
         } else {
-            const outreg = try cc.newRegister();
-            return try cc.pushInsn(.{ .getself = .{ .out = outreg, } });
+            return try cc.pushGetself();
         }
     }
 
@@ -134,20 +172,8 @@ pub const Compiler = struct {
         // Add an inline cache record
         const ccid = try cc.scope.?.pushCallCache(name, arg_size);
 
-        return try cc.pushInsn(.{
-            .call = .{
-                .out = try cc.newRegister(),
-                .funcreg = try cc.pushInsn(.{
-                    .getmethod = .{
-                        .out = try cc.newRegister(),
-                        .recv = recv_op,
-                        .ccid = ccid,
-                    }
-                }),
-
-                .params = params
-            }
-        });
+        const func = try cc.pushGetMethod(recv_op, ccid);
+        return try cc.pushCall(func, params);
     }
 
     fn compileScopeNode(cc: *Compiler, node: *prism.pm_scope_node_t) !*Scope {
@@ -180,14 +206,7 @@ pub const Compiler = struct {
 
     fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t) !ssa.Register {
         if (node.*.value.values == null) {
-            const outreg = try cc.newRegister();
-
-            return try cc.pushInsn(.{
-                .loadi = .{
-                    .out = outreg,
-                    .val = node.*.value.value,
-                }
-            });
+            return try cc.pushLoadi(node.*.value.value);
         } else {
             return error.NotImplementedError;
         }
@@ -198,12 +217,7 @@ pub const Compiler = struct {
         const inreg = cc.scope.?.getLocalRegister(lvar_name);
 
         if (inreg) |v| {
-            return try cc.pushInsn(.{
-                .getlocal = .{
-                    .out = try cc.newRegister(),
-                    .in = v,
-                }
-            });
+            return try cc.pushGetLocal(v);
         } else {
             // Probably getupvalue (from scope above us)
             return error.NotImplementedError;
@@ -213,13 +227,7 @@ pub const Compiler = struct {
     fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ssa.Register {
         const inreg = try cc.compileNode(node.*.value);
 
-        const outreg = try cc.pushInsn(.{
-            .setlocal = .{
-                .out = try cc.newRegister(),
-                .in = inreg,
-            }
-        });
-
+        const outreg = try cc.pushSetLocal(inreg);
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
 
         try cc.scope.?.registerLocal(lvar_name, outreg);
@@ -240,8 +248,7 @@ pub const Compiler = struct {
                 return error.NotImplementedError;
             } else {
                 const inreg = try cc.compileNode(args[0]);
-                const outreg = try cc.newRegister();
-                return try cc.pushInsn(.{ .leave = .{ .out = outreg, .in = inreg } });
+                return try cc.pushLeave(inreg);
             }
         }
     }
@@ -260,8 +267,32 @@ pub const Compiler = struct {
         allocator.destroy(self);
     }
 
-    fn pushInsn(self: *Compiler, insn: ssa.Instruction) !ssa.Register {
-        return try self.scope.?.pushInsn(insn);
+    fn pushCall(self: *Compiler, func: ssa.Register, params: std.ArrayList(ssa.Register)) !ssa.Register {
+        return try self.scope.?.pushCall(func, params);
+    }
+
+    fn pushGetLocal(self: *Compiler, in: ssa.Register) !ssa.Register {
+        return try self.scope.?.pushGetLocal(in);
+    }
+
+    fn pushGetMethod(self: *Compiler, recv: ssa.Register, ccid: usize) !ssa.Register {
+        return try self.scope.?.pushGetMethod(recv, ccid);
+    }
+
+    fn pushGetself(self: *Compiler) !ssa.Register {
+        return try self.scope.?.pushGetself();
+    }
+
+    fn pushLeave(self: *Compiler, in: ssa.Register) !ssa.Register {
+        return try self.scope.?.pushLeave(in);
+    }
+
+    fn pushLoadi(self: *Compiler, val: u64) !ssa.Register {
+        return try self.scope.?.pushLoadi(val);
+    }
+
+    fn pushSetLocal(self: *Compiler, in: ssa.Register) !ssa.Register {
+        return try self.scope.?.pushSetLocal(in);
     }
 
     fn stringFromId(cc: *Compiler, id: c.pm_constant_id_t) []const u8 {

@@ -53,7 +53,7 @@ pub const Instruction = union(InstructionName) {
 
     loadi: struct {
         out: Register,
-        val: u32,
+        val: u64,
     },
 
     move: struct {
