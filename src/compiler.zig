@@ -95,6 +95,11 @@ const Scope = struct {
         return try self.pushInsn(.{ .loadi = .{ .out = outreg, .val = val } });
     }
 
+    pub fn pushLoadNil(self: *Scope) !ssa.Register {
+        const outreg = self.newRegister();
+        return try self.pushInsn(.{ .loadnil = .{ .out = outreg } });
+    }
+
     pub fn pushSetLocal(self: *Scope, in: ssa.Register) !ssa.Register {
         const outreg = self.newRegister();
         return try self.pushInsn(.{ .setlocal = .{ .out = outreg, .in = in } });
@@ -246,20 +251,21 @@ pub const Compiler = struct {
     }
 
     fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t) !ssa.Register {
-        const arg_size = node.*.arguments.*.arguments.size;
-        const args = node.*.arguments.*.arguments.nodes[0..arg_size];
+        const arguments = node.*.arguments;
 
-        if (arg_size > 1) {
-            // need to make a new array
-            return error.NotImplementedError;
-        } else {
-            if (arg_size == 0) {
-                // need to return nil
+        if (arguments) |arg| {
+            const arg_size = arg.*.arguments.size;
+            const args = arg.*.arguments.nodes[0..arg_size];
+
+            if (arg_size > 1) {
+                // need to make a new array
                 return error.NotImplementedError;
             } else {
                 const inreg = try cc.compileNode(args[0]);
                 return try cc.pushLeave(inreg);
             }
+        } else {
+            return try cc.pushLeave(try cc.pushLoadNil());
         }
     }
 
@@ -299,6 +305,10 @@ pub const Compiler = struct {
 
     fn pushLoadi(self: *Compiler, val: u64) !ssa.Register {
         return try self.scope.?.pushLoadi(val);
+    }
+
+    fn pushLoadNil(self: *Compiler) !ssa.Register {
+        return try self.scope.?.pushLoadNil();
     }
 
     fn pushSetLocal(self: *Compiler, in: ssa.Register) !ssa.Register {
@@ -407,4 +417,27 @@ test "pushing instruction links origin to outreg" {
     const insn = scope.insns.first.?;
     try std.testing.expectEqual(insn, reg.origin.?);
     try std.testing.expectEqual(123, insn.data.loadi.val);
+}
+
+test "compile local get w/ nil return" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "foo = 5; return");
+    defer scope.deinit();
+
+    var insn = scope.insns.first;
+    try expectInstructionType(ssa.Instruction.loadi, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ssa.Instruction.setlocal, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ssa.Instruction.loadnil, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ssa.Instruction.leave, insn.?.data);
 }

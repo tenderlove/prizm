@@ -15,6 +15,7 @@ pub const InstructionName = enum {
     getself,
     leave,
     loadi,
+    loadnil,
     move,
     setlocal,
 };
@@ -55,6 +56,10 @@ pub const Instruction = union(InstructionName) {
     loadi: struct {
         out: Register,
         val: u64,
+    },
+
+    loadnil: struct {
+        out: Register,
     },
 
     move: struct {
