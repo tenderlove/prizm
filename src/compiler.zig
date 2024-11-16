@@ -322,26 +322,27 @@ pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: *prism.Prism) !*Com
     return cc;
 }
 
-test "compile math" {
-    const allocator = std.testing.allocator;
-
+fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*Scope {
     const parser = try prism.Prism.newParserCtx(allocator);
     defer parser.deinit();
-    const code = "5 + 7";
     parser.init(code, code.len, null);
     const root = parser.parse();
     defer parser.nodeDestroy(root);
 
     var scope_node = try prism.pmNewScopeNode(root);
+    const cc = try init(allocator, machine, parser);
+    defer cc.deinit(allocator);
+    return try cc.compile(&scope_node);
+}
+
+test "compile math" {
+    const allocator = std.testing.allocator;
 
     // Create a new VM
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    // Compile the parse tree
-    const cc = try init(allocator, machine, parser);
-    defer cc.deinit(allocator);
-    const scope = try cc.compile(&scope_node);
+    const scope = try compileScope(allocator, machine, "5 + 7");
     defer scope.deinit();
 
     try std.testing.expectEqual(null, scope.parent);
@@ -357,23 +358,11 @@ fn expectInstructionType(expected: ssa.InstructionName, actual: ssa.InstructionN
 test "compile local set" {
     const allocator = std.testing.allocator;
 
-    const parser = try prism.Prism.newParserCtx(allocator);
-    defer parser.deinit();
-    const code = "foo = 5; foo";
-    parser.init(code, code.len, null);
-    const root = parser.parse();
-    defer parser.nodeDestroy(root);
-
-    var scope_node = try prism.pmNewScopeNode(root);
-
     // Create a new VM
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    // Compile the parse tree
-    const cc = try init(allocator, machine, parser);
-    defer cc.deinit(allocator);
-    const scope = try cc.compile(&scope_node);
+    const scope = try compileScope(allocator, machine, "foo = 5; foo");
     defer scope.deinit();
 
     var insn = scope.insns.first;
@@ -386,31 +375,14 @@ test "compile local set" {
     try expectInstructionType(ssa.Instruction.getlocal, insn.?.data);
 }
 
-fn compile(machine: *vm.VM, code: []const u8) !*Scope {
-    _ = code;
-    _ = machine;
-}
-
 test "compile local get w/ return" {
     const allocator = std.testing.allocator;
-
-    const parser = try prism.Prism.newParserCtx(allocator);
-    defer parser.deinit();
-    const code = "foo = 5; return foo";
-    parser.init(code, code.len, null);
-    const root = parser.parse();
-    defer parser.nodeDestroy(root);
-
-    var scope_node = try prism.pmNewScopeNode(root);
 
     // Create a new VM
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    // Compile the parse tree
-    const cc = try init(allocator, machine, parser);
-    defer cc.deinit(allocator);
-    const scope = try cc.compile(&scope_node);
+    const scope = try compileScope(allocator, machine, "foo = 5; return foo");
     defer scope.deinit();
 
     var insn = scope.insns.first;
