@@ -3,33 +3,21 @@ const std = @import("std");
 pub const InstructionList = std.DoublyLinkedList(Instruction);
 
 pub const NameType = enum {
-    temp,
-    local,
-    ivar,
+    constant,
     cvar,
-    constant
+    ivar,
+    label,
+    local,
+    temp,
 };
 
 pub const Name = union(NameType) {
-    temp: struct {
-        name: usize,
-    },
-
-    local: struct {
-        name: usize,
-    },
-
-    ivar: struct {
-        name: usize,
-    },
-
-    cvar: struct {
-        name: usize,
-    },
-
-    constant: struct {
-        name: usize,
-    },
+    constant: struct { name: usize, },
+    cvar: struct { name: usize, },
+    ivar: struct { name: usize, },
+    label: struct { name: usize, },
+    local: struct { name: usize, },
+    temp: struct { name: usize, },
 };
 
 pub const InstructionName = enum {
@@ -37,9 +25,12 @@ pub const InstructionName = enum {
     getlocal,
     getmethod,
     getself,
+    jumpunless,
+    label,
     leave,
     loadi,
     loadnil,
+    phi,
     setlocal,
 };
 
@@ -65,6 +56,15 @@ pub const Instruction = union(InstructionName) {
         out: Name,
     },
 
+    jumpunless: struct {
+        in: Name,
+        label: Name,
+    },
+
+    label: struct {
+        name: Name,
+    },
+
     leave: struct {
         out: Name,
         in: Name,
@@ -77,6 +77,12 @@ pub const Instruction = union(InstructionName) {
 
     loadnil: struct {
         out: Name,
+    },
+
+    phi: struct {
+        out: Name,
+        a: Name,
+        b: Name,
     },
 
     setlocal: struct {

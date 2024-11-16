@@ -47,12 +47,26 @@ const Scope = struct {
         return .{ .temp = .{ .name = name } };
     }
 
+    fn newLabel(self: *Scope) ir.Name {
+        const name = self.tmpname;
+        self.tmpname += 1;
+        return .{ .label = .{ .name = name } };
+    }
+
+    fn pushVoidInsn(self: *Scope, insn: ir.Instruction) !void {
+        const node = try self.allocator.create(ir.InstructionList.Node);
+        node.*.data = insn;
+        self.insns.append(node);
+    }
+
     fn pushInsn(self: *Scope, insn: ir.Instruction) !ir.Name {
         const node = try self.allocator.create(ir.InstructionList.Node);
         node.*.data = insn;
         self.insns.append(node);
 
         return switch (insn) {
+            .label => unreachable,
+            .jumpunless => unreachable,
             inline else => |payload| payload.out
         };
     }
@@ -85,6 +99,14 @@ const Scope = struct {
         return try self.pushInsn(.{ .getself = .{ .out = outreg } });
     }
 
+    pub fn pushJumpUnless(self: *Scope, in: ir.Name, label: ir.Name) !void {
+        try self.pushVoidInsn(.{ .jumpunless = .{ .in = in, .label = label } });
+    }
+
+    pub fn pushLabel(self: *Scope, name: ir.Name) !void {
+        try self.pushVoidInsn(.{ .label = .{ .name = name } });
+    }
+
     pub fn pushLeave(self: *Scope, in: ir.Name) !ir.Name {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .leave = .{ .out = outreg, .in = in } });
@@ -98,6 +120,11 @@ const Scope = struct {
     pub fn pushLoadNil(self: *Scope) !ir.Name {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .loadnil = .{ .out = outreg } });
+    }
+
+    pub fn pushPhi(self: *Scope, a: ir.Name, b: ir.Name) !ir.Name {
+        const outreg = self.newTempName();
+        return try self.pushInsn(.{ .phi = .{ .out = outreg, .a = a, .b = b } });
     }
 
     pub fn pushSetLocal(self: *Scope, name: ir.Name, val: ir.Name) !ir.Name {
@@ -154,6 +181,7 @@ pub const Compiler = struct {
         std.debug.print("compiling type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
         return switch (node.*.type) {
             c.PM_CALL_NODE => try cc.compileCallNode(@ptrCast(node)),
+            c.PM_ELSE_NODE => try cc.compileElseNode(@ptrCast(node)),
             c.PM_IF_NODE => try cc.compileIfNode(@ptrCast(node)),
             c.PM_INTEGER_NODE => try cc.compileIntegerNode(@ptrCast(node)),
             c.PM_LOCAL_VARIABLE_READ_NODE => try cc.compileLocalVariableReadNode(@ptrCast(node)),
@@ -202,6 +230,14 @@ pub const Compiler = struct {
         return try cc.pushCall(func, params);
     }
 
+    fn compileElseNode(cc: *Compiler, node: *const c.pm_else_node_t) !ir.Name {
+        if (node.*.statements) |stmt| {
+            return cc.compileNode(@ptrCast(stmt));
+        } else {
+            return try cc.pushLoadNil();
+        }
+    }
+
     fn compileScopeNode(cc: *Compiler, node: *prism.pm_scope_node_t) !*Scope {
         if (node.*.parameters != null) {
             return error.NotImplementedError;
@@ -221,9 +257,41 @@ pub const Compiler = struct {
     }
 
     fn compileIfNode(cc: *Compiler, node: *const c.pm_if_node_t) !ir.Name {
-        _ = cc;
-        _ = node;
-        return error.NotImplementedError;
+        const then_label = try cc.newLabel();
+        // const else_label = cc.newLabel();
+        const end_label = try cc.newLabel();
+
+        // If predicate is false, jump to then label
+        try cc.compilePredicate(node.*.predicate, then_label);
+
+        // Compile the true branch and get a return value
+        const true_branch = try cc.compileNode(@ptrCast(node.*.statements));
+
+        // Push the then label so the false case has a place to jump
+        try cc.pushLabel(then_label);
+
+        const false_branch = try cc.compileNode(@ptrCast(node.*.subsequent));
+        try cc.pushLabel(end_label);
+
+        // If anyone cares about the return value of this if statement, then
+        // we know for sure we need a phi node here.  Caller might ignore it,
+        // but that's up to them.
+        return try cc.pushPhi(true_branch, false_branch);
+    }
+
+    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, then_label: ir.Name) !void {
+        while (true) {
+            switch (node.*.type) {
+                c.PM_CALL_NODE => {
+                    const val = try cc.compileNode(node);
+                    return try cc.pushJumpUnless(val, then_label);
+                },
+                else => {
+                    std.debug.print("unknown cond type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
+                    return error.NotImplementedError;
+                }
+            }
+        }
     }
 
     fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t) !ir.Name {
@@ -281,6 +349,10 @@ pub const Compiler = struct {
         allocator.destroy(self);
     }
 
+    fn newLabel(self: *Compiler) !ir.Name {
+        return self.scope.?.newLabel();
+    }
+
     fn pushCall(self: *Compiler, func: ir.Name, params: std.ArrayList(ir.Name)) !ir.Name {
         return try self.scope.?.pushCall(func, params);
     }
@@ -297,6 +369,14 @@ pub const Compiler = struct {
         return try self.scope.?.pushGetself();
     }
 
+    fn pushJumpUnless(self: *Compiler, in: ir.Name, label: ir.Name) !void {
+        return try self.scope.?.pushJumpUnless(in, label);
+    }
+
+    fn pushLabel(self: *Compiler, label: ir.Name) !void {
+        try self.scope.?.pushLabel(label);
+    }
+
     fn pushLeave(self: *Compiler, in: ir.Name) !ir.Name {
         return try self.scope.?.pushLeave(in);
     }
@@ -307,6 +387,10 @@ pub const Compiler = struct {
 
     fn pushLoadNil(self: *Compiler) !ir.Name {
         return try self.scope.?.pushLoadNil();
+    }
+
+    fn pushPhi(self: *Compiler, a: ir.Name, b: ir.Name) !ir.Name {
+        return try self.scope.?.pushPhi(a, b);
     }
 
     fn pushSetLocal(self: *Compiler, name: ir.Name, val: ir.Name) !ir.Name {
@@ -439,25 +523,43 @@ test "compile local get w/ nil return" {
     try expectInstructionType(ir.Instruction.leave, insn.?.data);
 }
 
-// test "compile if statement" {
-//     const allocator = std.testing.allocator;
-// 
-//     // Create a new VM
-//     const machine = try vm.init(allocator);
-//     defer machine.deinit(allocator);
-// 
-//     const scope = try compileScope(allocator, machine, "5 < 7 ? 123 : 456");
-//     defer scope.deinit();
-// 
-//     var insn = scope.insns.first;
-//     try expectInstructionType(ir.Instruction.loadi, insn.?.data);
-// 
-//     insn = insn.?.next;
-//     try expectInstructionType(ir.Instruction.setlocal, insn.?.data);
-// 
-//     insn = insn.?.next;
-//     try expectInstructionType(ir.Instruction.loadnil, insn.?.data);
-// 
-//     insn = insn.?.next;
-//     try expectInstructionType(ir.Instruction.leave, insn.?.data);
-// }
+test "compile if statement" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "5 < 7 ? 123 : 456");
+    defer scope.deinit();
+
+    var insn = scope.insns.first;
+    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ir.Instruction.getmethod, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ir.Instruction.call, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ir.Instruction.jumpunless, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ir.Instruction.label, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ir.Instruction.label, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ir.Instruction.phi, insn.?.data);
+}
