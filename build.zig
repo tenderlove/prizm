@@ -86,6 +86,7 @@ pub fn build(b: *std.Build) void {
     // Import yazap
     const yazap = b.dependency("yazap", .{ });
     exe.root_module.addImport("yazap", yazap.module("yazap"));
+    lib.root_module.addImport("yazap", yazap.module("yazap"));
 
     exe.addIncludePath(b.path("prism/include"));
     addPrismSource(b, exe, "prism/src");
