@@ -28,7 +28,7 @@ pub fn main() !void {
 
     if (matches.subcommandMatches("run")) |runcmd_matches| {
         if (runcmd_matches.getSingleValue("FILE")) |f| {
-            std.log.info("run file {f}", .{ f });
+            std.log.info("run file {s}", .{ f });
             return;
         }
     }

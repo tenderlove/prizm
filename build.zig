@@ -83,13 +83,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Import yazap
+    const yazap = b.dependency("yazap", .{ });
+    exe.root_module.addImport("yazap", yazap.module("yazap"));
+
     exe.addIncludePath(b.path("prism/include"));
     addPrismSource(b, exe, "prism/src");
     exe.linkLibC();
-
-    // Import yazap
-    const yazap = b.dependency("yazap", .{});
-    exe.root_module.addImport("yazap", yazap.module("yazap"));
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
