@@ -523,7 +523,7 @@ test "compile local get w/ nil return" {
     try expectInstructionType(ir.Instruction.leave, insn.?.data);
 }
 
-test "compile if statement" {
+test "compile ternary statement" {
     const allocator = std.testing.allocator;
 
     // Create a new VM
