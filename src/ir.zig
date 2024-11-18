@@ -161,7 +161,6 @@ pub const Instruction = union(InstructionName) {
     },
 
     setlocal: struct {
-        out: Operand,
         name: Operand,
         val: Operand,
 
@@ -201,6 +200,7 @@ pub const Instruction = union(InstructionName) {
             .label => null,
             .jump => null,
             .jumpunless => null,
+            .setlocal => null,
             inline else => |payload| payload.out
         };
     }

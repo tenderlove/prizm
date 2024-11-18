@@ -68,6 +68,7 @@ const Scope = struct {
             .label => unreachable,
             .jump => unreachable,
             .jumpunless => unreachable,
+            .setlocal => unreachable,
             inline else => |payload| payload.out
         };
     }
@@ -127,9 +128,8 @@ const Scope = struct {
         return try self.pushInsn(.{ .phi = .{ .out = outreg, .a = a, .b = b } });
     }
 
-    pub fn pushSetLocal(self: *Scope, name: ir.Operand, val: ir.Operand) !ir.Operand {
-        const outreg = self.newTempName();
-        return try self.pushInsn(.{ .setlocal = .{ .out = outreg, .name = name, .val = val } });
+    pub fn pushSetLocal(self: *Scope, name: ir.Operand, val: ir.Operand) !void {
+        return try self.pushVoidInsn(.{ .setlocal = .{ .name = name, .val = val } });
     }
 
     pub fn init(alloc: std.mem.Allocator, parent: ?*Scope) !*Scope {
@@ -306,7 +306,9 @@ pub const Compiler = struct {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const name = try cc.scope.?.getLocalName(lvar_name);
 
-        return try cc.pushSetLocal(name, inreg);
+        try cc.pushSetLocal(name, inreg);
+
+        return inreg;
     }
 
     fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t) !ir.Operand {
@@ -386,7 +388,7 @@ pub const Compiler = struct {
         return try self.scope.?.pushPhi(a, b);
     }
 
-    fn pushSetLocal(self: *Compiler, name: ir.Operand, val: ir.Operand) !ir.Operand {
+    fn pushSetLocal(self: *Compiler, name: ir.Operand, val: ir.Operand) !void {
         return try self.scope.?.pushSetLocal(name, val);
     }
 
