@@ -64,53 +64,109 @@ pub const Instruction = union(InstructionName) {
         recv: Operand,
         name: Operand,
         params: std.ArrayList(Operand),
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            const total = self.params.items.len + 2;
+            var idx: usize = 2;
+            fun(self.name, 0, total);
+            fun(self.recv, 1, total);
+            for (self.params.items) |op| {
+                fun(op, idx, total);
+                idx += 1;
+            }
+        }
     },
 
     getlocal: struct {
         out: Operand,
         in: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            fun(self.in, 0, 1);
+        }
     },
 
     getself: struct {
         out: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            _ = self;
+            _ = fun;
+        }
     },
 
     jumpunless: struct {
         in: Operand,
         label: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            fun(self.in, 0, 2);
+            fun(self.label, 1, 2);
+        }
     },
 
     label: struct {
         name: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            fun(self.name, 0, 1);
+        }
     },
 
     leave: struct {
         out: Operand,
         in: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            fun(self.in, 0, 1);
+        }
     },
 
     loadi: struct {
         out: Operand,
         val: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            fun(self.val, 0, 1);
+        }
     },
 
     loadnil: struct {
         out: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            _ = self;
+            _ = fun;
+        }
     },
 
     phi: struct {
         out: Operand,
         a: Operand,
         b: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            fun(self.a, 0, 2);
+            fun(self.b, 1, 2);
+        }
     },
 
     setlocal: struct {
         out: Operand,
         name: Operand,
         val: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            fun(self.name, 0, 2);
+            fun(self.val, 1, 2);
+        }
     },
 
-    //pub fn eachParam(self: Instruction, fun: fn (Param)
+    pub fn eachOperand(self: Instruction, fun: fn (Operand, usize, usize) void) void {
+        switch(self) {
+            inline else => |p| p.eachOperand(fun)
+        }
+    }
 
     pub fn isJump(self: Instruction) bool {
         _ = self;
