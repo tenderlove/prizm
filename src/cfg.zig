@@ -93,7 +93,7 @@ test "basic block two instruction" {
         .data = .{ .call = .{
             .out = .{ .temp = .{ .name = 0 } },
             .recv = .{ .temp = .{ .name = 0 } },
-            .name = "hello",
+            .name = .{ .string = .{ .value = "hello" } },
             .params = std.ArrayList(ir.Operand).init(std.testing.allocator),
         }}
     };

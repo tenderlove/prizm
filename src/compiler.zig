@@ -66,6 +66,7 @@ const Scope = struct {
 
         return switch (insn) {
             .label => unreachable,
+            .jump => unreachable,
             .jumpunless => unreachable,
             inline else => |payload| payload.out
         };
@@ -89,6 +90,10 @@ const Scope = struct {
     pub fn pushGetself(self: *Scope) !ir.Operand {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .getself = .{ .out = outreg } });
+    }
+
+    pub fn pushJump(self: *Scope, label: ir.Operand) !void {
+        try self.pushVoidInsn(.{ .jump = .{ .label = label } });
     }
 
     pub fn pushJumpUnless(self: *Scope, in: ir.Operand, label: ir.Operand) !void {
@@ -252,6 +257,9 @@ pub const Compiler = struct {
         // Compile the true branch and get a return value
         const true_branch = try cc.compileNode(@ptrCast(node.*.statements));
 
+        // Jump to the end of the if statement
+        try cc.pushJump(end_label);
+
         // Push the then label so the false case has a place to jump
         try cc.pushLabel(then_label);
 
@@ -348,6 +356,10 @@ pub const Compiler = struct {
 
     fn pushGetself(self: *Compiler) !ir.Operand {
         return try self.scope.?.pushGetself();
+    }
+
+    fn pushJump(self: *Compiler, label: ir.Operand) !void {
+        try self.scope.?.pushJump(label);
     }
 
     fn pushJumpUnless(self: *Compiler, in: ir.Operand, label: ir.Operand) !void {
@@ -478,7 +490,7 @@ test "pushing instruction adds value" {
     try std.testing.expectEqual(1, scope.insns.len);
 
     const insn = scope.insns.first.?;
-    try std.testing.expectEqual(123, insn.data.loadi.val);
+    try std.testing.expectEqual(123, insn.data.loadi.val.immediate.value);
 }
 
 test "compile local get w/ nil return" {
@@ -528,6 +540,9 @@ test "compile ternary statement" {
 
     insn = insn.?.next;
     try expectInstructionType(ir.Instruction.loadi, insn.?.data);
+
+    insn = insn.?.next;
+    try expectInstructionType(ir.Instruction.jump, insn.?.data);
 
     insn = insn.?.next;
     try expectInstructionType(ir.Instruction.label, insn.?.data);

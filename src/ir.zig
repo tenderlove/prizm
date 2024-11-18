@@ -49,6 +49,7 @@ pub const InstructionName = enum {
     call,
     getlocal,
     getself,
+    jump,
     jumpunless,
     label,
     leave,
@@ -92,6 +93,14 @@ pub const Instruction = union(InstructionName) {
         pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
             _ = self;
             _ = fun;
+        }
+    },
+
+    jump: struct {
+        label: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize) void) void {
+            fun(self.label, 0, 1);
         }
     },
 
@@ -190,6 +199,7 @@ pub const Instruction = union(InstructionName) {
     pub fn outVar(self: Instruction) ?Operand {
         return switch (self) {
             .label => null,
+            .jump => null,
             .jumpunless => null,
             inline else => |payload| payload.out
         };
