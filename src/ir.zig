@@ -18,6 +18,23 @@ pub const Name = union(NameType) {
     label: struct { name: usize, },
     local: struct { name: usize, },
     temp: struct { name: usize, },
+
+    pub fn number(self: Name) usize {
+        return switch(self) {
+            inline else => |payload| payload.name
+        };
+    }
+
+    pub fn shortName(self: Name) [] const u8 {
+        return switch(self) {
+            .constant => "k",
+            .cvar => "c",
+            .ivar => "i",
+            .label => "L",
+            .local => "l",
+            .temp => "t",
+        };
+    }
 };
 
 pub const InstructionName = enum {
@@ -91,6 +108,8 @@ pub const Instruction = union(InstructionName) {
         val: Name,
     },
 
+    //pub fn eachParam(self: Instruction, fun: fn (Param)
+
     pub fn isJump(self: Instruction) bool {
         _ = self;
         return false;
@@ -109,6 +128,15 @@ pub const Instruction = union(InstructionName) {
             else => false
         };
     }
+
+    pub fn outVar(self: Instruction) ?Name {
+        return switch (self) {
+            .label => null,
+            .jumpunless => null,
+            inline else => |payload| payload.out
+        };
+    }
+
     pub fn deinit(self: Instruction) void {
         switch(self) {
             .call => |x| x.params.deinit(),

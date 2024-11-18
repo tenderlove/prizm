@@ -59,22 +59,22 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary(.{
-        .name = "prizm",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
+    // const lib = b.addStaticLibrary(.{
+    //     .name = "prizm",
+    //     // In this case the main source file is merely a path, however, in more
+    //     // complicated build scripts, this could be a generated file.
+    //     .root_source_file = b.path("src/main.zig"),
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
 
-    lib.addIncludePath(b.path("prism/include"));
-    lib.step.dependOn(&rake.step);
+    // lib.addIncludePath(b.path("prism/include"));
+    // lib.step.dependOn(&rake.step);
 
-    // This declares intent for the library to be installed into the standard
-    // location when the user invokes the "install" step (the default step when
-    // running `zig build`).
-    b.installArtifact(lib);
+    // // This declares intent for the library to be installed into the standard
+    // // location when the user invokes the "install" step (the default step when
+    // // running `zig build`).
+    // b.installArtifact(lib);
 
     const exe = b.addExecutable(.{
         .name = "prizm",
@@ -86,7 +86,7 @@ pub fn build(b: *std.Build) void {
     // Import yazap
     const yazap = b.dependency("yazap", .{ });
     exe.root_module.addImport("yazap", yazap.module("yazap"));
-    lib.root_module.addImport("yazap", yazap.module("yazap"));
+    // lib.root_module.addImport("yazap", yazap.module("yazap"));
 
     exe.addIncludePath(b.path("prism/include"));
     addPrismSource(b, exe, "prism/src");
