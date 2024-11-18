@@ -43,6 +43,11 @@ const IRPrinter = struct {
 
     pub fn printIR(insns: ir.InstructionList, maxname: usize, out: anytype) void {
         var node = insns.first;
+        out.print("t*: temporary variables\n", .{});
+        out.print("l*: local variables\n", .{});
+        out.print("L*: label\n", .{});
+        out.print("=======================\n", .{});
+
         const digits = countDigits(maxname);
 
         while (node) |unwrapped| {
