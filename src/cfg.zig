@@ -90,10 +90,11 @@ test "basic block two instruction" {
     list.append(&one);
 
     var two = ir.InstructionList.Node {
-        .data = .{ .getmethod = .{
+        .data = .{ .call = .{
             .out = .{ .temp = .{ .name = 0 } },
             .recv = .{ .temp = .{ .name = 0 } },
-            .ccid = 123,
+            .name = "hello",
+            .params = std.ArrayList(ir.Name).init(std.testing.allocator),
         }}
     };
     list.append(&two);

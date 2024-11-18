@@ -40,7 +40,6 @@ pub const Name = union(NameType) {
 pub const InstructionName = enum {
     call,
     getlocal,
-    getmethod,
     getself,
     jumpunless,
     label,
@@ -54,19 +53,14 @@ pub const InstructionName = enum {
 pub const Instruction = union(InstructionName) {
     call: struct {
         out: Name,
-        funcreg: Name,
+        recv: Name,
+        name: []const u8,
         params: std.ArrayList(Name),
     },
 
     getlocal: struct {
         out: Name,
         in: Name,
-    },
-
-    getmethod: struct {
-        out: Name,
-        recv: Name,
-        ccid: usize,
     },
 
     getself: struct {

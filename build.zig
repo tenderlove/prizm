@@ -132,6 +132,7 @@ pub fn build(b: *std.Build) void {
     lib_unit_tests.addIncludePath(b.path("prism/include"));
     addPrismSource(b, lib_unit_tests, "prism/src");
     lib_unit_tests.linkLibC();
+    lib_unit_tests.root_module.addImport("yazap", yazap.module("yazap"));
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
@@ -146,6 +147,7 @@ pub fn build(b: *std.Build) void {
     exe_unit_tests.addIncludePath(b.path("prism/include"));
     addPrismSource(b, exe_unit_tests, "prism/src");
     exe_unit_tests.linkLibC();
+    exe_unit_tests.root_module.addImport("yazap", yazap.module("yazap"));
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 

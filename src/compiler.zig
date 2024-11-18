@@ -71,11 +71,12 @@ const Scope = struct {
         };
     }
 
-    pub fn pushCall(self: *Scope, func: ir.Name, params: std.ArrayList(ir.Name)) !ir.Name {
+    pub fn pushCall(self: *Scope, recv: ir.Name, name: []const u8, params: std.ArrayList(ir.Name)) !ir.Name {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .call = .{
             .out = outreg,
-            .funcreg = func,
+            .recv = recv,
+            .name = name,
             .params = params,
         } });
     }
@@ -83,15 +84,6 @@ const Scope = struct {
     pub fn pushGetLocal(self: *Scope, in: ir.Name) !ir.Name {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .getlocal = .{ .out = outreg, .in = in } });
-    }
-
-    pub fn pushGetMethod(self: *Scope, recv: ir.Name, ccid: usize) !ir.Name {
-        const outreg = self.newTempName();
-        return try self.pushInsn(.{ .getmethod = .{
-            .out = outreg,
-            .recv = recv,
-            .ccid = ccid,
-        } });
     }
 
     pub fn pushGetself(self: *Scope) !ir.Name {
@@ -130,12 +122,6 @@ const Scope = struct {
     pub fn pushSetLocal(self: *Scope, name: ir.Name, val: ir.Name) !ir.Name {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .setlocal = .{ .out = outreg, .name = name, .val = val } });
-    }
-
-    pub fn pushCallCache(self: *Scope, name: []const u8, argc: usize) !usize {
-        const ccid = self.ccs.items.len;
-        try self.ccs.append(.{ .method_name = name, .argc = argc }); 
-        return ccid;
     }
 
     pub fn init(alloc: std.mem.Allocator, parent: ?*Scope) !*Scope {
@@ -223,11 +209,7 @@ pub const Compiler = struct {
         // Get a pooled string that's owned by the VM
         const name = try cc.vm.getString(method_name);
 
-        // Add an inline cache record
-        const ccid = try cc.scope.?.pushCallCache(name, arg_size);
-
-        const func = try cc.pushGetMethod(recv_op, ccid);
-        return try cc.pushCall(func, params);
+        return try cc.pushCall(recv_op, name, params);
     }
 
     fn compileElseNode(cc: *Compiler, node: *const c.pm_else_node_t) !ir.Name {
@@ -353,16 +335,12 @@ pub const Compiler = struct {
         return self.scope.?.newLabel();
     }
 
-    fn pushCall(self: *Compiler, func: ir.Name, params: std.ArrayList(ir.Name)) !ir.Name {
-        return try self.scope.?.pushCall(func, params);
+    fn pushCall(self: *Compiler, recv: ir.Name, name: []const u8, params: std.ArrayList(ir.Name)) !ir.Name {
+        return try self.scope.?.pushCall(recv, name, params);
     }
 
     fn pushGetLocal(self: *Compiler, in: ir.Name) !ir.Name {
         return try self.scope.?.pushGetLocal(in);
-    }
-
-    fn pushGetMethod(self: *Compiler, recv: ir.Name, ccid: usize) !ir.Name {
-        return try self.scope.?.pushGetMethod(recv, ccid);
     }
 
     fn pushGetself(self: *Compiler) !ir.Name {
@@ -538,9 +516,6 @@ test "compile ternary statement" {
 
     insn = insn.?.next;
     try expectInstructionType(ir.Instruction.loadi, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.getmethod, insn.?.data);
 
     insn = insn.?.next;
     try expectInstructionType(ir.Instruction.call, insn.?.data);
