@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub const InstructionList = std.DoublyLinkedList(Instruction);
 
-pub const NameType = enum {
+pub const OperandType = enum {
     constant,
     cvar,
     ivar,
@@ -11,7 +11,7 @@ pub const NameType = enum {
     temp,
 };
 
-pub const Name = union(NameType) {
+pub const Operand = union(OperandType) {
     constant: struct { name: usize, },
     cvar: struct { name: usize, },
     ivar: struct { name: usize, },
@@ -19,13 +19,13 @@ pub const Name = union(NameType) {
     local: struct { name: usize, },
     temp: struct { name: usize, },
 
-    pub fn number(self: Name) usize {
+    pub fn number(self: Operand) usize {
         return switch(self) {
             inline else => |payload| payload.name
         };
     }
 
-    pub fn shortName(self: Name) [] const u8 {
+    pub fn shortName(self: Operand) [] const u8 {
         return switch(self) {
             .constant => "k",
             .cvar => "c",
@@ -52,54 +52,54 @@ pub const InstructionName = enum {
 
 pub const Instruction = union(InstructionName) {
     call: struct {
-        out: Name,
-        recv: Name,
+        out: Operand,
+        recv: Operand,
         name: []const u8,
-        params: std.ArrayList(Name),
+        params: std.ArrayList(Operand),
     },
 
     getlocal: struct {
-        out: Name,
-        in: Name,
+        out: Operand,
+        in: Operand,
     },
 
     getself: struct {
-        out: Name,
+        out: Operand,
     },
 
     jumpunless: struct {
-        in: Name,
-        label: Name,
+        in: Operand,
+        label: Operand,
     },
 
     label: struct {
-        name: Name,
+        name: Operand,
     },
 
     leave: struct {
-        out: Name,
-        in: Name,
+        out: Operand,
+        in: Operand,
     },
 
     loadi: struct {
-        out: Name,
+        out: Operand,
         val: u64,
     },
 
     loadnil: struct {
-        out: Name,
+        out: Operand,
     },
 
     phi: struct {
-        out: Name,
-        a: Name,
-        b: Name,
+        out: Operand,
+        a: Operand,
+        b: Operand,
     },
 
     setlocal: struct {
-        out: Name,
-        name: Name,
-        val: Name,
+        out: Operand,
+        name: Operand,
+        val: Operand,
     },
 
     //pub fn eachParam(self: Instruction, fun: fn (Param)
@@ -123,7 +123,7 @@ pub const Instruction = union(InstructionName) {
         };
     }
 
-    pub fn outVar(self: Instruction) ?Name {
+    pub fn outVar(self: Instruction) ?Operand {
         return switch (self) {
             .label => null,
             .jumpunless => null,

@@ -94,7 +94,7 @@ test "basic block two instruction" {
             .out = .{ .temp = .{ .name = 0 } },
             .recv = .{ .temp = .{ .name = 0 } },
             .name = "hello",
-            .params = std.ArrayList(ir.Name).init(std.testing.allocator),
+            .params = std.ArrayList(ir.Operand).init(std.testing.allocator),
         }}
     };
     list.append(&two);

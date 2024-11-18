@@ -18,15 +18,15 @@ const Scope = struct {
 
     const LocalInfo = struct {
         name: []const u8,
-        irname: ir.Name,
+        irname: ir.Operand,
     };
 
-    pub fn getLocalName(self: *Scope, name: []const u8) !ir.Name {
+    pub fn getLocalName(self: *Scope, name: []const u8) !ir.Operand {
         const info = self.locals.get(name);
         if (info) |v| {
             return v.irname;
         } else {
-            const lname: ir.Name = .{
+            const lname: ir.Operand = .{
                 .local = .{
                     .name = self.tmpname,
                 }
@@ -41,13 +41,13 @@ const Scope = struct {
         }
     }
 
-    fn newTempName(self: *Scope) ir.Name {
+    fn newTempName(self: *Scope) ir.Operand {
         const name = self.tmpname;
         self.tmpname += 1;
         return .{ .temp = .{ .name = name } };
     }
 
-    fn newLabel(self: *Scope) ir.Name {
+    fn newLabel(self: *Scope) ir.Operand {
         const name = self.tmpname;
         self.tmpname += 1;
         return .{ .label = .{ .name = name } };
@@ -59,7 +59,7 @@ const Scope = struct {
         self.insns.append(node);
     }
 
-    fn pushInsn(self: *Scope, insn: ir.Instruction) !ir.Name {
+    fn pushInsn(self: *Scope, insn: ir.Instruction) !ir.Operand {
         const node = try self.allocator.create(ir.InstructionList.Node);
         node.*.data = insn;
         self.insns.append(node);
@@ -71,7 +71,7 @@ const Scope = struct {
         };
     }
 
-    pub fn pushCall(self: *Scope, recv: ir.Name, name: []const u8, params: std.ArrayList(ir.Name)) !ir.Name {
+    pub fn pushCall(self: *Scope, recv: ir.Operand, name: []const u8, params: std.ArrayList(ir.Operand)) !ir.Operand {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .call = .{
             .out = outreg,
@@ -81,45 +81,45 @@ const Scope = struct {
         } });
     }
 
-    pub fn pushGetLocal(self: *Scope, in: ir.Name) !ir.Name {
+    pub fn pushGetLocal(self: *Scope, in: ir.Operand) !ir.Operand {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .getlocal = .{ .out = outreg, .in = in } });
     }
 
-    pub fn pushGetself(self: *Scope) !ir.Name {
+    pub fn pushGetself(self: *Scope) !ir.Operand {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .getself = .{ .out = outreg } });
     }
 
-    pub fn pushJumpUnless(self: *Scope, in: ir.Name, label: ir.Name) !void {
+    pub fn pushJumpUnless(self: *Scope, in: ir.Operand, label: ir.Operand) !void {
         try self.pushVoidInsn(.{ .jumpunless = .{ .in = in, .label = label } });
     }
 
-    pub fn pushLabel(self: *Scope, name: ir.Name) !void {
+    pub fn pushLabel(self: *Scope, name: ir.Operand) !void {
         try self.pushVoidInsn(.{ .label = .{ .name = name } });
     }
 
-    pub fn pushLeave(self: *Scope, in: ir.Name) !ir.Name {
+    pub fn pushLeave(self: *Scope, in: ir.Operand) !ir.Operand {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .leave = .{ .out = outreg, .in = in } });
     }
 
-    pub fn pushLoadi(self: *Scope, val: u64) !ir.Name {
+    pub fn pushLoadi(self: *Scope, val: u64) !ir.Operand {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .loadi = .{ .out = outreg, .val = val } });
     }
 
-    pub fn pushLoadNil(self: *Scope) !ir.Name {
+    pub fn pushLoadNil(self: *Scope) !ir.Operand {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .loadnil = .{ .out = outreg } });
     }
 
-    pub fn pushPhi(self: *Scope, a: ir.Name, b: ir.Name) !ir.Name {
+    pub fn pushPhi(self: *Scope, a: ir.Operand, b: ir.Operand) !ir.Operand {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .phi = .{ .out = outreg, .a = a, .b = b } });
     }
 
-    pub fn pushSetLocal(self: *Scope, name: ir.Name, val: ir.Name) !ir.Name {
+    pub fn pushSetLocal(self: *Scope, name: ir.Operand, val: ir.Operand) !ir.Operand {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .setlocal = .{ .out = outreg, .name = name, .val = val } });
     }
@@ -163,7 +163,7 @@ pub const Compiler = struct {
         return compileScopeNode(cc, node);
     }
 
-    pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!ir.Name {
+    pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!ir.Operand {
         std.debug.print("compiling type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
         return switch (node.*.type) {
             c.PM_CALL_NODE => try cc.compileCallNode(@ptrCast(node)),
@@ -182,7 +182,7 @@ pub const Compiler = struct {
         };
     }
 
-    fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t) !ir.Name {
+    fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t) !ir.Operand {
         if (node) |n| {
             return try cc.compileNode(n);
         } else {
@@ -190,7 +190,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileCallNode(cc: *Compiler, node: *const c.pm_call_node_t) !ir.Name {
+    fn compileCallNode(cc: *Compiler, node: *const c.pm_call_node_t) !ir.Operand {
         const constant = c.pm_constant_pool_id_to_constant(&cc.parser.*.constant_pool, node.*.name);
 
         const method_name = constant.*.start[0..(constant.*.length)];
@@ -200,7 +200,7 @@ pub const Compiler = struct {
         const arg_size = node.*.arguments.*.arguments.size;
         const args = node.*.arguments.*.arguments.nodes[0..arg_size];
 
-        var params = std.ArrayList(ir.Name).init(cc.allocator);
+        var params = std.ArrayList(ir.Operand).init(cc.allocator);
 
         for (args) |arg| {
             try params.append(try cc.compileNode(arg));
@@ -212,7 +212,7 @@ pub const Compiler = struct {
         return try cc.pushCall(recv_op, name, params);
     }
 
-    fn compileElseNode(cc: *Compiler, node: *const c.pm_else_node_t) !ir.Name {
+    fn compileElseNode(cc: *Compiler, node: *const c.pm_else_node_t) !ir.Operand {
         if (node.*.statements) |stmt| {
             return cc.compileNode(@ptrCast(stmt));
         } else {
@@ -238,7 +238,7 @@ pub const Compiler = struct {
         return scope;
     }
 
-    fn compileIfNode(cc: *Compiler, node: *const c.pm_if_node_t) !ir.Name {
+    fn compileIfNode(cc: *Compiler, node: *const c.pm_if_node_t) !ir.Operand {
         const then_label = try cc.newLabel();
         // const else_label = cc.newLabel();
         const end_label = try cc.newLabel();
@@ -261,7 +261,7 @@ pub const Compiler = struct {
         return try cc.pushPhi(true_branch, false_branch);
     }
 
-    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, then_label: ir.Name) !void {
+    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, then_label: ir.Operand) !void {
         while (true) {
             switch (node.*.type) {
                 c.PM_CALL_NODE => {
@@ -276,7 +276,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t) !ir.Name {
+    fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t) !ir.Operand {
         if (node.*.value.values == null) {
             return try cc.pushLoadi(node.*.value.value);
         } else {
@@ -284,13 +284,13 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ir.Name {
+    fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ir.Operand {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const inreg = try cc.scope.?.getLocalName(lvar_name);
         return try cc.pushGetLocal(inreg);
     }
 
-    fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ir.Name {
+    fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ir.Operand {
         const inreg = try cc.compileNode(node.*.value);
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const name = try cc.scope.?.getLocalName(lvar_name);
@@ -298,7 +298,7 @@ pub const Compiler = struct {
         return try cc.pushSetLocal(name, inreg);
     }
 
-    fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t) !ir.Name {
+    fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t) !ir.Operand {
         const arguments = node.*.arguments;
 
         if (arguments) |arg| {
@@ -317,10 +317,10 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t) !ir.Name {
+    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t) !ir.Operand {
         const body = &node.*.body;
         const list = body.*.nodes[0..body.*.size];
-        var reg: ?ir.Name = null;
+        var reg: ?ir.Operand = null;
         for (list) |item| {
             reg = try cc.compileNode(item);
         }
@@ -331,47 +331,47 @@ pub const Compiler = struct {
         allocator.destroy(self);
     }
 
-    fn newLabel(self: *Compiler) !ir.Name {
+    fn newLabel(self: *Compiler) !ir.Operand {
         return self.scope.?.newLabel();
     }
 
-    fn pushCall(self: *Compiler, recv: ir.Name, name: []const u8, params: std.ArrayList(ir.Name)) !ir.Name {
+    fn pushCall(self: *Compiler, recv: ir.Operand, name: []const u8, params: std.ArrayList(ir.Operand)) !ir.Operand {
         return try self.scope.?.pushCall(recv, name, params);
     }
 
-    fn pushGetLocal(self: *Compiler, in: ir.Name) !ir.Name {
+    fn pushGetLocal(self: *Compiler, in: ir.Operand) !ir.Operand {
         return try self.scope.?.pushGetLocal(in);
     }
 
-    fn pushGetself(self: *Compiler) !ir.Name {
+    fn pushGetself(self: *Compiler) !ir.Operand {
         return try self.scope.?.pushGetself();
     }
 
-    fn pushJumpUnless(self: *Compiler, in: ir.Name, label: ir.Name) !void {
+    fn pushJumpUnless(self: *Compiler, in: ir.Operand, label: ir.Operand) !void {
         return try self.scope.?.pushJumpUnless(in, label);
     }
 
-    fn pushLabel(self: *Compiler, label: ir.Name) !void {
+    fn pushLabel(self: *Compiler, label: ir.Operand) !void {
         try self.scope.?.pushLabel(label);
     }
 
-    fn pushLeave(self: *Compiler, in: ir.Name) !ir.Name {
+    fn pushLeave(self: *Compiler, in: ir.Operand) !ir.Operand {
         return try self.scope.?.pushLeave(in);
     }
 
-    fn pushLoadi(self: *Compiler, val: u64) !ir.Name {
+    fn pushLoadi(self: *Compiler, val: u64) !ir.Operand {
         return try self.scope.?.pushLoadi(val);
     }
 
-    fn pushLoadNil(self: *Compiler) !ir.Name {
+    fn pushLoadNil(self: *Compiler) !ir.Operand {
         return try self.scope.?.pushLoadNil();
     }
 
-    fn pushPhi(self: *Compiler, a: ir.Name, b: ir.Name) !ir.Name {
+    fn pushPhi(self: *Compiler, a: ir.Operand, b: ir.Operand) !ir.Operand {
         return try self.scope.?.pushPhi(a, b);
     }
 
-    fn pushSetLocal(self: *Compiler, name: ir.Name, val: ir.Name) !ir.Name {
+    fn pushSetLocal(self: *Compiler, name: ir.Operand, val: ir.Operand) !ir.Operand {
         return try self.scope.?.pushSetLocal(name, val);
     }
 
