@@ -7,13 +7,12 @@ const c = @cImport({
     @cInclude("prism.h");
 });
 
-const Scope = struct {
+pub const Scope = struct {
     tmpname: u32,
     insns: ir.InstructionList,
     parent: ?*Scope,
     children: std.ArrayList(Scope),
     locals: std.StringHashMapUnmanaged(LocalInfo),
-    ccs: std.ArrayList(vm.CallCache),
     allocator: std.mem.Allocator,
 
     const LocalInfo = struct {
@@ -71,6 +70,15 @@ const Scope = struct {
             .setlocal => unreachable,
             inline else => |payload| payload.out
         };
+    }
+
+    pub fn pushDefineMethod(self: *Scope, name: []const u8, scope: *Scope) !ir.Operand {
+        const outreg = self.newTempName();
+        return try self.pushInsn(.{ .define_method = .{
+            .out = outreg,
+            .name = .{ .string = .{ .value = name } },
+            .func = .{ .scope = .{ .value = scope } },
+        } });
     }
 
     pub fn pushCall(self: *Scope, recv: ir.Operand, name: []const u8, params: std.ArrayList(ir.Operand)) !ir.Operand {
@@ -146,7 +154,6 @@ const Scope = struct {
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(Scope.LocalInfo){},
             .children = std.ArrayList(Scope).init(alloc),
-            .ccs = std.ArrayList(vm.CallCache).init(alloc),
             .allocator = alloc,
         };
 
@@ -154,7 +161,6 @@ const Scope = struct {
     }
 
     pub fn deinit(self: *Scope) void {
-        self.ccs.deinit();
         var it = self.insns.first;
         while (it) |insn| {
             it = insn.next;
@@ -179,6 +185,7 @@ pub const Compiler = struct {
     pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!ir.Operand {
         std.debug.print("compiling type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
         return switch (node.*.type) {
+            c.PM_DEF_NODE => try cc.compileDefNode(@ptrCast(node)),
             c.PM_CALL_NODE => try cc.compileCallNode(@ptrCast(node)),
             c.PM_ELSE_NODE => try cc.compileElseNode(@ptrCast(node)),
             c.PM_IF_NODE => try cc.compileIfNode(@ptrCast(node)),
@@ -203,11 +210,16 @@ pub const Compiler = struct {
         }
     }
 
+    fn compileDefNode(cc: *Compiler, node: *const c.pm_def_node_t) !ir.Operand {
+        const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        const scope_node = try prism.pmNewScopeNode(@ptrCast(node));
+        const method_scope = try cc.compileScopeNode(&scope_node);
+
+        return try cc.pushDefineMethod(method_name, method_scope);
+    }
+
     fn compileCallNode(cc: *Compiler, node: *const c.pm_call_node_t) !ir.Operand {
-        const constant = c.pm_constant_pool_id_to_constant(&cc.parser.*.constant_pool, node.*.name);
-
-        const method_name = constant.*.start[0..(constant.*.length)];
-
+        const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const recv_op = try cc.compileRecv(node.*.receiver);
 
         const arg_size = node.*.arguments.*.arguments.size;
@@ -233,7 +245,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileScopeNode(cc: *Compiler, node: *prism.pm_scope_node_t) !*Scope {
+    fn compileScopeNode(cc: *Compiler, node: *const prism.pm_scope_node_t) !*Scope {
         if (node.*.parameters != null) {
             return error.NotImplementedError;
         }
@@ -242,9 +254,12 @@ pub const Compiler = struct {
 
         cc.scope = scope;
 
-        if (node.*.body) |body| {
-            _ = try cc.compileNode(body);
-        }
+        const last_insn = if (node.*.body) |body|
+            try cc.compileNode(body)
+        else
+            try cc.pushLoadNil();
+
+        _ = try cc.pushLeave(last_insn);
 
         cc.scope = scope.parent;
 
@@ -349,6 +364,10 @@ pub const Compiler = struct {
 
     fn newLabel(self: *Compiler) !ir.Operand {
         return self.scope.?.newLabel();
+    }
+
+    fn pushDefineMethod(self: *Compiler, name: []const u8, scope: *Scope) !ir.Operand {
+        return try self.scope.?.pushDefineMethod(name, scope);
     }
 
     fn pushCall(self: *Compiler, recv: ir.Operand, name: []const u8, params: std.ArrayList(ir.Operand)) !ir.Operand {
@@ -459,14 +478,12 @@ test "compile local set" {
     const scope = try compileScope(allocator, machine, "foo = 5; foo");
     defer scope.deinit();
 
-    var insn = scope.insns.first;
-    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.setlocal, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.getlocal, insn.?.data);
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.mov,
+        ir.Instruction.getlocal,
+        ir.Instruction.leave,
+    }, scope.insns);
 }
 
 test "compile local get w/ return" {
@@ -479,14 +496,12 @@ test "compile local get w/ return" {
     const scope = try compileScope(allocator, machine, "foo = 5; return foo");
     defer scope.deinit();
 
-    var insn = scope.insns.first;
-    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.setlocal, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.getlocal, insn.?.data);
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.mov,
+        ir.Instruction.getlocal,
+        ir.Instruction.leave,
+    }, scope.insns);
 }
 
 test "pushing instruction adds value" {
@@ -512,17 +527,20 @@ test "compile local get w/ nil return" {
     const scope = try compileScope(allocator, machine, "foo = 5; return");
     defer scope.deinit();
 
-    var insn = scope.insns.first;
-    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.mov,
+        ir.Instruction.loadnil,
+        ir.Instruction.leave,
+    }, scope.insns);
+}
 
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.setlocal, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.loadnil, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.leave, insn.?.data);
+fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.InstructionList) !void {
+    var insn = actual.first;
+    for (expected) |expected_insn| {
+        try expectInstructionType(expected_insn, insn.?.data);
+        insn = insn.?.next;
+    }
 }
 
 test "compile ternary statement" {
@@ -535,33 +553,34 @@ test "compile ternary statement" {
     const scope = try compileScope(allocator, machine, "5 < 7 ? 123 : 456");
     defer scope.deinit();
 
-    var insn = scope.insns.first;
-    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.loadi,
+        ir.Instruction.call,
+        ir.Instruction.jumpunless,
+        ir.Instruction.loadi,
+        ir.Instruction.jump,
+        ir.Instruction.label,
+        ir.Instruction.loadi,
+        ir.Instruction.label,
+        ir.Instruction.phi,
+    }, scope.insns);
+}
 
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
+test "compile def method" {
+    const allocator = std.testing.allocator;
 
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.call, insn.?.data);
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
 
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.jumpunless, insn.?.data);
+    const scope = try compileScope(allocator, machine, "def foo; end");
+    defer scope.deinit();
 
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
+    const insn = scope.insns.first;
+    try expectInstructionType(ir.Instruction.define_method, insn.?.data);
 
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.jump, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.label, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.loadi, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.label, insn.?.data);
-
-    insn = insn.?.next;
-    try expectInstructionType(ir.Instruction.phi, insn.?.data);
+    const method_scope: *Scope = insn.?.data.define_method.func.scope.value;
+    const method_insns = method_scope.insns;
+    try std.testing.expectEqual(2, method_insns.len);
 }

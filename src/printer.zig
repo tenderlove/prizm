@@ -10,6 +10,7 @@ const IRPrinter = struct {
         switch(op) {
             .immediate => |p| out.print("{d}", .{ p.value }),
             .string => |p| out.print("{s}", .{ p.value }),
+            .scope => |_| out.print("$", .{ }),
             inline else => |payload| out.print("{s}{d}", .{ op.shortName(), payload.name }),
         }
 

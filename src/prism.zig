@@ -8,7 +8,7 @@ pub const pm_scope_node_t = extern struct {
     base: c.pm_node_t,
     previous: ?*const pm_scope_node_t,
     ast_node: ?*const c.pm_node_t,
-    parameters: ?*const c.pm_node_t,
+    parameters: ?*const c.pm_parameters_node_t,
     body: ?*const c.pm_node_t,
     locals: c.pm_constant_id_list_t,
 };
@@ -452,6 +452,12 @@ pub fn scope_node_init(node: *const c.pm_node_t, scope: *pm_scope_node_t, prev: 
     scope.*.ast_node = node;
 
     switch (node.*.type) {
+        c.PM_DEF_NODE => {
+            const cast: *const c.pm_def_node_t = @ptrCast(node);
+            scope.*.parameters = cast.*.parameters;
+            scope.*.body = cast.*.body;
+            scope.*.locals = cast.*.locals;
+        },
         c.PM_PROGRAM_NODE => {
             const cast: *const c.pm_program_node_t = @ptrCast(node);
             scope.*.body = @ptrCast(cast.*.statements);
@@ -502,7 +508,7 @@ pub const Prism = struct {
     }
 };
 
-pub fn pmNewScopeNode(node: *c.pm_node_t) !pm_scope_node_t {
+pub fn pmNewScopeNode(node: *const c.pm_node_t) !pm_scope_node_t {
     var scope_node: pm_scope_node_t = .{
         .base = .{
             .type = c.PM_SCOPE_NODE,

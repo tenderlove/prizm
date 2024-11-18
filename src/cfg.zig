@@ -136,5 +136,5 @@ test "CFG from compiler" {
     try std.testing.expectEqual(ir.InstructionName.loadi, start_type);
 
     const finish_type: ir.InstructionName = cfg.finish.data;
-    try std.testing.expectEqual(ir.InstructionName.call, finish_type);
+    try std.testing.expectEqual(ir.InstructionName.leave, finish_type);
 }

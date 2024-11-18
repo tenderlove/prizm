@@ -1,4 +1,5 @@
 const std = @import("std");
+const cmp = @import("compiler.zig");
 
 pub const InstructionList = std.DoublyLinkedList(Instruction);
 
@@ -9,6 +10,7 @@ pub const OperandType = enum {
     ivar,
     label,
     local,
+    scope,
     string,
     temp,
 };
@@ -20,6 +22,7 @@ pub const Operand = union(OperandType) {
     ivar: struct { name: usize, },
     label: struct { name: usize, },
     local: struct { name: usize, },
+    scope: struct { value: *cmp.Scope, },
     string: struct { value: []const u8, },
     temp: struct { name: usize, },
 
@@ -27,6 +30,7 @@ pub const Operand = union(OperandType) {
         return switch(self) {
             .immediate => unreachable,
             .string => unreachable,
+            .scope => unreachable,
             inline else => |payload| payload.name
         };
     }
@@ -40,6 +44,7 @@ pub const Operand = union(OperandType) {
             .label => "L",
             .local => "l",
             .string => "s",
+            .scope => "S",
             .temp => "t",
         };
     }
@@ -47,6 +52,7 @@ pub const Operand = union(OperandType) {
 
 pub const InstructionName = enum {
     call,
+    define_method,
     getlocal,
     getself,
     jump,
@@ -76,6 +82,17 @@ pub const Instruction = union(InstructionName) {
                 fun(op, idx, total, ctx);
                 idx += 1;
             }
+        }
+    },
+
+    define_method: struct {
+        out: Operand,
+        name: Operand,
+        func: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, anytype) void, ctx: anytype) void {
+            fun(self.name, 0, 2, ctx);
+            fun(self.func, 1, 2, ctx);
         }
     },
 
@@ -214,6 +231,7 @@ pub const Instruction = union(InstructionName) {
     pub fn deinit(self: Instruction) void {
         switch(self) {
             .call => |x| x.params.deinit(),
+            .define_method => |x| x.func.scope.value.deinit(),
             else  => {}
         }
     }
