@@ -123,6 +123,11 @@ const Scope = struct {
         return try self.pushInsn(.{ .loadnil = .{ .out = outreg } });
     }
 
+    pub fn pushMov(self: *Scope, out: ir.Operand, in: ir.Operand) !ir.Operand {
+        try self.pushVoidInsn(.{ .mov = .{ .out = out, .in = in } });
+        return out;
+    }
+
     pub fn pushPhi(self: *Scope, a: ir.Operand, b: ir.Operand) !ir.Operand {
         const outreg = self.newTempName();
         return try self.pushInsn(.{ .phi = .{ .out = outreg, .a = a, .b = b } });
@@ -306,9 +311,7 @@ pub const Compiler = struct {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const name = try cc.scope.?.getLocalName(lvar_name);
 
-        try cc.pushSetLocal(name, inreg);
-
-        return inreg;
+        return try cc.pushMov(name, inreg);
     }
 
     fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t) !ir.Operand {
@@ -382,6 +385,10 @@ pub const Compiler = struct {
 
     fn pushLoadNil(self: *Compiler) !ir.Operand {
         return try self.scope.?.pushLoadNil();
+    }
+
+    fn pushMov(self: *Compiler, a: ir.Operand, b: ir.Operand) !ir.Operand {
+        return try self.scope.?.pushMov(a, b);
     }
 
     fn pushPhi(self: *Compiler, a: ir.Operand, b: ir.Operand) !ir.Operand {

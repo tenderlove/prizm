@@ -2,27 +2,27 @@ const std = @import("std");
 const ir = @import("ir.zig");
 
 const IRPrinter = struct {
-    fn printOperand(op: ir.Operand, idx: usize, nitems: usize) void {
+    fn printOperand(op: ir.Operand, idx: usize, nitems: usize, out: anytype) void {
         switch(op) {
-            .immediate => |p| std.debug.print("{d}", .{ p.value }),
-            .string => |p| std.debug.print("{s}", .{ p.value }),
-            inline else => |payload| std.debug.print("{s}{d}", .{ op.shortName(), payload.name }),
+            .immediate => |p| out.print("{d}", .{ p.value }),
+            .string => |p| out.print("{s}", .{ p.value }),
+            inline else => |payload| out.print("{s}{d}", .{ op.shortName(), payload.name }),
         }
 
         if (nitems > 0 and idx != (nitems - 1)) {
-            std.debug.print(", ", .{});
+            out.print(", ", .{});
         }
 
         return;
     }
 
-    fn printInsnParams(insn: ir.Instruction) void {
-        std.debug.print("(", .{});
-        insn.eachOperand(printOperand);
-        std.debug.print(")", .{});
+    fn printInsnParams(insn: ir.Instruction, out: anytype) void {
+        out.print("(", .{});
+        insn.eachOperand(printOperand, out);
+        out.print(")", .{});
     }
 
-    fn printInsnName(insn: ir.Instruction) void {
+    fn printInsnName(insn: ir.Instruction, out: anytype) void {
         comptime var maxlen: usize = 0;
         comptime for (@typeInfo(ir.InstructionName).@"enum".fields) |field| {
             const name_len = field.name.len;
@@ -30,7 +30,7 @@ const IRPrinter = struct {
                 maxlen = name_len;
             }
         };
-        std.debug.print("{[value]s: <[width]}", .{ .value = @tagName(insn), .width = maxlen + 1, });
+        out.print("{[value]s: <[width]}", .{ .value = @tagName(insn), .width = maxlen + 1, });
     }
 
     fn countDigits(num: usize) u32 {
@@ -41,32 +41,32 @@ const IRPrinter = struct {
         }
     }
 
-    pub fn printIR(insns: ir.InstructionList, maxname: usize) void {
+    pub fn printIR(insns: ir.InstructionList, maxname: usize, out: anytype) void {
         var node = insns.first;
         const digits = countDigits(maxname);
 
         while (node) |unwrapped| {
             switch(unwrapped.data) {
                 .label => |insn| {
-                    std.debug.print("{s}{d}:\n", .{
+                    out.print("{s}{d}:\n", .{
                         insn.name.shortName(),
                         insn.name.label.name
                     });
                 },
                 else => {
                     if (unwrapped.data.outVar()) |n| {
-                        std.debug.print("  {s}", .{ n.shortName()});
-                        std.debug.print("{[value]d: <[width]}<- ", .{
+                        out.print("  {s}", .{ n.shortName()});
+                        out.print("{[value]d: <[width]}<- ", .{
                             .value = n.number(),
                             .width = digits + 1,
                         });
                     } else {
-                        std.debug.print("   {[value]s: <[width]}   ", .{ .value = "", .width = digits + 1, });
+                        out.print("   {[value]s: <[width]}   ", .{ .value = "", .width = digits + 1, });
                     }
 
-                    printInsnName(unwrapped.data);
-                    printInsnParams(unwrapped.data);
-                    std.debug.print("\n", .{ });
+                    printInsnName(unwrapped.data, out);
+                    printInsnParams(unwrapped.data, out);
+                    out.print("\n", .{ });
                 }
             }
 
@@ -75,6 +75,6 @@ const IRPrinter = struct {
     }
 };
 
-pub fn printIR(insns: ir.InstructionList, maxname: usize) void {
-    IRPrinter.printIR(insns, maxname);
+pub fn printIR(insns: ir.InstructionList, maxname: usize, out: anytype) void {
+    IRPrinter.printIR(insns, maxname, out);
 }
