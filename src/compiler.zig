@@ -76,7 +76,7 @@ const Scope = struct {
         return try self.pushInsn(.{ .call = .{
             .out = outreg,
             .recv = recv,
-            .name = name,
+            .name = .{ .string = .{ .value = name } },
             .params = params,
         } });
     }
@@ -106,7 +106,10 @@ const Scope = struct {
 
     pub fn pushLoadi(self: *Scope, val: u64) !ir.Operand {
         const outreg = self.newTempName();
-        return try self.pushInsn(.{ .loadi = .{ .out = outreg, .val = val } });
+        return try self.pushInsn(.{ .loadi = .{
+            .out = outreg,
+            .val = .{ .immediate = .{ .value = val } }
+        }});
     }
 
     pub fn pushLoadNil(self: *Scope) !ir.Operand {

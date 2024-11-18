@@ -5,22 +5,28 @@ pub const InstructionList = std.DoublyLinkedList(Instruction);
 pub const OperandType = enum {
     constant,
     cvar,
+    immediate,
     ivar,
     label,
     local,
+    string,
     temp,
 };
 
 pub const Operand = union(OperandType) {
     constant: struct { name: usize, },
     cvar: struct { name: usize, },
+    immediate: struct { value: u64, },
     ivar: struct { name: usize, },
     label: struct { name: usize, },
     local: struct { name: usize, },
+    string: struct { value: []const u8, },
     temp: struct { name: usize, },
 
     pub fn number(self: Operand) usize {
         return switch(self) {
+            .immediate => unreachable,
+            .string => unreachable,
             inline else => |payload| payload.name
         };
     }
@@ -29,9 +35,11 @@ pub const Operand = union(OperandType) {
         return switch(self) {
             .constant => "k",
             .cvar => "c",
+            .immediate => "I",
             .ivar => "i",
             .label => "L",
             .local => "l",
+            .string => "s",
             .temp => "t",
         };
     }
@@ -54,7 +62,7 @@ pub const Instruction = union(InstructionName) {
     call: struct {
         out: Operand,
         recv: Operand,
-        name: []const u8,
+        name: Operand,
         params: std.ArrayList(Operand),
     },
 
@@ -83,7 +91,7 @@ pub const Instruction = union(InstructionName) {
 
     loadi: struct {
         out: Operand,
-        val: u64,
+        val: Operand,
     },
 
     loadnil: struct {
