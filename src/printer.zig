@@ -3,6 +3,10 @@ const ir = @import("ir.zig");
 
 const IRPrinter = struct {
     fn printOperand(op: ir.Operand, idx: usize, nitems: usize, out: anytype) void {
+        if (idx == 0) {
+            out.print("(", .{});
+        }
+
         switch(op) {
             .immediate => |p| out.print("{d}", .{ p.value }),
             .string => |p| out.print("{s}", .{ p.value }),
@@ -13,13 +17,15 @@ const IRPrinter = struct {
             out.print(", ", .{});
         }
 
+        if (idx == (nitems - 1)) {
+            out.print(")", .{});
+        }
+
         return;
     }
 
     fn printInsnParams(insn: ir.Instruction, out: anytype) void {
-        out.print("(", .{});
         insn.eachOperand(printOperand, out);
-        out.print(")", .{});
     }
 
     fn printInsnName(insn: ir.Instruction, out: anytype) void {
