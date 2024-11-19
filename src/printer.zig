@@ -49,7 +49,7 @@ const IRPrinter = struct {
         }
     }
 
-    fn printInsn(insn: ir.Instruction, digits: anytype, out: anytype) void {
+    fn printInsn(insn: ir.Instruction, digits: u32, out: anytype) void {
         if (insn.outVar()) |n| {
             out.print("  {s}", .{ n.shortName()});
             out.print("{[value]d: <[width]}<- ", .{
@@ -77,7 +77,7 @@ const IRPrinter = struct {
             out.print("L*: label\n", .{});
             out.print("=======================\n", .{});
 
-            const digits = countDigits(scope.tmpname);
+            const digits = countDigits(work_scope.tmpname);
 
             while (node) |unwrapped| {
                 switch(unwrapped.data) {

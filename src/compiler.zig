@@ -9,6 +9,7 @@ const c = @cImport({
 
 pub const Scope = struct {
     tmpname: u32,
+    localname: u32 = 0,
     param_size: usize = 0,
     local_storage: usize = 0,
     insns: ir.InstructionList,
@@ -29,14 +30,14 @@ pub const Scope = struct {
         } else {
             const lname: ir.Operand = .{
                 .local = .{
-                    .name = self.tmpname,
+                    .name = self.localname,
                 }
             };
             const li: LocalInfo = .{
                 .name = name,
                 .irname = lname,
             };
-            self.tmpname += 1;
+            self.localname += 1;
             try self.locals.put(self.allocator, name, li);
             return lname;
         }
@@ -343,7 +344,8 @@ pub const Compiler = struct {
     fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ir.Operand {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const inreg = try cc.scope.?.getLocalName(lvar_name);
-        return try cc.pushGetLocal(inreg);
+        // return try cc.pushGetLocal(inreg);
+        return inreg;
     }
 
     fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ir.Operand {
@@ -506,7 +508,6 @@ test "compile local set" {
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
         ir.Instruction.mov,
-        ir.Instruction.getlocal,
         ir.Instruction.leave,
     }, scope.insns);
 }
@@ -524,7 +525,6 @@ test "compile local get w/ return" {
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
         ir.Instruction.mov,
-        ir.Instruction.getlocal,
         ir.Instruction.leave,
     }, scope.insns);
 }
