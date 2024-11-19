@@ -8,7 +8,7 @@ pub const pm_scope_node_t = extern struct {
     base: c.pm_node_t,
     previous: ?*const pm_scope_node_t,
     ast_node: ?*const c.pm_node_t,
-    parameters: ?*const c.pm_parameters_node_t,
+    parameters: ?*const c.pm_node_t,
     body: ?*const c.pm_node_t,
     locals: c.pm_constant_id_list_t,
 };
@@ -454,7 +454,7 @@ pub fn scope_node_init(node: *const c.pm_node_t, scope: *pm_scope_node_t, prev: 
     switch (node.*.type) {
         c.PM_DEF_NODE => {
             const cast: *const c.pm_def_node_t = @ptrCast(node);
-            scope.*.parameters = cast.*.parameters;
+            scope.*.parameters = @ptrCast(cast.*.parameters);
             scope.*.body = cast.*.body;
             scope.*.locals = cast.*.locals;
         },

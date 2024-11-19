@@ -9,6 +9,8 @@ const c = @cImport({
 
 pub const Scope = struct {
     tmpname: u32,
+    param_size: usize = 0,
+    local_storage: usize = 0,
     insns: ir.InstructionList,
     parent: ?*Scope,
     children: std.ArrayList(Scope),
@@ -246,11 +248,34 @@ pub const Compiler = struct {
     }
 
     fn compileScopeNode(cc: *Compiler, node: *const prism.pm_scope_node_t) !*Scope {
-        if (node.*.parameters != null) {
-            return error.NotImplementedError;
+        const locals = node.locals;
+        var optionals_list: ?*const c.pm_node_list_t = null;
+        var requireds_list: ?*const c.pm_node_list_t = null;
+        var keywords_list: ?*const c.pm_node_list_t = null;
+        var posts_list: ?*const c.pm_node_list_t = null;
+
+        const parameters_node: ?*const c.pm_parameters_node_t = if (node.*.parameters) |params|
+            switch(c.PM_NODE_TYPE(params)) {
+                c.PM_PARAMETERS_NODE => @ptrCast(params),
+                else => {
+                    std.debug.print("unknown parameter type {s}\n", .{c.pm_node_type_to_str(params.*.type)});
+                    return error.NotImplementedError;
+                }
+            }
+        else
+            null;
+
+        if (parameters_node) |params| {
+            optionals_list = &params.*.optionals;
+            requireds_list = &params.*.requireds;
+            keywords_list = &params.*.keywords;
+            posts_list = &params.*.posts;
         }
 
         const scope = try Scope.init(cc.allocator, cc.scope);
+
+        scope.local_storage = locals.size;
+        scope.param_size = if (requireds_list) |l| l.*.size else 0;
 
         cc.scope = scope;
 
@@ -583,4 +608,26 @@ test "compile def method" {
     const method_scope: *Scope = insn.?.data.define_method.func.scope.value;
     const method_insns = method_scope.insns;
     try std.testing.expectEqual(2, method_insns.len);
+    try std.testing.expectEqual(0, method_scope.param_size);
+    try std.testing.expectEqual(0, method_scope.local_storage);
+}
+
+test "compile def method 2 params" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "def foo(a, b); end");
+    defer scope.deinit();
+
+    const insn = scope.insns.first;
+    try expectInstructionType(ir.Instruction.define_method, insn.?.data);
+
+    const method_scope: *Scope = insn.?.data.define_method.func.scope.value;
+    const method_insns = method_scope.insns;
+    try std.testing.expectEqual(2, method_insns.len);
+    try std.testing.expectEqual(2, method_scope.param_size);
+    try std.testing.expectEqual(2, method_scope.local_storage);
 }
