@@ -1,5 +1,6 @@
 const std = @import("std");
 const ir = @import("ir.zig");
+const cmp = @import("compiler.zig");
 
 const IRPrinter = struct {
     fn printOperand(op: ir.Operand, idx: usize, nitems: usize, out: anytype) void {
@@ -48,45 +49,59 @@ const IRPrinter = struct {
         }
     }
 
-    pub fn printIR(insns: ir.InstructionList, maxname: usize, out: anytype) void {
-        var node = insns.first;
-        out.print("t*: temporary variables\n", .{});
-        out.print("l*: local variables\n", .{});
-        out.print("L*: label\n", .{});
-        out.print("=======================\n", .{});
+    fn printInsn(insn: ir.Instruction, digits: anytype, out: anytype) void {
+        if (insn.outVar()) |n| {
+            out.print("  {s}", .{ n.shortName()});
+            out.print("{[value]d: <[width]}<- ", .{
+                .value = n.number(),
+                .width = digits + 1,
+            });
+        } else {
+            out.print("   {[value]s: <[width]}   ", .{ .value = "", .width = digits + 1, });
+        }
 
-        const digits = countDigits(maxname);
+        printInsnName(insn, out);
+        printInsnParams(insn, out);
+        out.print("\n", .{ });
+    }
 
-        while (node) |unwrapped| {
-            switch(unwrapped.data) {
-                .label => |insn| {
-                    out.print("{s}{d}:\n", .{
-                        insn.name.shortName(),
-                        insn.name.label.name
-                    });
-                },
-                else => {
-                    if (unwrapped.data.outVar()) |n| {
-                        out.print("  {s}", .{ n.shortName()});
-                        out.print("{[value]d: <[width]}<- ", .{
-                            .value = n.number(),
-                            .width = digits + 1,
+    pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: anytype) !void {
+        var work = std.ArrayList(*cmp.Scope).init(alloc);
+        defer work.deinit();
+        try work.append(scope);
+
+        while (work.popOrNull()) |work_scope| {
+            var node = work_scope.insns.first;
+            out.print("t*: temporary variables\n", .{});
+            out.print("l*: local variables\n", .{});
+            out.print("L*: label\n", .{});
+            out.print("=======================\n", .{});
+
+            const digits = countDigits(scope.tmpname);
+
+            while (node) |unwrapped| {
+                switch(unwrapped.data) {
+                    .label => |insn| {
+                        out.print("{s}{d}:\n", .{
+                            insn.name.shortName(),
+                            insn.name.label.name
                         });
-                    } else {
-                        out.print("   {[value]s: <[width]}   ", .{ .value = "", .width = digits + 1, });
+                    },
+                    .define_method => |insn| {
+                        try work.append(insn.func.scope.value);
+                        printInsn(unwrapped.data, digits, out);
+                    },
+                    else => {
+                        printInsn(unwrapped.data, digits, out);
                     }
-
-                    printInsnName(unwrapped.data, out);
-                    printInsnParams(unwrapped.data, out);
-                    out.print("\n", .{ });
                 }
-            }
 
-            node = unwrapped.next;
+                node = unwrapped.next;
+            }
         }
     }
 };
 
-pub fn printIR(insns: ir.InstructionList, maxname: usize, out: anytype) void {
-    IRPrinter.printIR(insns, maxname, out);
+pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: anytype) !void {
+    try IRPrinter.printIR(alloc, scope, out);
 }

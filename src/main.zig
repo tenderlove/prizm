@@ -99,7 +99,7 @@ pub fn main() !void {
             defer cc.deinit(allocator);
 
             const scope = try cc.compile(&scope_node);
-            printer.printIR(scope.insns, scope.tmpname, std.debug);
+            try printer.printIR(allocator, scope, std.debug);
 
             return;
         }
