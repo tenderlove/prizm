@@ -10,12 +10,14 @@ const c = @cImport({
 pub const Scope = struct {
     tmpname: u32,
     localname: u32 = 0,
+    paramname: u32 = 0,
     param_size: usize = 0,
     local_storage: usize = 0,
     insns: ir.InstructionList,
     parent: ?*Scope,
     children: std.ArrayList(Scope),
     locals: std.StringHashMapUnmanaged(LocalInfo),
+    params: std.StringHashMapUnmanaged(LocalInfo),
     allocator: std.mem.Allocator,
 
     const LocalInfo = struct {
@@ -40,6 +42,35 @@ pub const Scope = struct {
             self.localname += 1;
             try self.locals.put(self.allocator, name, li);
             return lname;
+        }
+    }
+
+    pub fn registerParamName(self: *Scope, name: []const u8) !ir.Operand {
+        const info = self.params.get(name);
+        if (info) |v| {
+            return v.irname;
+        } else {
+            const lname: ir.Operand = .{
+                .param = .{
+                    .name = self.paramname,
+                }
+            };
+            const li: LocalInfo = .{
+                .name = name,
+                .irname = lname,
+            };
+            self.paramname += 1;
+            try self.params.put(self.allocator, name, li);
+            return lname;
+        }
+    }
+
+    pub fn getParamName(self: *Scope, name: []const u8) ?ir.Operand {
+        const info = self.params.get(name);
+        if (info) |v| {
+            return v.irname;
+        } else {
+            return null;
         }
     }
 
@@ -156,6 +187,7 @@ pub const Scope = struct {
             .insns = ir.InstructionList { },
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(Scope.LocalInfo){},
+            .params = std.StringHashMapUnmanaged(Scope.LocalInfo){},
             .children = std.ArrayList(Scope).init(alloc),
             .allocator = alloc,
         };
@@ -171,6 +203,7 @@ pub const Scope = struct {
             self.allocator.destroy(insn);
         }
         self.locals.deinit(self.allocator);
+        self.params.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 };
@@ -186,7 +219,7 @@ pub const Compiler = struct {
     }
 
     pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!ir.Operand {
-        std.debug.print("compiling type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
+        // std.debug.print("compiling type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
         return switch (node.*.type) {
             c.PM_DEF_NODE => try cc.compileDefNode(@ptrCast(node)),
             c.PM_CALL_NODE => try cc.compileCallNode(@ptrCast(node)),
@@ -268,17 +301,33 @@ pub const Compiler = struct {
         else
             null;
 
-        if (parameters_node) |params| {
-            optionals_list = &params.*.optionals;
-            requireds_list = &params.*.requireds;
-            keywords_list = &params.*.keywords;
-            posts_list = &params.*.posts;
-        }
-
         const scope = try Scope.init(cc.allocator, cc.scope);
 
+        if (parameters_node) |params| {
+            requireds_list = &params.*.requireds;
+            optionals_list = &params.*.optionals;
+            keywords_list = &params.*.keywords;
+            posts_list = &params.*.posts;
+
+            if (requireds_list) |listptr| {
+                scope.param_size = listptr.*.size;
+                const list = listptr.*.nodes[0..scope.param_size];
+                for (list) |param| {
+                    switch(c.PM_NODE_TYPE(param)) {
+                        c.PM_REQUIRED_PARAMETER_NODE => {
+                            const cast: *const c.pm_required_parameter_node_t = @ptrCast(param);
+                            _ = try scope.registerParamName(try cc.vm.getString(cc.stringFromId(cast.*.name)));
+                        },
+                        else => {
+                            std.debug.print("unknown parameter type {s}\n", .{c.pm_node_type_to_str(param.*.type)});
+                            return error.NotImplementedError;
+                        }
+                    }
+                }
+            }
+        }
+
         scope.local_storage = locals.size;
-        scope.param_size = if (requireds_list) |l| l.*.size else 0;
 
         cc.scope = scope;
 
@@ -345,9 +394,12 @@ pub const Compiler = struct {
 
     fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ir.Operand {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
-        const inreg = try cc.scope.?.getLocalName(lvar_name);
-        // return try cc.pushGetLocal(inreg);
-        return inreg;
+        const param = cc.scope.?.getParamName(lvar_name);
+        if (param) |paramreg| {
+            return paramreg;
+        } else {
+            return try cc.scope.?.getLocalName(lvar_name);
+        }
     }
 
     fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t) !ir.Operand {
@@ -667,4 +719,29 @@ test "compile def method 2 params 3 locals" {
     const method_scope: *Scope = insn.?.data.define_method.func.scope.value;
     try std.testing.expectEqual(2, method_scope.param_size);
     try std.testing.expectEqual(5, method_scope.local_storage);
+}
+
+test "method returns param" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "def foo(a); a; end");
+    defer scope.deinit();
+
+    const insn = scope.insns.first;
+    try expectInstructionType(ir.Instruction.define_method, insn.?.data);
+
+    const method_scope: *Scope = insn.?.data.define_method.func.scope.value;
+
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.leave,
+    }, method_scope.insns);
+
+    const inop = method_scope.insns.first.?.data.leave.in;
+    const inop_type: ir.OperandType = inop;
+    try std.testing.expectEqual(ir.OperandType.param, inop_type);
+    try std.testing.expectEqual(0, inop.param.name);
 }
