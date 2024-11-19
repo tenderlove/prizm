@@ -225,13 +225,15 @@ pub const Compiler = struct {
         const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const recv_op = try cc.compileRecv(node.*.receiver);
 
-        const arg_size = node.*.arguments.*.arguments.size;
-        const args = node.*.arguments.*.arguments.nodes[0..arg_size];
-
         var params = std.ArrayList(ir.Operand).init(cc.allocator);
 
-        for (args) |arg| {
-            try params.append(try cc.compileNode(arg));
+        if (node.*.arguments) |argnode| {
+            const arg_size = argnode.*.arguments.size;
+            const args = argnode.*.arguments.nodes[0..arg_size];
+
+            for (args) |arg| {
+                try params.append(try cc.compileNode(arg));
+            }
         }
 
         // Get a pooled string that's owned by the VM
@@ -610,6 +612,23 @@ test "compile def method" {
     try std.testing.expectEqual(2, method_insns.len);
     try std.testing.expectEqual(0, method_scope.param_size);
     try std.testing.expectEqual(0, method_scope.local_storage);
+}
+
+test "compile call no params" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "foo");
+    defer scope.deinit();
+
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.getself,
+        ir.Instruction.call,
+        ir.Instruction.leave,
+    }, scope.insns);
 }
 
 test "compile def method 2 params" {
