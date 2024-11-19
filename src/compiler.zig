@@ -631,3 +631,21 @@ test "compile def method 2 params" {
     try std.testing.expectEqual(2, method_scope.param_size);
     try std.testing.expectEqual(2, method_scope.local_storage);
 }
+
+test "compile def method 2 params 3 locals" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "def foo(a, b); c = 123; d = a; e = d + b; end");
+    defer scope.deinit();
+
+    const insn = scope.insns.first;
+    try expectInstructionType(ir.Instruction.define_method, insn.?.data);
+
+    const method_scope: *Scope = insn.?.data.define_method.func.scope.value;
+    try std.testing.expectEqual(2, method_scope.param_size);
+    try std.testing.expectEqual(5, method_scope.local_storage);
+}
