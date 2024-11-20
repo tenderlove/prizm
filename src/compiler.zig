@@ -8,11 +8,13 @@ const c = @cImport({
 });
 
 pub const Scope = struct {
-    tmpname: u32,
-    localname: u32 = 0,
-    paramname: u32 = 0,
+    tmp_id: u32 = 0,
+    local_id: u32 = 0,
+    param_id: u32 = 0,
+    label_id: u32 = 0,
     param_size: usize = 0,
     local_storage: usize = 0,
+    scope_id: u32,
     insns: ir.InstructionList,
     parent: ?*Scope,
     children: std.ArrayList(Scope),
@@ -25,6 +27,17 @@ pub const Scope = struct {
         irname: ir.Operand,
     };
 
+    pub fn maxId(self: *Scope) u32 {
+        const list = [_]u32 { self.tmp_id, self.local_id, self.param_id, self.label_id }; 
+        var max: u32 = 0;
+        for (list) |item| {
+            if (item > max) {
+                max = item;
+            }
+        }
+        return max;
+    }
+
     pub fn getLocalName(self: *Scope, name: []const u8) !ir.Operand {
         const info = self.locals.get(name);
         if (info) |v| {
@@ -32,14 +45,14 @@ pub const Scope = struct {
         } else {
             const lname: ir.Operand = .{
                 .local = .{
-                    .name = self.localname,
+                    .name = self.local_id,
                 }
             };
             const li: LocalInfo = .{
                 .name = name,
                 .irname = lname,
             };
-            self.localname += 1;
+            self.local_id += 1;
             try self.locals.put(self.allocator, name, li);
             return lname;
         }
@@ -52,14 +65,14 @@ pub const Scope = struct {
         } else {
             const lname: ir.Operand = .{
                 .param = .{
-                    .name = self.paramname,
+                    .name = self.param_id,
                 }
             };
             const li: LocalInfo = .{
                 .name = name,
                 .irname = lname,
             };
-            self.paramname += 1;
+            self.param_id += 1;
             try self.params.put(self.allocator, name, li);
             return lname;
         }
@@ -75,14 +88,14 @@ pub const Scope = struct {
     }
 
     fn newTempName(self: *Scope) ir.Operand {
-        const name = self.tmpname;
-        self.tmpname += 1;
+        const name = self.tmp_id;
+        self.tmp_id += 1;
         return .{ .temp = .{ .name = name } };
     }
 
     fn newLabel(self: *Scope) ir.Operand {
-        const name = self.tmpname;
-        self.tmpname += 1;
+        const name = self.label_id;
+        self.label_id += 1;
         return .{ .label = .{ .name = name } };
     }
 
@@ -179,12 +192,12 @@ pub const Scope = struct {
         return try self.pushVoidInsn(.{ .setlocal = .{ .name = name, .val = val } });
     }
 
-    pub fn init(alloc: std.mem.Allocator, parent: ?*Scope) !*Scope {
+    pub fn init(alloc: std.mem.Allocator, id: u32, parent: ?*Scope) !*Scope {
         const scope = try alloc.create(Scope);
 
         scope.* = Scope {
-            .tmpname = 0,
             .insns = ir.InstructionList { },
+            .scope_id = id,
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(Scope.LocalInfo){},
             .params = std.StringHashMapUnmanaged(Scope.LocalInfo){},
@@ -213,6 +226,7 @@ pub const Compiler = struct {
     scope: ?*Scope,
     allocator: std.mem.Allocator,
     vm: *vm.VM,
+    scope_ids: u32 = 0,
 
     pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{EmptyInstructionSequence, NotImplementedError, OutOfMemory}!*Scope {
         return compileScopeNode(cc, node);
@@ -301,7 +315,8 @@ pub const Compiler = struct {
         else
             null;
 
-        const scope = try Scope.init(cc.allocator, cc.scope);
+        const scope = try Scope.init(cc.allocator, cc.scope_ids, cc.scope);
+        cc.scope_ids += 1;
 
         if (parameters_node) |params| {
             requireds_list = &params.*.requireds;
@@ -586,7 +601,7 @@ test "compile local get w/ return" {
 test "pushing instruction adds value" {
     const allocator = std.testing.allocator;
 
-    const scope = try Scope.init(allocator, null);
+    const scope = try Scope.init(allocator, 0, null);
     defer scope.deinit();
 
     _ = try scope.pushLoadi(123);

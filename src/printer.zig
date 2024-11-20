@@ -11,7 +11,7 @@ const IRPrinter = struct {
         switch(op) {
             .immediate => |p| out.print("{d}", .{ p.value }),
             .string => |p| out.print("{s}", .{ p.value }),
-            .scope => |_| out.print("$", .{ }),
+            .scope => |payload| out.print("{s}{d}", .{ op.shortName(), payload.value.scope_id }),
             inline else => |payload| out.print("{s}{d}", .{ op.shortName(), payload.name }),
         }
 
@@ -70,14 +70,17 @@ const IRPrinter = struct {
         defer work.deinit();
         try work.append(scope);
 
+        out.print("t*: temporary variables\n", .{});
+        out.print("l*: local variables\n", .{});
+        out.print("L*: label\n", .{});
+        out.print("p*: parameter\n", .{});
+        out.print("\n", .{ });
+
         while (work.popOrNull()) |work_scope| {
             var node = work_scope.insns.first;
-            out.print("t*: temporary variables\n", .{});
-            out.print("l*: local variables\n", .{});
-            out.print("L*: label\n", .{});
-            out.print("=======================\n", .{});
+            out.print("= Scope: {d} ======================\n", .{ work_scope.scope_id });
 
-            const digits = countDigits(work_scope.tmpname);
+            const digits = countDigits(work_scope.maxId());
 
             while (node) |unwrapped| {
                 switch(unwrapped.data) {
@@ -98,6 +101,8 @@ const IRPrinter = struct {
 
                 node = unwrapped.next;
             }
+
+            out.print("\n", .{ });
         }
     }
 };
