@@ -111,23 +111,11 @@ test "basic block two instruction" {
 test "CFG from compiler" {
     const allocator = std.testing.allocator;
 
-    const parser = try prism.Prism.newParserCtx(allocator);
-    defer parser.deinit();
-    const code = "5 + 7";
-    parser.init(code, code.len, null);
-    const root = parser.parse();
-    defer parser.nodeDestroy(root);
-
-    var scope_node = try prism.pmNewScopeNode(root);
-
     // Create a new VM
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    // Compile the parse tree
-    const cc = try compiler.init(allocator, machine, parser);
-    defer cc.deinit(allocator);
-    const scope = try cc.compile(&scope_node);
+    const scope = try compileScope(allocator, machine, "5 + 7");
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope.insns);
@@ -138,3 +126,36 @@ test "CFG from compiler" {
     const finish_type: ir.InstructionName = cfg.finish.data;
     try std.testing.expectEqual(ir.InstructionName.leave, finish_type);
 }
+
+test "if statement" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "6 ? 7 : 8");
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope.insns);
+    defer allocator.destroy(cfg);
+    const start_type: ir.InstructionName = cfg.start.data;
+    try std.testing.expectEqual(ir.InstructionName.loadi, start_type);
+
+    const finish_type: ir.InstructionName = cfg.finish.data;
+    try std.testing.expectEqual(ir.InstructionName.leave, finish_type);
+}
+
+fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*compiler.Scope {
+    const parser = try prism.Prism.newParserCtx(allocator);
+    defer parser.deinit();
+    parser.init(code, code.len, null);
+    const root = parser.parse();
+    defer parser.nodeDestroy(root);
+
+    var scope_node = try prism.pmNewScopeNode(root);
+    const cc = try compiler.init(allocator, machine, parser);
+    defer cc.deinit(allocator);
+    return try cc.compile(&scope_node);
+}
+

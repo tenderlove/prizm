@@ -364,32 +364,56 @@ pub const Compiler = struct {
         const end_label = try cc.newLabel();
 
         // If predicate is false, jump to then label
-        try cc.compilePredicate(node.*.predicate, then_label);
+        const predicate = try cc.compilePredicate(node.*.predicate, then_label);
 
-        // Compile the true branch and get a return value
-        const true_branch = try cc.compileNode(@ptrCast(node.*.statements));
+        switch (predicate) {
+            .always_true => {
+                // Compile the true branch and get a return value
+                return try cc.compileNode(@ptrCast(node.*.statements));
+            },
+            .always_false => {
+                // Compile the true branch and get a return value
+                return try cc.compileNode(@ptrCast(node.*.subsequent));
+            },
+            .unknown => {
+                // Compile the true branch and get a return value
+                const true_branch = try cc.compileNode(@ptrCast(node.*.statements));
+                // Jump to the end of the if statement
+                try cc.pushJump(end_label);
 
-        // Jump to the end of the if statement
-        try cc.pushJump(end_label);
+                // Push the then label so the false case has a place to jump
+                try cc.pushLabel(then_label);
 
-        // Push the then label so the false case has a place to jump
-        try cc.pushLabel(then_label);
+                const false_branch = try cc.compileNode(@ptrCast(node.*.subsequent));
+                try cc.pushLabel(end_label);
 
-        const false_branch = try cc.compileNode(@ptrCast(node.*.subsequent));
-        try cc.pushLabel(end_label);
-
-        // If anyone cares about the return value of this if statement, then
-        // we know for sure we need a phi node here.  Caller might ignore it,
-        // but that's up to them.
-        return try cc.pushPhi(true_branch, false_branch);
+                // If anyone cares about the return value of this if statement, then
+                // we know for sure we need a phi node here.  Caller might ignore it,
+                // but that's up to them.
+                return try cc.pushPhi(true_branch, false_branch);
+            }
+        }
     }
 
-    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, then_label: ir.Operand) !void {
+    const PredicateType = enum {
+        always_true,
+        always_false,
+        unknown,
+    };
+
+    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, then_label: ir.Operand) !PredicateType {
         while (true) {
             switch (node.*.type) {
                 c.PM_CALL_NODE => {
                     const val = try cc.compileNode(node);
-                    return try cc.pushJumpUnless(val, then_label);
+                    try cc.pushJumpUnless(val, then_label);
+                    return PredicateType.unknown;
+                },
+                c.PM_INTEGER_NODE => {
+                    return PredicateType.always_true;
+                },
+                c.PM_NIL_NODE, c.PM_FALSE_NODE => {
+                    return PredicateType.always_false;
                 },
                 else => {
                     std.debug.print("unknown cond type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
@@ -762,4 +786,61 @@ test "method returns param" {
     const inop_type: ir.OperandType = inop;
     try std.testing.expectEqual(ir.OperandType.param, inop_type);
     try std.testing.expectEqual(0, inop.param.name);
+}
+
+test "always true ternary" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "6 ? 7 : 8");
+    defer scope.deinit();
+
+    try std.testing.expectEqual(2, scope.insns.len);
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.leave,
+    }, scope.insns);
+
+    try std.testing.expectEqual(7, scope.insns.first.?.data.loadi.val.immediate.value);
+}
+
+test "always false ternary" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "false ? 7 : 8");
+    defer scope.deinit();
+
+    try std.testing.expectEqual(2, scope.insns.len);
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.leave,
+    }, scope.insns);
+
+    try std.testing.expectEqual(8, scope.insns.first.?.data.loadi.val.immediate.value);
+}
+
+test "always nil ternary" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "nil ? 7 : 8");
+    defer scope.deinit();
+
+    try std.testing.expectEqual(2, scope.insns.len);
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.leave,
+    }, scope.insns);
+
+    try std.testing.expectEqual(8, scope.insns.first.?.data.loadi.val.immediate.value);
 }
