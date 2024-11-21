@@ -141,7 +141,6 @@ pub const Instruction = union(InstructionName) {
     },
 
     leave: struct {
-        out: Operand,
         in: Operand,
 
         pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, anytype) void, ctx: anytype) void {
@@ -227,6 +226,7 @@ pub const Instruction = union(InstructionName) {
             .jump => null,
             .jumpunless => null,
             .setlocal => null,
+            .leave => null,
             inline else => |payload| payload.out
         };
     }

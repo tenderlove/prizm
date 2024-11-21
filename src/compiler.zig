@@ -115,6 +115,7 @@ pub const Scope = struct {
             .jump => unreachable,
             .jumpunless => unreachable,
             .setlocal => unreachable,
+            .leave => unreachable,
             inline else => |payload| payload.out
         };
     }
@@ -160,9 +161,8 @@ pub const Scope = struct {
         try self.pushVoidInsn(.{ .label = .{ .name = name } });
     }
 
-    pub fn pushLeave(self: *Scope, in: ir.Operand) !ir.Operand {
-        const outreg = self.newTempName();
-        return try self.pushInsn(.{ .leave = .{ .out = outreg, .in = in } });
+    pub fn pushLeave(self: *Scope, in: ir.Operand) !void {
+        try self.pushVoidInsn(.{ .leave = .{ .in= in } });
     }
 
     pub fn pushLoadi(self: *Scope, val: u64) !ir.Operand {
@@ -437,10 +437,13 @@ pub const Compiler = struct {
                 return error.NotImplementedError;
             } else {
                 const inreg = try cc.compileNode(args[0]);
-                return try cc.pushLeave(inreg);
+                try cc.pushLeave(inreg);
+                return inreg;
             }
         } else {
-            return try cc.pushLeave(try cc.pushLoadNil());
+            const nil = try cc.pushLoadNil();
+            try cc.pushLeave(nil);
+            return nil;
         }
     }
 
@@ -490,7 +493,7 @@ pub const Compiler = struct {
         try self.scope.?.pushLabel(label);
     }
 
-    fn pushLeave(self: *Compiler, in: ir.Operand) !ir.Operand {
+    fn pushLeave(self: *Compiler, in: ir.Operand) !void {
         return try self.scope.?.pushLeave(in);
     }
 
