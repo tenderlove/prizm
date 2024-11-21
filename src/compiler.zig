@@ -404,7 +404,7 @@ pub const Compiler = struct {
     fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, then_label: ir.Operand) !PredicateType {
         while (true) {
             switch (node.*.type) {
-                c.PM_CALL_NODE => {
+                c.PM_CALL_NODE, c.PM_LOCAL_VARIABLE_READ_NODE => {
                     const val = try cc.compileNode(node);
                     try cc.pushJumpUnless(val, then_label);
                     return PredicateType.unknown;
@@ -843,4 +843,32 @@ test "always nil ternary" {
     }, scope.insns);
 
     try std.testing.expectEqual(8, scope.insns.first.?.data.loadi.val.immediate.value);
+}
+
+test "local ternary" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "def foo(x); x ? 7 : 8; end");
+    defer scope.deinit();
+
+    const method_scope: *Scope = scope.insns.first.?.data.define_method.func.scope.value;
+
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.jumpunless,
+        ir.Instruction.loadi,
+        ir.Instruction.jump,
+        ir.Instruction.label,
+        ir.Instruction.loadi,
+        ir.Instruction.label,
+        ir.Instruction.phi,
+        ir.Instruction.leave,
+    }, method_scope.insns);
+
+    // Make sure the jump instruction is testing the first parameter
+    const test_reg = method_scope.insns.first.?.data.jumpunless.in;
+    try std.testing.expectEqual(0, test_reg.param.name);
 }
