@@ -21,6 +21,7 @@ pub const Scope = struct {
     locals: std.StringHashMapUnmanaged(LocalInfo),
     params: std.StringHashMapUnmanaged(LocalInfo),
     allocator: std.mem.Allocator,
+    arena: std.heap.ArenaAllocator,
 
     const LocalInfo = struct {
         name: []const u8,
@@ -100,13 +101,13 @@ pub const Scope = struct {
     }
 
     fn pushVoidInsn(self: *Scope, insn: ir.Instruction) !void {
-        const node = try self.allocator.create(ir.InstructionList.Node);
+        const node = try self.arena.allocator().create(ir.InstructionList.Node);
         node.*.data = insn;
         self.insns.append(node);
     }
 
     fn pushInsn(self: *Scope, insn: ir.Instruction) !ir.Operand {
-        const node = try self.allocator.create(ir.InstructionList.Node);
+        const node = try self.arena.allocator().create(ir.InstructionList.Node);
         node.*.data = insn;
         self.insns.append(node);
 
@@ -203,6 +204,7 @@ pub const Scope = struct {
             .params = std.StringHashMapUnmanaged(Scope.LocalInfo){},
             .children = std.ArrayList(Scope).init(alloc),
             .allocator = alloc,
+            .arena = std.heap.ArenaAllocator.init(alloc),
         };
 
         return scope;
@@ -213,10 +215,10 @@ pub const Scope = struct {
         while (it) |insn| {
             it = insn.next;
             insn.data.deinit();
-            self.allocator.destroy(insn);
         }
         self.locals.deinit(self.allocator);
         self.params.deinit(self.allocator);
+        self.arena.deinit();
         self.allocator.destroy(self);
     }
 };
