@@ -111,7 +111,7 @@ pub const Scope = struct {
         self.insns.append(node);
 
         return switch (insn) {
-            .label => unreachable,
+            .putlabel => unreachable,
             .jump => unreachable,
             .jumpunless => unreachable,
             .setlocal => unreachable,
@@ -158,7 +158,7 @@ pub const Scope = struct {
     }
 
     pub fn pushLabel(self: *Scope, name: ir.Operand) !void {
-        try self.pushVoidInsn(.{ .label = .{ .name = name } });
+        try self.pushVoidInsn(.{ .putlabel = .{ .name = name } });
     }
 
     pub fn pushLeave(self: *Scope, in: ir.Operand) !void {
@@ -681,9 +681,9 @@ test "compile ternary statement" {
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
         ir.Instruction.jump,
-        ir.Instruction.label,
+        ir.Instruction.putlabel,
         ir.Instruction.loadi,
-        ir.Instruction.label,
+        ir.Instruction.putlabel,
         ir.Instruction.phi,
     }, scope.insns);
 }
@@ -861,9 +861,9 @@ test "local ternary" {
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
         ir.Instruction.jump,
-        ir.Instruction.label,
+        ir.Instruction.putlabel,
         ir.Instruction.loadi,
-        ir.Instruction.label,
+        ir.Instruction.putlabel,
         ir.Instruction.phi,
         ir.Instruction.leave,
     }, method_scope.insns);

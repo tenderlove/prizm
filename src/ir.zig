@@ -60,12 +60,12 @@ pub const InstructionName = enum {
     getself,
     jump,
     jumpunless,
-    label,
     leave,
     loadi,
     loadnil,
     mov,
     phi,
+    putlabel,
     setlocal,
 };
 
@@ -132,14 +132,6 @@ pub const Instruction = union(InstructionName) {
         }
     },
 
-    label: struct {
-        name: Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, anytype) void, ctx: anytype) void {
-            fun(self.name, 0, 1, ctx);
-        }
-    },
-
     leave: struct {
         in: Operand,
 
@@ -183,6 +175,14 @@ pub const Instruction = union(InstructionName) {
         }
     },
 
+    putlabel: struct {
+        name: Operand,
+
+        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, anytype) void, ctx: anytype) void {
+            fun(self.name, 0, 1, ctx);
+        }
+    },
+
     setlocal: struct {
         name: Operand,
         val: Operand,
@@ -206,6 +206,13 @@ pub const Instruction = union(InstructionName) {
         };
     }
 
+    pub fn isLabel(self: Instruction) bool {
+        return switch(self) {
+            .putlabel => true,
+            else => false
+        };
+    }
+
     pub fn isReturn(self: Instruction) bool {
         return switch(self) {
             .leave => true,
@@ -220,9 +227,17 @@ pub const Instruction = union(InstructionName) {
         };
     }
 
+    pub fn jumpTarget(self: Instruction) Operand {
+        return switch(self) {
+            .jump => |payload| payload.label,
+            .jumpunless => |payload| payload.label,
+            else => unreachable
+        };
+    }
+
     pub fn outVar(self: Instruction) ?Operand {
         return switch (self) {
-            .label => null,
+            .putlabel => null,
             .jump => null,
             .jumpunless => null,
             .setlocal => null,

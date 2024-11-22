@@ -84,7 +84,7 @@ const IRPrinter = struct {
 
             while (node) |unwrapped| {
                 switch(unwrapped.data) {
-                    .label => |insn| {
+                    .putlabel => |insn| {
                         out.print("{s}{d}:\n", .{
                             insn.name.shortName(),
                             insn.name.label.name
