@@ -79,53 +79,39 @@ pub const Scope = struct {
     }
 
     fn newLocal(self: *Scope) !*ir.Operand {
-        const opnd = try self.arena.allocator().create(ir.Operand);
         const name = self.local_id;
         self.local_id += 1;
-        opnd.* = .{ .local = .{ .name = name } };
-        return opnd;
+        return try ir.Operand.initLocal(self.arena.allocator(), name);
     }
 
     fn newParam(self: *Scope) !*ir.Operand {
-        const opnd = try self.arena.allocator().create(ir.Operand);
         const name = self.param_id;
         self.param_id += 1;
-        opnd.* = .{ .param = .{ .name = name } };
-        return opnd;
+        return try ir.Operand.initParam(self.arena.allocator(), name);
     }
 
     fn newScope(self: *Scope, scope: *Scope) !*ir.Operand {
-        const opnd = try self.arena.allocator().create(ir.Operand);
-        opnd.* = .{ .scope = .{ .value = scope } };
-        return opnd;
+        return try ir.Operand.initScope(self.arena.allocator(), scope);
     }
 
     fn newString(self: *Scope, name: []const u8) !*ir.Operand {
-        const opnd = try self.arena.allocator().create(ir.Operand);
-        opnd.* = .{ .string = .{ .value = name } };
-        return opnd;
+        return try ir.Operand.initString(self.arena.allocator(), name);
     }
 
     fn newTempName(self: *Scope) !*ir.Operand {
-        const opnd = try self.arena.allocator().create(ir.Operand);
         const name = self.tmp_id;
         self.tmp_id += 1;
-        opnd.* = .{ .temp = .{ .name = name } };
-        return opnd;
+        return try ir.Operand.initTemp(self.arena.allocator(), name);
     }
 
     fn newImmediate(self: *Scope, value: u64) !*ir.Operand {
-        const opnd = try self.arena.allocator().create(ir.Operand);
-        opnd.* = .{ .immediate = .{ .value = value } };
-        return opnd;
+        return try ir.Operand.initImmediate(self.arena.allocator(), value);
     }
 
     fn newLabel(self: *Scope) !*ir.Operand {
-        const opnd = try self.arena.allocator().create(ir.Operand);
         const name = self.label_id;
         self.label_id += 1;
-        opnd.* = .{ .label = .{ .name = name } };
-        return opnd;
+        return try ir.Operand.initLabel(self.arena.allocator(), name);
     }
 
     fn pushVoidInsn(self: *Scope, insn: ir.Instruction) !void {

@@ -28,6 +28,48 @@ pub const Operand = union(OperandType) {
     string: struct { value: []const u8, },
     temp: struct { name: usize, },
 
+    pub fn initImmediate(alloc: std.mem.Allocator, value: anytype) !*Operand {
+        const opnd = try alloc.create(Operand);
+        opnd.* = .{ .immediate = .{ .value = value } };
+        return opnd;
+    }
+
+    pub fn initLabel(alloc: std.mem.Allocator, name: anytype) !*Operand {
+        const opnd = try alloc.create(Operand);
+        opnd.* = .{ .label = .{ .name = name } };
+        return opnd;
+    }
+
+    pub fn initLocal(alloc: std.mem.Allocator, name: anytype) !*Operand {
+        const opnd = try alloc.create(Operand);
+        opnd.* = .{ .local = .{ .name = name } };
+        return opnd;
+    }
+
+    pub fn initParam(alloc: std.mem.Allocator, name: anytype) !*Operand {
+        const opnd = try alloc.create(Operand);
+        opnd.* = .{ .param = .{ .name = name } };
+        return opnd;
+    }
+
+    pub fn initScope(alloc: std.mem.Allocator, scope: anytype) !*Operand {
+        const opnd = try alloc.create(Operand);
+        opnd.* = .{ .scope = .{ .value = scope } };
+        return opnd;
+    }
+
+    pub fn initString(alloc: std.mem.Allocator, value: anytype) !*Operand {
+        const opnd = try alloc.create(Operand);
+        opnd.* = .{ .string = .{ .value = value } };
+        return opnd;
+    }
+
+    pub fn initTemp(alloc: std.mem.Allocator, name: anytype) !*Operand {
+        const opnd = try alloc.create(Operand);
+        opnd.* = .{ .temp = .{ .name = name } };
+        return opnd;
+    }
+
     pub fn number(self: Operand) usize {
         return switch(self) {
             .immediate => unreachable,
