@@ -61,6 +61,55 @@ pub const CFG = struct {
         }
     }
 
+    const DepthFirstIterator = struct {
+        seen: std.AutoHashMap(u64, *BasicBlock),
+        work: std.ArrayList(*BasicBlock),
+        mem: std.mem.Allocator,
+
+        pub fn next(self: *DepthFirstIterator) !?*BasicBlock {
+            while (self.work.popOrNull()) |bb| {
+                if (!self.seen.contains(bb.block.name)) {
+                    try self.seen.put(bb.block.name, bb);
+                    if (bb.block.out2) |bb2| { try self.work.append(bb2); }
+                    if (bb.block.out) |bb1| { try self.work.append(bb1); }
+                    return bb;
+                }
+            }
+
+            return null;
+        }
+
+        pub fn deinit(self: *DepthFirstIterator) void {
+            self.seen.deinit();
+            self.work.deinit();
+            self.mem.destroy(self);
+        }
+    };
+
+    pub fn depthFirstIterator(self: *CFG) !*DepthFirstIterator {
+        const iter = try self.mem.create(DepthFirstIterator);
+        iter.* = .{
+            .seen = std.AutoHashMap(u64, *BasicBlock).init(self.mem),
+            .work = std.ArrayList(*BasicBlock).init(self.mem),
+            .mem = self.mem,
+        };
+
+        try iter.work.append(self.head.head.out.?);
+
+        return iter;
+    }
+
+    pub fn liveBlockCount(self: *CFG) !usize {
+        const dfi = try self.depthFirstIterator();
+        defer dfi.deinit();
+
+        var count: usize = 0;
+        while (try dfi.next()) |_| {
+            count += 1;
+        }
+        return count;
+    }
+
     pub fn deinit(self: *CFG) void {
         self.arena.deinit();
     }
@@ -280,6 +329,8 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
         want_label.addEdge(target);
     }
 
+    // TODO: sweep unreachable blocks?
+
     return cfg;
 }
 
@@ -401,6 +452,31 @@ test "if statement should have 2 children blocks" {
     // block via jump then fallthrough
     const last_block2 = block.block.out2.?.block.out.?;
     try std.testing.expectEqual(last_block, last_block2);
+}
+
+test "killed operands" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "x = 5");
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    try std.testing.expectEqual(1, cfg.liveBlockCount());
+
+    //const iter = try cfg.depthFirstIterator();
+    //defer iter.deinit();
+
+    //const bb = iter.next().?;
+    //const killed = try bb.killedVariables();
+    //defer killed.deinit();
+
+    //try std.testing.expectEqual(2, killed.items.len);
 }
 
 fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*compiler.Scope {
