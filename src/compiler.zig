@@ -20,6 +20,7 @@ pub const Scope = struct {
     children: std.ArrayList(Scope),
     locals: std.StringHashMapUnmanaged(LocalInfo),
     params: std.StringHashMapUnmanaged(LocalInfo),
+    operands: std.ArrayList(*ir.Operand),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
 
@@ -78,40 +79,49 @@ pub const Scope = struct {
         }
     }
 
+    fn addOpnd(self: *Scope, opnd: *ir.Operand) !*ir.Operand {
+        try self.operands.append(opnd);
+        return opnd;
+    }
+
+    fn nextOpndId(self: *Scope) usize {
+        return self.operands.items.len;
+    }
+
     fn newLocal(self: *Scope) !*ir.Operand {
         const name = self.local_id;
         self.local_id += 1;
-        return try ir.Operand.initLocal(self.arena.allocator(), name);
+        return try self.addOpnd(try ir.Operand.initLocal(self.arena.allocator(), self.nextOpndId(), name));
     }
 
     fn newParam(self: *Scope) !*ir.Operand {
         const name = self.param_id;
         self.param_id += 1;
-        return try ir.Operand.initParam(self.arena.allocator(), name);
+        return try self.addOpnd(try ir.Operand.initParam(self.arena.allocator(), self.nextOpndId(), name));
     }
 
     fn newScope(self: *Scope, scope: *Scope) !*ir.Operand {
-        return try ir.Operand.initScope(self.arena.allocator(), scope);
+        return try self.addOpnd(try ir.Operand.initScope(self.arena.allocator(), self.nextOpndId(), scope));
     }
 
     fn newString(self: *Scope, name: []const u8) !*ir.Operand {
-        return try ir.Operand.initString(self.arena.allocator(), name);
+        return try self.addOpnd(try ir.Operand.initString(self.arena.allocator(), self.nextOpndId(), name));
     }
 
     fn newTemp(self: *Scope) !*ir.Operand {
         const name = self.tmp_id;
         self.tmp_id += 1;
-        return try ir.Operand.initTemp(self.arena.allocator(), name);
+        return try self.addOpnd(try ir.Operand.initTemp(self.arena.allocator(), self.nextOpndId(), name));
     }
 
     fn newImmediate(self: *Scope, value: u64) !*ir.Operand {
-        return try ir.Operand.initImmediate(self.arena.allocator(), value);
+        return try self.addOpnd(try ir.Operand.initImmediate(self.arena.allocator(), self.nextOpndId(), value));
     }
 
     fn newLabel(self: *Scope) !*ir.Operand {
         const name = self.label_id;
         self.label_id += 1;
-        return try ir.Operand.initLabel(self.arena.allocator(), name);
+        return try self.addOpnd(try ir.Operand.initLabel(self.arena.allocator(), self.nextOpndId(), name));
     }
 
     fn pushVoidInsn(self: *Scope, insn: ir.Instruction) !void {
@@ -217,6 +227,7 @@ pub const Scope = struct {
             .locals = std.StringHashMapUnmanaged(Scope.LocalInfo){},
             .params = std.StringHashMapUnmanaged(Scope.LocalInfo){},
             .children = std.ArrayList(Scope).init(alloc),
+            .operands = std.ArrayList(*ir.Operand).init(alloc),
             .allocator = alloc,
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
@@ -232,6 +243,7 @@ pub const Scope = struct {
         }
         self.locals.deinit(self.allocator);
         self.params.deinit(self.allocator);
+        self.operands.deinit();
         self.arena.deinit();
         self.allocator.destroy(self);
     }

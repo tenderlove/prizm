@@ -17,56 +17,56 @@ pub const OperandType = enum {
 };
 
 pub const Operand = union(OperandType) {
-    constant: struct { name: usize, },
-    cvar: struct { name: usize, },
-    immediate: struct { value: u64, },
-    ivar: struct { name: usize, },
-    label: struct { name: usize, },
-    local: struct { name: usize, },
-    param: struct { name: usize, },
-    scope: struct { value: *cmp.Scope, },
-    string: struct { value: []const u8, },
-    temp: struct { name: usize, },
+    constant: struct { id: usize, name: usize, },
+    cvar: struct { id: usize, name: usize, },
+    immediate: struct { id: usize, value: u64, },
+    ivar: struct { id: usize, name: usize, },
+    label: struct { id: usize, name: usize, },
+    local: struct { id: usize, name: usize, },
+    param: struct { id: usize, name: usize, },
+    scope: struct { id: usize, value: *cmp.Scope, },
+    string: struct { id: usize, value: []const u8, },
+    temp: struct { id: usize, name: usize, },
 
-    pub fn initImmediate(alloc: std.mem.Allocator, value: anytype) !*Operand {
+    pub fn initImmediate(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .immediate = .{ .value = value } };
+        opnd.* = .{ .immediate = .{ .id = id, .value = value } };
         return opnd;
     }
 
-    pub fn initLabel(alloc: std.mem.Allocator, name: anytype) !*Operand {
+    pub fn initLabel(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .label = .{ .name = name } };
+        opnd.* = .{ .label = .{ .id = id, .name = name } };
         return opnd;
     }
 
-    pub fn initLocal(alloc: std.mem.Allocator, name: anytype) !*Operand {
+    pub fn initLocal(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .local = .{ .name = name } };
+        opnd.* = .{ .local = .{ .id = id, .name = name } };
         return opnd;
     }
 
-    pub fn initParam(alloc: std.mem.Allocator, name: anytype) !*Operand {
+    pub fn initParam(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .param = .{ .name = name } };
+        opnd.* = .{ .param = .{ .id = id, .name = name } };
         return opnd;
     }
 
-    pub fn initScope(alloc: std.mem.Allocator, scope: anytype) !*Operand {
+    pub fn initScope(alloc: std.mem.Allocator, id: usize, scope: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .scope = .{ .value = scope } };
+        opnd.* = .{ .scope = .{ .id = id, .value = scope } };
         return opnd;
     }
 
-    pub fn initString(alloc: std.mem.Allocator, value: anytype) !*Operand {
+    pub fn initString(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .string = .{ .value = value } };
+        opnd.* = .{ .string = .{ .id = id, .value = value } };
         return opnd;
     }
 
-    pub fn initTemp(alloc: std.mem.Allocator, name: anytype) !*Operand {
+    pub fn initTemp(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .temp = .{ .name = name } };
+        opnd.* = .{ .temp = .{ .id = id, .name = name } };
         return opnd;
     }
 
