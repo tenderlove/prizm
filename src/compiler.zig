@@ -14,7 +14,7 @@ pub const Scope = struct {
     label_id: u32 = 0,
     param_size: usize = 0,
     local_storage: usize = 0,
-    scope_id: u32,
+    name: u32,
     insns: ir.InstructionList,
     parent: ?*Scope,
     children: std.ArrayList(Scope),
@@ -198,7 +198,7 @@ pub const Scope = struct {
 
         scope.* = Scope {
             .insns = ir.InstructionList { },
-            .scope_id = id,
+            .name = id,
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(Scope.LocalInfo){},
             .params = std.StringHashMapUnmanaged(Scope.LocalInfo){},

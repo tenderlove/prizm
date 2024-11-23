@@ -29,6 +29,10 @@ pub fn main() !void {
     try ircmd.addArg(Arg.positional("FILE", null, null));
     try prizm.addSubcommand(ircmd);
 
+    var cfgcmd = app.createCommand("cfg", "display CFG");
+    try cfgcmd.addArg(Arg.positional("FILE", null, null));
+    try prizm.addSubcommand(cfgcmd);
+
     const matches = try app.parseProcess();
 
     if (matches.subcommandMatches("run")) |runcmd_matches| {
@@ -99,7 +103,43 @@ pub fn main() !void {
             defer cc.deinit(allocator);
 
             const scope = try cc.compile(&scope_node);
-            try printer.printIR(allocator, scope, std.debug);
+            try printer.printIR(allocator, scope, std.io.getStdOut().writer().any());
+
+            return;
+        }
+    }
+
+    if (matches.subcommandMatches("cfg")) |runcmd_matches| {
+        if (runcmd_matches.getSingleValue("FILE")) |path| {
+            std.log.info("print CFG for {s}", .{ path });
+
+            // Read the file in
+            const file = try std.fs.cwd().openFile(path, .{});
+            const file_size = (try file.stat()).size;
+            defer file.close();
+
+            const src = try file.readToEndAlloc(allocator, file_size);
+
+            // Parse the file
+            const parser = try prism.Prism.newParserCtx(allocator);
+            parser.init(src, file_size, null);
+            defer parser.deinit();
+
+            const root_node = parser.parse();
+            defer parser.nodeDestroy(root_node);
+
+            var scope_node = try prism.pmNewScopeNode(root_node);
+
+            // Create a new VM
+            const machine = try vm.init(allocator);
+            defer machine.deinit(allocator);
+
+            // Compile the parse tree
+            const cc = try compiler.init(allocator, machine, parser);
+            defer cc.deinit(allocator);
+
+            const scope = try cc.compile(&scope_node);
+            try printer.printCFG(allocator, scope, std.io.getStdOut().writer().any());
 
             return;
         }

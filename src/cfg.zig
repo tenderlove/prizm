@@ -9,6 +9,7 @@ const assert = @import("std").debug.assert;
 
 pub const CFG = struct {
     arena: std.heap.ArenaAllocator,
+    mem: std.mem.Allocator,
     block_name: u32,
     head: *BasicBlock,
 
@@ -27,6 +28,7 @@ pub const CFG = struct {
 
         cfg.* = CFG {
             .arena = arena,
+            .mem = mem,
             .block_name = 1,
             .head = bb,
         };
@@ -48,6 +50,27 @@ pub const CFG = struct {
         self.block_name += 1;
 
         return block;
+    }
+
+    // Do a breadth first search on the cfg
+    pub fn bfs(self: *CFG, cb: fn (*BasicBlock, *anyopaque) void, ctx: *anyopaque) !void {
+        var seen = std.AutoHashMap(u64, *BasicBlock).init(self.mem);
+        defer seen.deinit();
+        try self.bfs_(self.head.head.out.?, &seen, cb, ctx);
+    }
+
+    pub fn bfs_(self: *CFG, bb: *BasicBlock, seen: *std.AutoHashMap(u64, *BasicBlock), cb: fn (*BasicBlock, *anyopaque) void, ctx: *anyopaque) !void {
+        if (!seen.contains(bb.block.name)) {
+             try seen.put(bb.block.name, bb);
+             cb(bb, ctx);
+
+             if (bb.block.out) |left| {
+                 try self.bfs_(left, seen, cb, ctx);
+             }
+             if (bb.block.out2) |right| {
+                 try self.bfs_(right, seen, cb, ctx);
+             }
+        }
     }
 
     pub fn deinit(self: *CFG) void {
@@ -194,14 +217,12 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
 
             // If the last instruction is a jump we should end the block
             if (insn_node.isJump() or insn_node.isCall() or insn_node.isReturn()) {
-                std.debug.print("end the block\n", .{ });
                 break;
             }
 
             // If the next instruction is a label we should end the block
             if (node) |next_insn| {
                 if (next_insn.data.isLabel()) {
-                    std.debug.print("it's a label\n", .{ });
                     break;
                 }
             }
@@ -327,7 +348,6 @@ test "if statement should have 2 children blocks" {
     // Get the scope for the method
     const method_scope: *compiler.Scope = scope.insns.first.?.data.define_method.func.scope.value;
 
-    try printer.printIR(allocator, method_scope, std.debug);
     const cfg = try buildCFG(allocator, method_scope);
     defer cfg.deinit();
 
