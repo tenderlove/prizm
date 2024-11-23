@@ -162,6 +162,20 @@ pub const BasicBlock = union(BasicBlockType) {
         return block;
     }
 
+    pub fn killedVariables(self: *BasicBlock, mem: std.mem.Allocator) !std.ArrayList(*ir.Operand) {
+        var list = std.ArrayList(*ir.Operand).init(mem);
+
+        var cursor: ?*ir.InstructionList.Node = self.block.start;
+        while (cursor) |insn| {
+            if (insn.data.isAssignment()) {
+                try list.append(insn.data.outVar().?);
+            }
+            if (insn == self.block.finish) break;
+            cursor = insn.next;
+        }
+        return list;
+    }
+
     fn addInstruction(self: *BasicBlock, insn: *ir.InstructionList.Node) void {
         self.block.finish = insn;
     }
@@ -469,14 +483,19 @@ test "killed operands" {
 
     try std.testing.expectEqual(1, cfg.liveBlockCount());
 
-    //const iter = try cfg.depthFirstIterator();
-    //defer iter.deinit();
+    const iter = try cfg.depthFirstIterator();
+    defer iter.deinit();
 
-    //const bb = iter.next().?;
-    //const killed = try bb.killedVariables();
-    //defer killed.deinit();
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.mov,
+    }, bb);
 
-    //try std.testing.expectEqual(2, killed.items.len);
+    const bb = (try iter.next()).?;
+    const killed = try bb.killedVariables(allocator);
+    defer killed.deinit();
+
+    try std.testing.expectEqual(2, killed.items.len);
 }
 
 fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*compiler.Scope {

@@ -241,6 +241,17 @@ pub const Instruction = union(InstructionName) {
         }
     }
 
+    pub fn isAssignment(self: Instruction) bool {
+        return switch(self) {
+            .putlabel => false,
+            .jump => false,
+            .jumpunless => false,
+            .setlocal => false,
+            .leave => false,
+            else => true,
+        };
+    }
+
     pub fn isJump(self: Instruction) bool {
         return switch(self) {
             .jump, .jumpunless => true,
