@@ -12,40 +12,28 @@ pub const CFG = struct {
     mem: std.mem.Allocator,
     block_name: u32,
     head: *BasicBlock,
+    scope: *compiler.Scope,
 
-    pub fn init(mem: std.mem.Allocator) !*CFG {
+    pub fn init(mem: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
         // Create an arena
         var arena = std.heap.ArenaAllocator.init(mem);
 
         const cfg = try arena.allocator().create(CFG);
-        const bb = try arena.allocator().create(BasicBlock);
-
-        bb.* = BasicBlock {
-            .head = .{
-                .name = 0,
-            }
-        };
+        const bb = try BasicBlock.initHead(arena.allocator(), 0);
 
         cfg.* = CFG {
             .arena = arena,
             .mem = mem,
             .block_name = 1,
             .head = bb,
+            .scope = scope,
         };
 
         return cfg;
     }
 
     pub fn makeBlock(self: *CFG, start: *ir.InstructionList.Node, finish: *ir.InstructionList.Node) !*BasicBlock {
-        const block = try self.arena.allocator().create(BasicBlock);
-
-        block.* = .{
-            .block = .{
-                .name = self.block_name,
-                .start = start,
-                .finish = finish,
-            }
-        };
+        const block = try BasicBlock.initBlock(self.arena.allocator(), self.block_name, start, finish);
 
         self.block_name += 1;
 
@@ -93,9 +81,37 @@ pub const BasicBlock = union(BasicBlockType) {
         name: u64,
         start: *ir.InstructionList.Node,
         finish: *ir.InstructionList.Node,
+        predecessors: std.ArrayList(*BasicBlock),
         out: ?*BasicBlock = null,
         out2: ?*BasicBlock = null,
     },
+
+    fn initHead(alloc: std.mem.Allocator, name: u64) !*BasicBlock {
+        const bb = try alloc.create(BasicBlock);
+
+        bb.* = BasicBlock {
+            .head = .{
+                .name = name,
+            }
+        };
+
+        return bb;
+    }
+
+    fn initBlock(alloc: std.mem.Allocator, name: u64, start: anytype, finish: anytype) !*BasicBlock {
+        const block = try alloc.create(BasicBlock);
+
+        block.* = .{
+            .block = .{
+                .name = name,
+                .start = start,
+                .finish = finish,
+                .predecessors = std.ArrayList(*BasicBlock).init(alloc),
+            }
+        };
+
+        return block;
+    }
 
     fn addInstruction(self: *BasicBlock, insn: *ir.InstructionList.Node) void {
         self.block.finish = insn;
@@ -155,6 +171,10 @@ pub const BasicBlock = union(BasicBlockType) {
         }
     }
 
+    fn addPredecessor(self: *BasicBlock, predecessor: *BasicBlock) !void {
+        try self.block.predecessors.append(predecessor);
+    }
+
     fn addEdge(self: *BasicBlock, child: *BasicBlock) void {
         switch(self.*) {
             .head => {
@@ -184,7 +204,7 @@ pub const CompileError = error {
 };
 
 pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
-    const cfg = try CFG.init(allocator);
+    const cfg = try CFG.init(allocator, scope);
 
     var wants_label = std.ArrayList(*BasicBlock).init(allocator);
     defer wants_label.deinit();
@@ -235,7 +255,7 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
         // as a predecessor to this block.
         if (last_block.fallsThrough()) {
             last_block.addEdge(current_block);
-            //current_block.addPredecessor(last_block);
+            try current_block.addPredecessor(last_block);
         }
 
         // If this block has a label at the top, register it so that
