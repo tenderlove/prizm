@@ -98,7 +98,7 @@ pub const Scope = struct {
         return try ir.Operand.initString(self.arena.allocator(), name);
     }
 
-    fn newTempName(self: *Scope) !*ir.Operand {
+    fn newTemp(self: *Scope) !*ir.Operand {
         const name = self.tmp_id;
         self.tmp_id += 1;
         return try ir.Operand.initTemp(self.arena.allocator(), name);
@@ -136,7 +136,7 @@ pub const Scope = struct {
     }
 
     pub fn pushDefineMethod(self: *Scope, name: []const u8, scope: *Scope) !*ir.Operand {
-        const outreg = try self.newTempName();
+        const outreg = try self.newTemp();
         return try self.pushInsn(.{ .define_method = .{
             .out = outreg,
             .name = try self.newString(name),
@@ -145,7 +145,7 @@ pub const Scope = struct {
     }
 
     pub fn pushCall(self: *Scope, recv: *ir.Operand, name: []const u8, params: std.ArrayList(*ir.Operand)) !*ir.Operand {
-        const outreg = try self.newTempName();
+        const outreg = try self.newTemp();
         return try self.pushInsn(.{ .call = .{
             .out = outreg,
             .recv = recv,
@@ -155,12 +155,12 @@ pub const Scope = struct {
     }
 
     pub fn pushGetLocal(self: *Scope, in: *ir.Operand) !*ir.Operand {
-        const outreg = try self.newTempName();
+        const outreg = try self.newTemp();
         return try self.pushInsn(.{ .getlocal = .{ .out = outreg, .in = in } });
     }
 
     pub fn pushGetself(self: *Scope) !*ir.Operand {
-        const outreg = try self.newTempName();
+        const outreg = try self.newTemp();
         return try self.pushInsn(.{ .getself = .{ .out = outreg } });
     }
 
@@ -181,7 +181,7 @@ pub const Scope = struct {
     }
 
     pub fn pushLoadi(self: *Scope, val: u64) !*ir.Operand {
-        const outreg = try self.newTempName();
+        const outreg = try self.newTemp();
         return try self.pushInsn(.{ .loadi = .{
             .out = outreg,
             .val = try self.newImmediate(val),
@@ -189,7 +189,7 @@ pub const Scope = struct {
     }
 
     pub fn pushLoadNil(self: *Scope) !*ir.Operand {
-        const outreg = try self.newTempName();
+        const outreg = try self.newTemp();
         return try self.pushInsn(.{ .loadnil = .{ .out = outreg } });
     }
 
@@ -199,7 +199,7 @@ pub const Scope = struct {
     }
 
     pub fn pushPhi(self: *Scope, a: *ir.Operand, b: *ir.Operand) !*ir.Operand {
-        const outreg = try self.newTempName();
+        const outreg = try self.newTemp();
         return try self.pushInsn(.{ .phi = .{ .out = outreg, .a = a, .b = b } });
     }
 
