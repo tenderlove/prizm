@@ -71,12 +71,12 @@ pub const InstructionName = enum {
 
 pub const Instruction = union(InstructionName) {
     call: struct {
-        out: Operand,
-        recv: Operand,
-        name: Operand,
-        params: std.ArrayList(Operand),
+        out: *Operand,
+        recv: *Operand,
+        name: *Operand,
+        params: std.ArrayList(*Operand),
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             const total = self.params.items.len + 2;
             var idx: usize = 2;
             fun(self.name, 0, total, ctx);
@@ -89,111 +89,111 @@ pub const Instruction = union(InstructionName) {
     },
 
     define_method: struct {
-        out: Operand,
-        name: Operand,
-        func: Operand,
+        out: *Operand,
+        name: *Operand,
+        func: *Operand,
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             fun(self.name, 0, 2, ctx);
             fun(self.func, 1, 2, ctx);
         }
     },
 
     getlocal: struct {
-        out: Operand,
-        in: Operand,
+        out: *Operand,
+        in: *Operand,
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             fun(self.in, 0, 1, ctx);
         }
     },
 
     getself: struct {
-        out: Operand,
+        out: *Operand,
 
-        pub fn eachOperand(_: @This(), _: fn (Operand, usize, usize, *anyopaque) void, _: *anyopaque) void { }
+        pub fn eachOperand(_: @This(), _: fn (*Operand, usize, usize, *anyopaque) void, _: *anyopaque) void { }
     },
 
     jump: struct {
-        label: Operand,
+        label: *Operand,
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             fun(self.label, 0, 1, ctx);
         }
     },
 
     jumpunless: struct {
-        in: Operand,
-        label: Operand,
+        in: *Operand,
+        label: *Operand,
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             fun(self.in, 0, 2, ctx);
             fun(self.label, 1, 2, ctx);
         }
     },
 
     leave: struct {
-        in: Operand,
+        in: *Operand,
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             fun(self.in, 0, 1, ctx);
         }
     },
 
     loadi: struct {
-        out: Operand,
-        val: Operand,
+        out: *Operand,
+        val: *Operand,
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             fun(self.val, 0, 1, ctx);
         }
     },
 
     loadnil: struct {
-        out: Operand,
+        out: *Operand,
 
-        pub fn eachOperand(_: @This(), _: fn (Operand, usize, usize, *anyopaque) void, _: *anyopaque) void { }
+        pub fn eachOperand(_: @This(), _: fn (*Operand, usize, usize, *anyopaque) void, _: *anyopaque) void { }
     },
 
     mov: struct {
-        out: Operand,
-        in: Operand,
+        out: *Operand,
+        in: *Operand,
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             fun(self.in, 0, 1, ctx);
         }
     },
 
     phi: struct {
-        out: Operand,
-        a: Operand,
-        b: Operand,
+        out: *Operand,
+        a: *Operand,
+        b: *Operand,
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             fun(self.a, 0, 2, ctx);
             fun(self.b, 1, 2, ctx);
         }
     },
 
     putlabel: struct {
-        name: Operand,
+        name: *Operand,
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             fun(self.name, 0, 1, ctx);
         }
     },
 
     setlocal: struct {
-        name: Operand,
-        val: Operand,
+        name: *Operand,
+        val: *Operand,
 
-        pub fn eachOperand(self: @This(), fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
             fun(self.name, 0, 2, ctx);
             fun(self.val, 1, 2, ctx);
         }
     },
 
-    pub fn eachOperand(self: Instruction, fun: fn (Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
+    pub fn eachOperand(self: Instruction, fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
         switch(self) {
             inline else => |p| p.eachOperand(fun, ctx)
         }
@@ -227,7 +227,7 @@ pub const Instruction = union(InstructionName) {
         };
     }
 
-    pub fn jumpTarget(self: Instruction) Operand {
+    pub fn jumpTarget(self: Instruction) *Operand {
         return switch(self) {
             .jump => |payload| payload.label,
             .jumpunless => |payload| payload.label,
@@ -235,7 +235,7 @@ pub const Instruction = union(InstructionName) {
         };
     }
 
-    pub fn outVar(self: Instruction) ?Operand {
+    pub fn outVar(self: Instruction) ?*Operand {
         return switch (self) {
             .putlabel => null,
             .jump => null,

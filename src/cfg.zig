@@ -147,7 +147,7 @@ pub const BasicBlock = union(BasicBlockType) {
         }
     }
 
-    fn jumpTarget(self: *BasicBlock) ir.Operand {
+    fn jumpTarget(self: *BasicBlock) *ir.Operand {
         if (BasicBlockType.head == @as(BasicBlockType, self.*)) {
             unreachable;
         } else {

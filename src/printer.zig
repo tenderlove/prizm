@@ -8,7 +8,7 @@ const IRPrinter = struct {
         out: *const std.io.AnyWriter,
     };
 
-    fn printOperand(op: ir.Operand, idx: usize, nitems: usize, c: *anyopaque) void {
+    fn printOperand(op: *ir.Operand, idx: usize, nitems: usize, c: *anyopaque) void {
         const ctx: *Context = @ptrCast(@alignCast(c));
         const out = ctx.out;
 
@@ -16,7 +16,7 @@ const IRPrinter = struct {
             out.print("(", .{}) catch { };
         }
 
-        switch (op) {
+        switch (op.*) {
             .immediate => |p| out.print("{d}", .{p.value}) catch { },
             .string => |p| out.print("{s}", .{p.value}) catch { },
             .scope => |payload| out.print("{s}{d}", .{ op.shortName(), payload.value.name }) catch { },
