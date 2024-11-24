@@ -20,9 +20,8 @@ pub const BitMap = struct {
     pub fn setBit(self: *BitMap, bit: u64) void {
         if (self.bits > 63) {
             const plane = bit / 64;
-            const fields = self.many.?;
             const theBit: u6 = @intCast(@mod(bit, 64));
-            fields[plane] |= (@as(u64, 1) << theBit);
+            self.many.?[plane] |= (@as(u64, 1) << theBit);
         } else {
             self.single |= (@as(u64, 1) << @as(u6, @intCast(bit)));
         }
@@ -31,10 +30,8 @@ pub const BitMap = struct {
     pub fn unsetBit(self: *BitMap, bit: u64) void {
         if (self.bits > 63) {
             const plane = bit / 64;
-            const fields = self.many.?;
             const theBit: u6 = @intCast(@mod(bit, 64));
-            const mask = ~(@as(u64, 1) << theBit);
-            fields[plane] &= mask;
+            self.many.?[plane] &= ~(@as(u64, 1) << theBit);
         } else {
             const mask = ~(@as(u64, 1) << @as(u6, @intCast(bit)));
             self.single &= mask;
@@ -44,10 +41,9 @@ pub const BitMap = struct {
     pub fn isBitSet(self: *BitMap, bit: u64) bool {
         if (self.bits > 63) {
             const plane = bit / 64;
-            const fields = self.many.?;
             const theBit: u6 = @intCast(@mod(bit, 64));
             const mask = (@as(u64, 1) << theBit);
-            return mask == (fields[plane] & mask);
+            return mask == (self.many.?[plane] & mask);
         } else {
             const v = (@as(u64, 1) << @as(u6, @intCast(bit)));
             return v == (self.single & v);
