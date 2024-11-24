@@ -66,7 +66,6 @@ pub const CFG = struct {
     const DepthFirstIterator = struct {
         seen: std.AutoHashMap(u64, *BasicBlock),
         work: std.ArrayList(*BasicBlock),
-        mem: std.mem.Allocator,
 
         pub fn next(self: *DepthFirstIterator) !?*BasicBlock {
             while (self.work.popOrNull()) |bb| {
@@ -84,25 +83,21 @@ pub const CFG = struct {
         pub fn deinit(self: *DepthFirstIterator) void {
             self.seen.deinit();
             self.work.deinit();
-            self.mem.destroy(self);
         }
     };
 
-    pub fn depthFirstIterator(self: *CFG) !*DepthFirstIterator {
-        const iter = try self.mem.create(DepthFirstIterator);
-        iter.* = .{
+    pub fn depthFirstIterator(self: *CFG) !DepthFirstIterator {
+        var worklist = std.ArrayList(*BasicBlock).init(self.mem);
+        try worklist.append(self.head.head.out.?);
+
+        return .{
             .seen = std.AutoHashMap(u64, *BasicBlock).init(self.mem),
-            .work = std.ArrayList(*BasicBlock).init(self.mem),
-            .mem = self.mem,
+            .work = worklist,
         };
-
-        try iter.work.append(self.head.head.out.?);
-
-        return iter;
     }
 
     pub fn liveBlockCount(self: *CFG) !usize {
-        const dfi = try self.depthFirstIterator();
+        var dfi = try self.depthFirstIterator();
         defer dfi.deinit();
 
         var count: usize = 0;
@@ -399,8 +394,9 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     // calculating the VarKilled and UEVars.  Haven't implemented the
     // peephole optimization step yet. Maybe we don't need it and can avoid
     // the extra loops here?
-    const iter = try cfg.depthFirstIterator();
+    var iter = try cfg.depthFirstIterator();
     defer iter.deinit();
+
     while (try iter.next()) |bb| {
         bb.fillVarSets();
     }
@@ -543,7 +539,7 @@ test "killed operands" {
 
     try std.testing.expectEqual(1, cfg.liveBlockCount());
 
-    const iter = try cfg.depthFirstIterator();
+    var iter = try cfg.depthFirstIterator();
     defer iter.deinit();
 
     const bb = (try iter.next()).?;
