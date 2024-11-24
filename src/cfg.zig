@@ -555,6 +555,39 @@ test "killed operands" {
     try std.testing.expectEqual(2, killed.items.len);
 }
 
+test "killed operands de-duplicate" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "x = 5; x = 10");
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    try std.testing.expectEqual(1, cfg.liveBlockCount());
+
+    var iter = try cfg.depthFirstIterator();
+    defer iter.deinit();
+
+    const bb = (try iter.next()).?;
+
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.mov,
+        ir.Instruction.loadi,
+        ir.Instruction.mov,
+    }, bb);
+
+    const killed = try bb.killedVariables(allocator);
+    defer killed.deinit();
+
+    try std.testing.expectEqual(3, killed.items.len);
+}
+
 fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*compiler.Scope {
     const parser = try prism.Prism.newParserCtx(allocator);
     defer parser.deinit();
