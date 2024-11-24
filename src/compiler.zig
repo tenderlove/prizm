@@ -257,12 +257,12 @@ pub const Compiler = struct {
     scope_ids: u32 = 0,
 
     pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{EmptyInstructionSequence, NotImplementedError, OutOfMemory}!*Scope {
-        return compileScopeNode(cc, node, true);
+        return compileScopeNode(cc, node, false);
     }
 
     pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t, popped: bool) error{NotImplementedError, OutOfMemory}!?*ir.Operand {
-        // std.debug.print("compiling type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
-        return switch (node.*.type) {
+        // std.debug.print("--> compiling type {s} {}\n", .{c.pm_node_type_to_str(node.*.type), popped});
+        const opnd = switch (node.*.type) {
             c.PM_DEF_NODE => try cc.compileDefNode(@ptrCast(node), popped),
             c.PM_CALL_NODE => try cc.compileCallNode(@ptrCast(node), popped),
             c.PM_ELSE_NODE => try cc.compileElseNode(@ptrCast(node), popped),
@@ -278,6 +278,8 @@ pub const Compiler = struct {
                 return error.NotImplementedError;
             }
         };
+        // std.debug.print("<-- compiling type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
+        return opnd;
     }
 
     fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t, popped: bool) !?*ir.Operand {
@@ -405,14 +407,14 @@ pub const Compiler = struct {
             },
             .unknown => {
                 // Compile the true branch and get a return value
-                const true_branch = try cc.compileNode(@ptrCast(node.*.statements), false);
+                const true_branch = try cc.compileNode(@ptrCast(node.*.statements), popped);
                 // Jump to the end of the if statement
                 try cc.pushJump(end_label);
 
                 // Push the then label so the false case has a place to jump
                 try cc.pushLabel(then_label);
 
-                const false_branch = try cc.compileNode(@ptrCast(node.*.subsequent), false);
+                const false_branch = try cc.compileNode(@ptrCast(node.*.subsequent), popped);
                 try cc.pushLabel(end_label);
 
                 // If anyone cares about the return value of this if statement, then
@@ -451,7 +453,6 @@ pub const Compiler = struct {
                     return PredicateType.always_false;
                 },
                 else => {
-                    std.debug.print("unknown cond type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
                     return error.NotImplementedError;
                 }
             }
@@ -510,14 +511,27 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t, _: bool) !*ir.Operand {
+    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t, popped: bool) !?*ir.Operand {
         const body = &node.*.body;
         const list = body.*.nodes[0..body.*.size];
-        var reg: ?*ir.Operand = null;
-        for (list) |item| {
-            reg = try cc.compileNode(item, false);
+
+        if (list.len > 0) {
+            var reg: ?*ir.Operand = null;
+
+            for (list, 0..list.len) |item, i| {
+                const last_item_p = i == list.len - 1;
+
+                // If it's the last item, we inherit the popped value passed in
+                if (last_item_p) {
+                    reg = try cc.compileNode(item, popped);
+                } else {
+                    _ = try cc.compileNode(item, true);
+                }
+            }
+            return reg;
+        } else {
+            return try cc.pushLoadNil();
         }
-        return reg orelse error.NotImplementedError;
     }
 
     pub fn deinit(self: *Compiler, allocator: std.mem.Allocator) void {
