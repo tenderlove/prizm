@@ -123,8 +123,7 @@ const CFGPrinter = struct {
         var_width: u32,
     };
 
-    fn printBlock(blk: *CFG.BasicBlock, c: *anyopaque) void {
-        const ctx: *const Context = @ptrCast(@alignCast(c));
+    fn printBlock(blk: *CFG.BasicBlock, ctx: *const Context) void {
         ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.block.name }) catch { };
         ctx.out.print("label=\"BB{d}\\l\\l", .{ blk.block.name }) catch { };
 
@@ -183,7 +182,10 @@ const CFGPrinter = struct {
             try out.print("subgraph cluster_{d} {{\n", .{ work_scope.name });
             try out.print("color=lightgrey;\n", .{});
             const cfg = try CFG.buildCFG(alloc, work_scope);
-            try cfg.bfs(printBlock, @constCast(&ctx));
+            var iter = try cfg.depthFirstIterator();
+            while (try iter.next()) |bb| {
+                printBlock(bb, &ctx);
+            }
             try out.print("}}\n", .{});
         }
         try out.print("\n\n", .{});

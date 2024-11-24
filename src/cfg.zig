@@ -42,27 +42,6 @@ pub const CFG = struct {
         return block;
     }
 
-    // Do a breadth first search on the cfg
-    pub fn bfs(self: *CFG, cb: fn (*BasicBlock, *anyopaque) void, ctx: *anyopaque) !void {
-        var seen = std.AutoHashMap(u64, *BasicBlock).init(self.mem);
-        defer seen.deinit();
-        try self.bfs_(self.head.head.out.?, &seen, cb, ctx);
-    }
-
-    pub fn bfs_(self: *CFG, bb: *BasicBlock, seen: *std.AutoHashMap(u64, *BasicBlock), cb: fn (*BasicBlock, *anyopaque) void, ctx: *anyopaque) !void {
-        if (!seen.contains(bb.block.name)) {
-             try seen.put(bb.block.name, bb);
-             cb(bb, ctx);
-
-             if (bb.block.out) |left| {
-                 try self.bfs_(left, seen, cb, ctx);
-             }
-             if (bb.block.out2) |right| {
-                 try self.bfs_(right, seen, cb, ctx);
-             }
-        }
-    }
-
     const DepthFirstIterator = struct {
         seen: std.AutoHashMap(u64, *BasicBlock),
         work: std.ArrayList(*BasicBlock),
