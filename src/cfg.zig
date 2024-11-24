@@ -193,7 +193,7 @@ pub const BasicBlock = union(BasicBlockType) {
         }
     };
 
-    fn instructionIter(self: *BasicBlock) InstructionIter {
+    pub fn instructionIter(self: *BasicBlock) InstructionIter {
         return .{ .current = self.block.start, .finish = self.block.finish, .done = false };
     }
 

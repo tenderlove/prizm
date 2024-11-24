@@ -128,17 +128,13 @@ const CFGPrinter = struct {
         ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.block.name }) catch { };
         ctx.out.print("label=\"BB{d}\\l\\l", .{ blk.block.name }) catch { };
 
-        var node: ?*ir.InstructionList.Node = blk.block.start;
-        while (node) |insn| {
+        var iter = blk.instructionIter();
+        while (iter.next()) |insn| {
             if (ir.InstructionName.define_method == @as(ir.InstructionName, insn.data)) {
                 ctx.work.append(insn.data.define_method.func.scope.value) catch { };
             }
             IRPrinter.printInsn(insn.data, ctx.var_width, ctx.out.*) catch { };
             ctx.out.print("\\l", .{}) catch { };
-            if (insn == blk.block.finish) {
-                break;
-            }
-            node = insn.next;
         }
 
         ctx.out.print("\"];\n", .{ }) catch { };
