@@ -35,21 +35,12 @@ pub const BitMap = struct {
 
         pub fn next(self: *SetBitsIterator) ?usize {
             while (self.bit_index <= self.bm.bits) {
-                // If the current bit is set, we need to return the index
+                var idx: ?usize = null;
+
                 if (self.current_plane & 0x1 == 0x1) {
-                    // First save it so we can advance the cursor
-                    const idx = self.bit_index;
-                    self.bit_index += 1;
-
-                    if (@mod(self.bit_index, 64) == 0) {
-                        self.plane_index = self.bit_index / 64;
-                        self.current_plane = self.bm.many.?[self.plane_index];
-                    } else {
-                        self.current_plane >>= 1;
-                    }
-
-                    return idx;
+                    idx = self.bit_index;
                 }
+
                 self.bit_index += 1;
 
                 if (@mod(self.bit_index, 64) == 0) {
@@ -58,6 +49,8 @@ pub const BitMap = struct {
                 } else {
                     self.current_plane >>= 1;
                 }
+
+                if (idx) |x| { return x; }
             }
             return null;
         }
