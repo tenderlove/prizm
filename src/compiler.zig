@@ -925,3 +925,24 @@ test "local ternary" {
     const test_reg = method_scope.insns.first.?.data.jumpunless.in;
     try std.testing.expectEqual(0, test_reg.param.name);
 }
+
+test "popped if body" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "def foo(x); x ? 7 : 8; x; end");
+    defer scope.deinit();
+
+    const method_scope: *Scope = scope.insns.first.?.data.define_method.func.scope.value;
+
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.jumpunless,
+        ir.Instruction.jump,
+        ir.Instruction.putlabel,
+        ir.Instruction.putlabel,
+        ir.Instruction.leave,
+    }, method_scope.insns);
+}
