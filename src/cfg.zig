@@ -163,25 +163,12 @@ pub const BasicBlock = union(BasicBlockType) {
         return block;
     }
 
-    pub fn killedVariables(self: *BasicBlock, mem: std.mem.Allocator) !std.ArrayList(*ir.Operand) {
-        var list = std.ArrayList(*ir.Operand).init(mem);
-
-        var cursor: ?*ir.InstructionList.Node = self.block.start;
-        while (cursor) |insn| {
-            if (insn.data.isAssignment()) {
-                try list.append(insn.data.outVar().?);
-            }
-            if (insn == self.block.finish) break;
-            cursor = insn.next;
-        }
-        return list;
+    pub fn killedVariableCount(self: *BasicBlock) usize {
+        return self.block.killed_set.popCount();
     }
 
-    fn fillUESet(op: *ir.Operand, _: usize, _: usize, ctx: *anyopaque) void {
-        const set: *bitmap.BitMap = @ptrCast(@alignCast(ctx));
-        if (op.isVariable()) {
-            set.setBit(op.getID());
-        }
+    pub fn upwardExposedCount(self: *BasicBlock) usize {
+        return self.block.upward_exposed_set.popCount();
     }
 
     const InstructionIter = struct {
@@ -206,11 +193,23 @@ pub const BasicBlock = union(BasicBlockType) {
         return .{ .current = self.block.start, .finish = self.block.finish };
     }
 
+    fn fillUESet(op: *ir.Operand, _: usize, _: usize, ctx: *anyopaque) void {
+        const self: *BasicBlock = @ptrCast(@alignCast(ctx));
+
+        // If the operand is a variable, and it _isn't_ part of the kill set,
+        // (in other words it hasn't been defined in this BB), then add
+        // the operand to the "upward exposed" set.  This means the operand
+        // _must_ have been defined in a block that dominates this block.
+        if (op.isVariable() and !self.block.killed_set.isBitSet(op.getID())) {
+            self.block.upward_exposed_set.setBit(op.getID());
+        }
+    }
+
     pub fn fillVarSets(self: *BasicBlock) void {
         var iter = self.instructionIter();
 
         while (iter.next()) |insn| {
-            insn.data.eachOperand(fillUESet, @constCast(self.block.upward_exposed_set));
+            insn.data.eachOperand(fillUESet, @constCast(self));
             if (insn.data.outVar()) |v| {
                 if (v.isVariable()) {
                     self.block.killed_set.setBit(v.getID());
@@ -549,10 +548,8 @@ test "killed operands" {
         ir.Instruction.mov,
     }, bb);
 
-    const killed = try bb.killedVariables(allocator);
-    defer killed.deinit();
-
-    try std.testing.expectEqual(2, killed.items.len);
+    try std.testing.expectEqual(2, bb.killedVariableCount());
+    try std.testing.expectEqual(0, bb.upwardExposedCount());
 }
 
 test "killed operands de-duplicate" {
@@ -582,10 +579,8 @@ test "killed operands de-duplicate" {
         ir.Instruction.mov,
     }, bb);
 
-    const killed = try bb.killedVariables(allocator);
-    defer killed.deinit();
-
-    try std.testing.expectEqual(3, killed.items.len);
+    try std.testing.expectEqual(3, bb.killedVariableCount());
+    try std.testing.expectEqual(0, bb.upwardExposedCount());
 }
 
 fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*compiler.Scope {

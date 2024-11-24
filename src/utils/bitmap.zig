@@ -17,6 +17,18 @@ pub const BitMap = struct {
         return bm;
     }
 
+    pub fn popCount(self: *BitMap) usize {
+        if (self.bits > 64) {
+            var count: usize = 0;
+            for (self.many.?) |plane| {
+                count += @popCount(plane);
+            }
+            return count;
+        } else {
+            return @popCount(self.single);
+        }
+    }
+
     pub fn setBit(self: *BitMap, bit: u64) void {
         if (self.bits > 64) {
             const plane = bit / 64;
@@ -196,4 +208,29 @@ test "bitset iterator multi plane" {
     try std.testing.expectEqual(63, bits[1]);
     try std.testing.expectEqual(64, bits[2]);
     try std.testing.expectEqual(128, bits[3]);
+}
+
+test "popcount single plane" {
+    const alloc = std.testing.allocator;
+
+    const bm = try BitMap.init(alloc, 20);
+    defer bm.deinit(alloc);
+
+    bm.setBit(1);
+    bm.setBit(15);
+
+    try std.testing.expectEqual(2, bm.popCount());
+}
+
+test "popcount multi-plane" {
+    const alloc = std.testing.allocator;
+    const bm = try BitMap.init(alloc, 128);
+    defer bm.deinit(alloc);
+
+    bm.setBit(1);
+    bm.setBit(63);
+    bm.setBit(64);
+    bm.setBit(128);
+
+    try std.testing.expectEqual(4, bm.popCount());
 }
