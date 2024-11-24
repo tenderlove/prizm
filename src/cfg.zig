@@ -174,15 +174,19 @@ pub const BasicBlock = union(BasicBlockType) {
     const InstructionIter = struct {
         current: ?*ir.InstructionList.Node,
         finish: *ir.InstructionList.Node,
+        done: bool,
 
         pub fn next(self: *InstructionIter) ?*ir.InstructionList.Node {
+            if (self.done) return null;
+
             if (self.current) |node| {
                 if (node == self.finish) {
-                    return null;
-                } else {
-                    self.current = node.next;
+                    self.done = true;
                     return node;
                 }
+
+                self.current = node.next;
+                return node;
             } else {
                 return null;
             }
@@ -190,7 +194,7 @@ pub const BasicBlock = union(BasicBlockType) {
     };
 
     fn instructionIter(self: *BasicBlock) InstructionIter {
-        return .{ .current = self.block.start, .finish = self.block.finish };
+        return .{ .current = self.block.start, .finish = self.block.finish, .done = false };
     }
 
     fn fillUESet(op: *ir.Operand, _: usize, _: usize, ctx: *anyopaque) void {
@@ -252,7 +256,7 @@ pub const BasicBlock = union(BasicBlockType) {
         if (BasicBlockType.head == @as(BasicBlockType, self.*)) {
             return 0;
         } else {
-            var count: u32 = 1;
+            var count: u32 = 0;
             var iter = self.instructionIter();
 
             while(iter.next()) |_| {
@@ -499,8 +503,11 @@ test "if statement should have 2 children blocks" {
     try std.testing.expect(block.fallsThrough());
 
     var child = block.block.out.?;
-    try std.testing.expectEqual(ir.Instruction.loadi, @as(ir.InstructionName, child.block.start.data));
-    try std.testing.expectEqual(ir.Instruction.jump, @as(ir.InstructionName, child.block.finish.data));
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.jump,
+    }, child);
+
     try std.testing.expectEqual(2, child.instructionCount());
     try std.testing.expect(!child.fallsThrough());
 
@@ -581,6 +588,65 @@ test "killed operands de-duplicate" {
 
     try std.testing.expectEqual(3, bb.killedVariableCount());
     try std.testing.expectEqual(0, bb.upwardExposedCount());
+}
+
+test "upward exposed bits get set" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "def foo(x); x ? x + 1 : 5; end");
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func.scope.value;
+
+    const methodcfg = try buildCFG(allocator, method_scope);
+    defer methodcfg.deinit();
+    //printer.printCFG(allocator, method_scope, std.debug);
+
+    const bb = (try findBBWithInsn(methodcfg, ir.InstructionName.call)).?;
+    // One for x
+    try std.testing.expectEqual(1, bb.upwardExposedCount());
+    // one for loadi, and return value of call
+    try std.testing.expectEqual(2, bb.killedVariableCount());
+}
+
+fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
+    var iter = try cfg.depthFirstIterator();
+    defer iter.deinit();
+
+    while (try iter.next()) |bb| {
+        var insni = bb.instructionIter();
+        while (insni.next()) |insn| {
+            if (name == @as(ir.InstructionName, insn.data)) {
+                return bb;
+            }
+        }
+    }
+
+    return null;
+}
+
+fn findInsn(cfg: *CFG, name: ir.InstructionName) !?*ir.InstructionList.Node {
+    var iter = try cfg.depthFirstIterator();
+    defer iter.deinit();
+
+    while (try iter.next()) |bb| {
+        var insni = bb.instructionIter();
+        while (insni.next()) |insn| {
+            if (name == @as(ir.InstructionName, insn.data)) {
+                return insn;
+            }
+        }
+    }
+
+    return null;
 }
 
 fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*compiler.Scope {
