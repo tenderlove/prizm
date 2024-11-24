@@ -6,6 +6,7 @@ const vm = @import("vm.zig");
 const compiler = @import("compiler.zig");
 const printer = @import("printer.zig");
 const assert = @import("std").debug.assert;
+const bitmap = @import("utils/bitmap.zig");
 
 pub const CFG = struct {
     arena: std.heap.ArenaAllocator,
@@ -131,6 +132,7 @@ pub const BasicBlock = union(BasicBlockType) {
         start: *ir.InstructionList.Node,
         finish: *ir.InstructionList.Node,
         predecessors: std.ArrayList(*BasicBlock),
+        killed_set: ?*bitmap.BitMap = null,
         out: ?*BasicBlock = null,
         out2: ?*BasicBlock = null,
     },
@@ -345,6 +347,9 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
 
     // TODO: sweep unreachable blocks?
 
+    const killed_var_set = try bitmap.BitMap.init(allocator, scope.nextOpndId());
+    defer allocator.destroy(killed_var_set);
+
     return cfg;
 }
 
@@ -486,12 +491,13 @@ test "killed operands" {
     const iter = try cfg.depthFirstIterator();
     defer iter.deinit();
 
+    const bb = (try iter.next()).?;
+
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
         ir.Instruction.mov,
     }, bb);
 
-    const bb = (try iter.next()).?;
     const killed = try bb.killedVariables(allocator);
     defer killed.deinit();
 

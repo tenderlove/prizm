@@ -84,7 +84,7 @@ pub const Scope = struct {
         return opnd;
     }
 
-    fn nextOpndId(self: *Scope) usize {
+    pub fn nextOpndId(self: *Scope) usize {
         return self.operands.items.len;
     }
 
