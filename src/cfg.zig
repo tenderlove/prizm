@@ -497,10 +497,12 @@ test "if statement should have 2 children blocks" {
 
     const block = cfg.head.head.out.?;
 
-    try std.testing.expectEqual(ir.Instruction.jumpunless, @as(ir.InstructionName, block.block.start.data));
-    try std.testing.expectEqual(ir.Instruction.jumpunless, @as(ir.InstructionName, block.block.finish.data));
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.jumpunless,
+    }, block);
     try std.testing.expectEqual(block.block.finish, block.block.start);
     try std.testing.expect(block.fallsThrough());
+    try std.testing.expectEqual(1, block.instructionCount());
 
     var child = block.block.out.?;
     try expectInstructionList(&[_] ir.InstructionName {
