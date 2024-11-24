@@ -189,20 +189,38 @@ pub const BasicBlock = union(BasicBlockType) {
         }
     }
 
+    const InstructionIter = struct {
+        current: ?*ir.InstructionList.Node,
+        finish: *ir.InstructionList.Node,
+
+        pub fn next(self: *InstructionIter) ?*ir.InstructionList.Node {
+            if (self.current) |node| {
+                if (node == self.finish) {
+                    return null;
+                } else {
+                    self.current = node.next;
+                    return node;
+                }
+            } else {
+                return null;
+            }
+        }
+    };
+
+    fn instructionIter(self: *BasicBlock) InstructionIter {
+        return .{ .current = self.block.start, .finish = self.block.finish };
+    }
+
     pub fn fillVarSets(self: *BasicBlock) void {
-        var cursor: ?*ir.InstructionList.Node = self.block.start;
-        while (cursor) |insn| {
+        var iter = self.instructionIter();
+
+        while (iter.next()) |insn| {
             insn.data.eachOperand(fillUESet, @constCast(self.block.upward_exposed_set));
             if (insn.data.outVar()) |v| {
                 if (v.isVariable()) {
                     self.block.killed_set.setBit(v.getID());
                 }
             }
-
-            if (cursor == self.block.finish) {
-                break;
-            }
-            cursor = insn.next;
         }
     }
 
@@ -241,15 +259,10 @@ pub const BasicBlock = union(BasicBlockType) {
             return 0;
         } else {
             var count: u32 = 1;
+            var iter = self.instructionIter();
 
-            var cursor: ?*ir.InstructionList.Node = self.block.start;
-
-            while(cursor) |link| {
-                if (cursor == self.block.finish) {
-                    break;
-                }
+            while(iter.next()) |_| {
                 count += 1;
-                cursor = link.next;
             }
 
             return count;
