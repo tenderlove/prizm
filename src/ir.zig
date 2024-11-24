@@ -79,6 +79,19 @@ pub const Operand = union(OperandType) {
         };
     }
 
+    pub fn getID(self: Operand) usize {
+        return switch(self) {
+            inline else => |payload| payload.id
+        };
+    }
+
+    pub fn isVariable(self: Operand) bool {
+        return switch(self) {
+            .param, .temp, .local => true,
+            inline else => false
+        };
+    }
+
     pub fn shortName(self: Operand) [] const u8 {
         return switch(self) {
             .constant => "k",

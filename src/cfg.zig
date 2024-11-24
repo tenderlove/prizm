@@ -34,7 +34,8 @@ pub const CFG = struct {
     }
 
     pub fn makeBlock(self: *CFG, start: *ir.InstructionList.Node, finish: *ir.InstructionList.Node) !*BasicBlock {
-        const block = try BasicBlock.initBlock(self.arena.allocator(), self.block_name, start, finish);
+        const block = try BasicBlock.initBlock(self.arena.allocator(),
+            self.block_name, start, finish, self.scope.nextOpndId());
 
         self.block_name += 1;
 
@@ -132,7 +133,8 @@ pub const BasicBlock = union(BasicBlockType) {
         start: *ir.InstructionList.Node,
         finish: *ir.InstructionList.Node,
         predecessors: std.ArrayList(*BasicBlock),
-        killed_set: ?*bitmap.BitMap = null,
+        killed_set: *bitmap.BitMap,
+        upward_exposed_set: *bitmap.BitMap,
         out: ?*BasicBlock = null,
         out2: ?*BasicBlock = null,
     },
@@ -149,7 +151,7 @@ pub const BasicBlock = union(BasicBlockType) {
         return bb;
     }
 
-    fn initBlock(alloc: std.mem.Allocator, name: u64, start: anytype, finish: anytype) !*BasicBlock {
+    fn initBlock(alloc: std.mem.Allocator, name: u64, start: anytype, finish: anytype, vars: usize) !*BasicBlock {
         const block = try alloc.create(BasicBlock);
 
         block.* = .{
@@ -157,6 +159,8 @@ pub const BasicBlock = union(BasicBlockType) {
                 .name = name,
                 .start = start,
                 .finish = finish,
+                .killed_set = try bitmap.BitMap.init(alloc, vars),
+                .upward_exposed_set = try bitmap.BitMap.init(alloc, vars),
                 .predecessors = std.ArrayList(*BasicBlock).init(alloc),
             }
         };
@@ -176,6 +180,30 @@ pub const BasicBlock = union(BasicBlockType) {
             cursor = insn.next;
         }
         return list;
+    }
+
+    fn fillUESet(op: *ir.Operand, _: usize, _: usize, ctx: *anyopaque) void {
+        const set: *bitmap.BitMap = @ptrCast(@alignCast(ctx));
+        if (op.isVariable()) {
+            set.setBit(op.getID());
+        }
+    }
+
+    pub fn fillVarSets(self: *BasicBlock) void {
+        var cursor: ?*ir.InstructionList.Node = self.block.start;
+        while (cursor) |insn| {
+            insn.data.eachOperand(fillUESet, @constCast(self.block.upward_exposed_set));
+            if (insn.data.outVar()) |v| {
+                if (v.isVariable()) {
+                    self.block.killed_set.setBit(v.getID());
+                }
+            }
+
+            if (cursor == self.block.finish) {
+                break;
+            }
+            cursor = insn.next;
+        }
     }
 
     fn addInstruction(self: *BasicBlock, insn: *ir.InstructionList.Node) void {
@@ -285,6 +313,11 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     const insns = scope.insns;
     var node = insns.first;
 
+    // If we don't have any nodes to process, just return the empty CFG.
+    if (node == null) {
+        return cfg;
+    }
+
     // For all of our instructions
     while (node) |insn| {
         // Create a new block
@@ -347,8 +380,17 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
 
     // TODO: sweep unreachable blocks?
 
-    const killed_var_set = try bitmap.BitMap.init(allocator, scope.nextOpndId());
-    defer allocator.destroy(killed_var_set);
+    // TODO: We could calculate the killed set and the upward exposed set
+    // while building the basic blocks, rather than here.  But then we
+    // wouldn't have the opportunity to do a peephole optimization step before
+    // calculating the VarKilled and UEVars.  Haven't implemented the
+    // peephole optimization step yet. Maybe we don't need it and can avoid
+    // the extra loops here?
+    const iter = try cfg.depthFirstIterator();
+    defer iter.deinit();
+    while (try iter.next()) |bb| {
+        bb.fillVarSets();
+    }
 
     return cfg;
 }
