@@ -123,37 +123,72 @@ const CFGPrinter = struct {
         var_width: u32,
     };
 
-    fn printBlock(blk: *CFG.BasicBlock, ctx: *const Context) void {
-        ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.block.name }) catch { };
-        ctx.out.print("label=\"BB{d}\\l\\l", .{ blk.block.name }) catch { };
+    fn printBlock(scope: *cmp.Scope, blk: *CFG.BasicBlock, ctx: *const Context) !void {
+        try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.block.name });
+        try ctx.out.print("label=\"BB{d}\\l", .{ blk.block.name });
+
+        // Print upward exposed variables
+        {
+            const nitems = blk.block.upward_exposed_set.popCount(); // number of variables
+            if (nitems > 0) {
+                var biti = blk.block.upward_exposed_set.setBitsIterator();
+                try ctx.out.print("UE: ", .{ });
+                var i: usize = 0;
+                while (biti.next()) |opnd_id| {
+                    const opndctx = IRPrinter.Context { .out = ctx.out };
+                    const opnd = scope.operands.items[opnd_id];
+                    IRPrinter.printOperand(opnd, i, nitems, @constCast(&opndctx));
+                    i += 1;
+                }
+                try ctx.out.print("\\l", .{ });
+            }
+        }
+
+        // Print killed variables
+        {
+            const nitems = blk.block.killed_set.popCount(); // number of variables
+            if (nitems > 0) {
+                var biti = blk.block.killed_set.setBitsIterator();
+                try ctx.out.print("Killed: ", .{ });
+                var i: usize = 0;
+                while (biti.next()) |opnd_id| {
+                    const opndctx = IRPrinter.Context { .out = ctx.out };
+                    const opnd = scope.operands.items[opnd_id];
+                    IRPrinter.printOperand(opnd, i, nitems, @constCast(&opndctx));
+                    i += 1;
+                }
+                try ctx.out.print("\\l", .{ });
+            }
+        }
+        try ctx.out.print("\\l", .{ });
 
         var iter = blk.instructionIter();
         while (iter.next()) |insn| {
             if (ir.InstructionName.define_method == @as(ir.InstructionName, insn.data)) {
-                ctx.work.append(insn.data.define_method.func.scope.value) catch { };
+                try ctx.work.append(insn.data.define_method.func.scope.value);
             }
-            IRPrinter.printInsn(insn.data, ctx.var_width, ctx.out.*) catch { };
-            ctx.out.print("\\l", .{}) catch { };
+            try IRPrinter.printInsn(insn.data, ctx.var_width, ctx.out.*);
+            try ctx.out.print("\\l", .{});
         }
 
-        ctx.out.print("\"];\n", .{ }) catch { };
+        try ctx.out.print("\"];\n", .{ });
 
         if (blk.block.out) |left| {
-            ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"out1\"];\n", .{
+            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"out1\"];\n", .{
                 ctx.scope.name,
                 blk.block.name,
                 ctx.scope.name,
                 left.block.name
-            }) catch { };
+            });
         }
 
         if (blk.block.out2) |right| {
-            ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"out1\"];\n", .{
+            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"out1\"];\n", .{
                 ctx.scope.name,
                 blk.block.name,
                 ctx.scope.name,
                 right.block.name
-            }) catch { };
+            });
         }
 
     }
@@ -183,8 +218,9 @@ const CFGPrinter = struct {
             try out.print("color=lightgrey;\n", .{});
             const cfg = try CFG.buildCFG(alloc, work_scope);
             var iter = try cfg.depthFirstIterator();
+            defer iter.deinit();
             while (try iter.next()) |bb| {
-                printBlock(bb, &ctx);
+                try printBlock(work_scope, bb, &ctx);
             }
             try out.print("}}\n", .{});
         }
