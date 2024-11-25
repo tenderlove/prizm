@@ -292,9 +292,6 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     var wants_label = std.ArrayList(*BasicBlock).init(allocator);
     defer wants_label.deinit();
 
-    var has_label = std.ArrayList(*BasicBlock).init(allocator);
-    defer has_label.deinit();
-
     //var all_bbs = std.ArrayList(*BasicBlock).init(allocator);
     //defer all_bbs.deinit();
 
@@ -307,6 +304,10 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     if (node == null) {
         return cfg;
     }
+
+    var label_to_block_lut: []?*BasicBlock = try allocator.alloc(?*BasicBlock, scope.label_id);
+    @memset(label_to_block_lut, null);
+    defer allocator.free(label_to_block_lut);
 
     // For all of our instructions
     while (node) |insn| {
@@ -349,8 +350,8 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
         // If this block has a label at the top, register it so that
         // we can link other blocks to this one
         if (current_block.hasLabeledEntry()) {
-            assert(current_block.block.start.data.putlabel.name.label.name == has_label.items.len);
-            try has_label.append(current_block);
+            const label_name = current_block.block.start.data.putlabel.name.label.name;
+            label_to_block_lut[label_name] = current_block;
         }
 
         // If this block jumps to a label, register it so that we can link
@@ -364,7 +365,7 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
 
     for (wants_label.items) |want_label| {
         const dest_label = want_label.jumpTarget();
-        const target = has_label.items[dest_label.label.name];
+        const target = label_to_block_lut[dest_label.label.name].?;
         want_label.addEdge(target);
     }
 
@@ -596,6 +597,42 @@ test "upward exposed bits get set" {
     try std.testing.expectEqual(1, bb.upwardExposedCount());
     // one for loadi, and return value of call
     try std.testing.expectEqual(2, bb.killedVariableCount());
+}
+
+test "complex loop with if" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code =
+\\ def foo y, z
+\\   while y
+\\     if y < 3
+\\       y + 1
+\\     else
+\\       if y > 5
+\\         y + 1
+\\       else
+\\         z + 1
+\\       end
+\\     end
+\\   end
+\\   y
+\\ end
+;
+    const scope = try compileScope(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func.scope.value;
+
+    const methodcfg = try buildCFG(allocator, method_scope);
+    defer methodcfg.deinit();
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
