@@ -273,6 +273,7 @@ pub const Compiler = struct {
             c.PM_RETURN_NODE => try cc.compileReturnNode(@ptrCast(node), popped),
             c.PM_SCOPE_NODE => return error.NotImplementedError,
             c.PM_STATEMENTS_NODE => try cc.compileStatementsNode(@ptrCast(node), popped),
+            c.PM_WHILE_NODE => try cc.compileWhileNode(@ptrCast(node), popped),
             else => {
                 std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
                 return error.NotImplementedError;
@@ -531,6 +532,32 @@ pub const Compiler = struct {
             return reg;
         } else {
             return try cc.pushLoadNil();
+        }
+    }
+
+    fn compileWhileNode(cc: *Compiler, node: *const c.pm_while_node_t, popped: bool) !?*ir.Operand {
+        const loop_entry = try cc.newLabel();
+        try cc.pushLabel(loop_entry);
+
+        const loop_end = try cc.newLabel();
+
+        // If predicate is false, jump to then label
+        const predicate = try cc.compilePredicate(node.*.predicate, loop_end, false);
+
+        switch (predicate) {
+            .always_false => { },
+            .always_true, .unknown => {
+                _ = try cc.compileNode(@ptrCast(node.*.statements), popped);
+            }
+        }
+
+        try cc.pushJump(loop_entry);
+        try cc.pushLabel(loop_end);
+
+        if (!popped) {
+            return try cc.pushLoadNil();
+        } else {
+            return null;
         }
     }
 
@@ -943,6 +970,30 @@ test "popped if body" {
         ir.Instruction.jump,
         ir.Instruction.putlabel,
         ir.Instruction.putlabel,
+        ir.Instruction.leave,
+    }, method_scope.insns);
+}
+
+test "while loop" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "def foo(x); while x; puts x; end; end");
+    defer scope.deinit();
+
+    const method_scope: *Scope = scope.insns.first.?.data.define_method.func.scope.value;
+
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.putlabel,
+        ir.Instruction.jumpunless,
+        ir.Instruction.getself,
+        ir.Instruction.call,
+        ir.Instruction.jump,
+        ir.Instruction.putlabel,
+        ir.Instruction.loadnil,
         ir.Instruction.leave,
     }, method_scope.insns);
 }
