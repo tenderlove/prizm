@@ -325,7 +325,7 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
             const insn_node = finish_insn.data;
 
             // If the last instruction is a jump we should end the block
-            if (insn_node.isJump() or insn_node.isCall() or insn_node.isReturn()) {
+            if (insn_node.isJump() or insn_node.isReturn()) {
                 break;
             }
 
@@ -445,17 +445,10 @@ test "CFG from compiler" {
     defer cfg.deinit();
 
     const bb = cfg.head.head.out.?;
-    var start_type: ir.InstructionName = bb.block.start.data;
+    const start_type: ir.InstructionName = bb.block.start.data;
     try std.testing.expectEqual(ir.InstructionName.loadi, start_type);
 
-    var finish_type: ir.InstructionName = bb.block.finish.data;
-    try std.testing.expectEqual(ir.InstructionName.call, finish_type);
-
-    const following = bb.block.out.?;
-    start_type = following.block.start.data;
-    try std.testing.expectEqual(ir.InstructionName.leave, start_type);
-
-    finish_type = following.block.finish.data;
+    const finish_type: ir.InstructionName = bb.block.finish.data;
     try std.testing.expectEqual(ir.InstructionName.leave, finish_type);
 }
 
