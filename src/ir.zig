@@ -329,7 +329,7 @@ pub const Instruction = union(InstructionName) {
     }
 
     const OpIter = struct {
-        item_index: usize,
+        item_index: usize = 0,
         item_fields: u64,
         array_fields: u64,
         array_index: usize = 0,
@@ -373,7 +373,6 @@ pub const Instruction = union(InstructionName) {
         const af_mask = self.array_fields();
 
         return .{
-            .item_index = 0,
             .insn = self,
             .item_fields = if_mask,
             .array_fields = af_mask
@@ -497,4 +496,7 @@ test "can iterate on ops with list" {
     }
     try std.testing.expectEqual(4, i);
     try std.testing.expectEqual(1, list[0]);
+    try std.testing.expectEqual(2, list[1]);
+    try std.testing.expectEqual(3, list[2]);
+    try std.testing.expectEqual(4, list[3]);
 }
