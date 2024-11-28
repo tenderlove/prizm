@@ -178,23 +178,22 @@ pub const BasicBlock = union(BasicBlockType) {
         return .{ .current = self.block.start, .finish = self.block.finish, .done = false };
     }
 
-    fn fillUESet(op: *ir.Operand, _: usize, _: usize, ctx: *anyopaque) void {
-        const self: *BasicBlock = @ptrCast(@alignCast(ctx));
-
-        // If the operand is a variable, and it _isn't_ part of the kill set,
-        // (in other words it hasn't been defined in this BB), then add
-        // the operand to the "upward exposed" set.  This means the operand
-        // _must_ have been defined in a block that dominates this block.
-        if (op.isVariable() and !self.block.killed_set.isBitSet(op.getID())) {
-            self.block.upward_exposed_set.setBit(op.getID());
-        }
-    }
-
     pub fn fillVarSets(self: *BasicBlock) void {
         var iter = self.instructionIter();
 
         while (iter.next()) |insn| {
-            insn.data.eachOperand(fillUESet, @constCast(self));
+            // Full the UE set.
+            var opiter = insn.data.opIter();
+            while (opiter.next()) |op| {
+                // If the operand is a variable, and it _isn't_ part of the kill set,
+                // (in other words it hasn't been defined in this BB), then add
+                // the operand to the "upward exposed" set.  This means the operand
+                // _must_ have been defined in a block that dominates this block.
+                if (op.isVariable() and !self.block.killed_set.isBitSet(op.getID())) {
+                    self.block.upward_exposed_set.setBit(op.getID());
+                }
+            }
+
             if (insn.data.outVar()) |v| {
                 if (v.isVariable()) {
                     self.block.killed_set.setBit(v.getID());

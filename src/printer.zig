@@ -34,12 +34,24 @@ const IRPrinter = struct {
         return;
     }
 
-    fn printInsnParams(insn: ir.Instruction, out: std.io.AnyWriter) void {
-        const ctx: Context = .{
-            .out = &out,
-        };
+    fn printInsnParams(insn: ir.Instruction, out: std.io.AnyWriter) !void {
+        try out.print("(", .{});
+        var opiter = insn.opIter();
+        var first = true;
 
-        insn.eachOperand(printOperand, @constCast(&ctx));
+        while (opiter.next()) |op| {
+            if (!first) {
+                try out.print(", ", .{});
+            }
+            first = false;
+            switch (op.*) {
+                .immediate => |p| try out.print("{d}", .{p.value}),
+                .string => |p| try out.print("{s}", .{p.value}),
+                .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.name }),
+                inline else => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.name }),
+            }
+        }
+        try out.print(")", .{});
     }
 
     fn printInsnName(insn: ir.Instruction, out: std.io.AnyWriter) !void {
@@ -71,7 +83,7 @@ const IRPrinter = struct {
         }
 
         try printInsnName(insn, out);
-        printInsnParams(insn, out);
+        try printInsnParams(insn, out);
     }
 
     pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: std.io.AnyWriter) !void {

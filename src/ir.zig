@@ -130,141 +130,70 @@ pub const Instruction = union(InstructionName) {
         recv: *Operand,
         name: *Operand,
         params: std.ArrayList(*Operand),
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            const total = self.params.items.len + 2;
-            var idx: usize = 2;
-            fun(self.name, 0, total, ctx);
-            fun(self.recv, 1, total, ctx);
-            for (self.params.items) |op| {
-                fun(op, idx, total, ctx);
-                idx += 1;
-            }
-        }
     },
 
     define_method: struct {
         out: *Operand,
         name: *Operand,
         func: *Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            fun(self.name, 0, 2, ctx);
-            fun(self.func, 1, 2, ctx);
-        }
     },
 
     getlocal: struct {
         out: *Operand,
         in: *Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            fun(self.in, 0, 1, ctx);
-        }
     },
 
     getself: struct {
         out: *Operand,
-
-        pub fn eachOperand(_: @This(), _: fn (*Operand, usize, usize, *anyopaque) void, _: *anyopaque) void { }
     },
 
     jump: struct {
         label: *Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            fun(self.label, 0, 1, ctx);
-        }
     },
 
     jumpunless: struct {
         in: *Operand,
         label: *Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            fun(self.in, 0, 2, ctx);
-            fun(self.label, 1, 2, ctx);
-        }
     },
 
     leave: struct {
         in: *Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            fun(self.in, 0, 1, ctx);
-        }
     },
 
     loadi: struct {
         out: *Operand,
         val: *Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            fun(self.val, 0, 1, ctx);
-        }
     },
 
     loadnil: struct {
         out: *Operand,
-
-        pub fn eachOperand(_: @This(), _: fn (*Operand, usize, usize, *anyopaque) void, _: *anyopaque) void { }
     },
 
     mov: struct {
         out: *Operand,
         in: *Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            fun(self.in, 0, 1, ctx);
-        }
     },
 
     phi: struct {
         out: *Operand,
         a: *Operand,
         b: *Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            fun(self.a, 0, 2, ctx);
-            fun(self.b, 1, 2, ctx);
-        }
     },
 
     putlabel: struct {
         name: *Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            fun(self.name, 0, 1, ctx);
-        }
     },
 
     setlocal: struct {
         name: *Operand,
         val: *Operand,
-
-        pub fn eachOperand(self: @This(), fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-            fun(self.name, 0, 2, ctx);
-            fun(self.val, 1, 2, ctx);
-        }
     },
-
-    pub fn eachOperand(self: Instruction, fun: fn (*Operand, usize, usize, *anyopaque) void, ctx: *anyopaque) void {
-        switch(self) {
-            inline else => |p| p.eachOperand(fun, ctx)
-        }
-    }
 
     fn nth_field(comptime T: type, comptime F: type, t: *const T, index: usize) ?*const F {
         inline for (std.meta.fields(T), 0..) |field, field_index| {
             if (field.type == (*F)) {
                 if (index == field_index) {
                     return @field(t, field.name);
-                }
-            } else {
-                if (field.type == std.ArrayList(*F)) {
-                    std.debug.print("interesting {s} {} {}\n", .{ field.name, field.type, F });
-                } else {
-                    std.debug.print("wtf {s} {} {}\n", .{ field.name, field.type, F });
                 }
             }
         }
