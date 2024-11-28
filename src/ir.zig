@@ -254,6 +254,134 @@ pub const Instruction = union(InstructionName) {
         }
     }
 
+    fn nth_field(comptime T: type, comptime F: type, t: *const T, index: usize) ?*const F {
+        inline for (std.meta.fields(T), 0..) |field, field_index| {
+            if (field.type == (*F)) {
+                if (index == field_index) {
+                    return @field(t, field.name);
+                }
+            } else {
+                if (field.type == std.ArrayList(*F)) {
+                    std.debug.print("interesting {s} {} {}\n", .{ field.name, field.type, F });
+                } else {
+                    std.debug.print("wtf {s} {} {}\n", .{ field.name, field.type, F });
+                }
+            }
+        }
+        return null;
+    }
+
+    fn nth_union_field(e: *const Instruction, index: usize) ?*const Operand {
+        switch (e.*) {
+            inline else => |*variant| return nth_field(@TypeOf(variant.*), Operand, variant, index),
+        }
+    }
+
+    fn nth_list(comptime T: type, comptime F: type, t: *const T, index: usize) ?std.ArrayList(*F) {
+        inline for (std.meta.fields(T), 0..) |field, field_index| {
+            if (field.type == (std.ArrayList(*F))) {
+                if (index == field_index) {
+                    return @field(t, field.name);
+                }
+            }
+        }
+        return null;
+    }
+
+    fn nth_union_list(e: *const Instruction, index: usize) ?std.ArrayList(*Operand) {
+        switch (e.*) {
+            inline else => |*variant| return nth_list(@TypeOf(variant.*), Operand, variant, index),
+        }
+    }
+
+    fn item_fields_sub(comptime T: type) u64 {
+        var mask: u64 = 0;
+
+        inline for (std.meta.fields(T), 0..) |field, field_index| {
+            if (!std.mem.eql(u8, field.name, "out")) {
+                mask |= (1 << field_index);
+            }
+        }
+        return mask;
+    }
+
+    fn item_fields(e: *const Instruction) usize {
+        switch (e.*) {
+            inline else => |*variant| return item_fields_sub(@TypeOf(variant.*)),
+        }
+    }
+
+    fn array_fields_sub(comptime T: type, comptime F: type) u64 {
+        var fields: u64 = 0;
+
+        inline for (std.meta.fields(T), 0..) |field, field_index| {
+            if (field.type == (std.ArrayList(*F)) and !std.mem.eql(u8, field.name, "out")) {
+                fields |= (1 << field_index);
+            }
+        }
+        return fields;
+    }
+
+    fn array_fields(e: *const Instruction) usize {
+        switch (e.*) {
+            inline else => |*variant| return array_fields_sub(@TypeOf(variant.*), Operand),
+        }
+    }
+
+    const OpIter = struct {
+        item_index: usize,
+        item_fields: u64,
+        array_fields: u64,
+        array_index: usize = 0,
+        insn: *const Instruction,
+
+        pub fn next(self: *OpIter) ?*const Operand {
+            if (self.item_fields > 0) {
+                while((self.item_fields & 0x1) != 0x1) {
+                    self.item_index += 1;
+                    self.item_fields >>= 1;
+                    self.array_fields >>= 1;
+                    self.array_index = 0;
+                }
+                if (self.item_fields & 0x1 == 0x1 and self.array_fields & 0x1 == 0x1) {
+                    const item_idx = self.item_index;
+                    const ary_idx = self.array_index;
+                    const list = self.insn.nth_union_list(item_idx).?;
+                    self.array_index += 1;
+                    if (ary_idx >= list.items.len) {
+                        self.item_index += 1;
+                        self.item_fields >>= 1;
+                        self.array_fields >>= 1;
+                        self.array_index = 0;
+                        return next(self);
+                    } else {
+                        return list.items[ary_idx];
+                    }
+                } else {
+                    const idx = self.item_index;
+                    self.item_index += 1;
+                    self.item_fields >>= 1;
+                    self.array_fields >>= 1;
+                    self.array_index = 0;
+                    return self.insn.nth_union_field(idx);
+                }
+            }
+            return null;
+        }
+    };
+
+    pub fn opIter(self: *const Instruction) OpIter {
+        const if_mask = self.item_fields();
+        const af_mask = self.array_fields();
+
+        return .{
+            .item_index = 0,
+            .insn = self,
+            .item_fields = if_mask,
+            .array_fields = af_mask
+        };
+    }
+
     pub fn isAssignment(self: Instruction) bool {
         return switch(self) {
             .putlabel => false,
@@ -320,3 +448,55 @@ pub const Instruction = union(InstructionName) {
         }
     }
 };
+
+test "can iterate on ops" {
+    var out = Operand { .temp = .{ .id = 0, .name = 0 }, };
+    var in = Operand { .temp = .{ .id = 1, .name = 1 }, };
+    var insn = Instruction {
+        .mov = .{
+            .out = &out,
+            .in = &in,
+        },
+    };
+    var itr = insn.opIter();
+    var list = [_]usize { 0 };
+    var i: u32 = 0;
+    while (itr.next()) |op| {
+        list[i] = op.temp.id;
+        i += 1;
+    }
+    try std.testing.expectEqual(1, i);
+    try std.testing.expectEqual(1, list[0]);
+}
+
+test "can iterate on ops with list" {
+    var out = Operand { .temp = .{ .id = 0, .name = 0 }, };
+    var recv = Operand { .temp = .{ .id = 1, .name = 1 }, };
+    var name = Operand { .temp = .{ .id = 2, .name = 2 }, };
+    const param1 = Operand { .temp = .{ .id = 3, .name = 3 }, };
+    const param2 = Operand { .temp = .{ .id = 4, .name = 4 }, };
+
+    var params = std.ArrayList(*Operand).init(std.testing.allocator);
+    defer params.deinit();
+
+    try params.append(@constCast(&param1));
+    try params.append(@constCast(&param2));
+
+    var insn = Instruction {
+        .call = .{
+            .out = &out,
+            .recv = &recv,
+            .name = &name,
+            .params = params,
+        },
+    };
+    var itr = insn.opIter();
+    var list = [_]usize { 0, 0, 0, 0 };
+    var i: u32 = 0;
+    while (itr.next()) |op| {
+        list[i] = op.temp.id;
+        i += 1;
+    }
+    try std.testing.expectEqual(4, i);
+    try std.testing.expectEqual(1, list[0]);
+}

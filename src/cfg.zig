@@ -109,6 +109,7 @@ pub const BasicBlock = union(BasicBlockType) {
         predecessors: std.ArrayList(*BasicBlock),
         killed_set: *bitmap.BitMap,
         upward_exposed_set: *bitmap.BitMap,
+        liveout_set: *bitmap.BitMap,
         out: ?*BasicBlock = null,
         out2: ?*BasicBlock = null,
     },
@@ -135,6 +136,7 @@ pub const BasicBlock = union(BasicBlockType) {
                 .finish = finish,
                 .killed_set = try bitmap.BitMap.init(alloc, vars),
                 .upward_exposed_set = try bitmap.BitMap.init(alloc, vars),
+                .liveout_set = try bitmap.BitMap.init(alloc, vars),
                 .predecessors = std.ArrayList(*BasicBlock).init(alloc),
             }
         };
