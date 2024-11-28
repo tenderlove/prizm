@@ -335,13 +335,17 @@ pub const Instruction = union(InstructionName) {
         array_index: usize = 0,
         insn: *const Instruction,
 
+        fn advance(self:*OpIter) void {
+            self.item_index += 1;
+            self.item_fields >>= 1;
+            self.array_fields >>= 1;
+            self.array_index = 0;
+        }
+
         pub fn next(self: *OpIter) ?*const Operand {
             if (self.item_fields > 0) {
                 while((self.item_fields & 0x1) != 0x1) {
-                    self.item_index += 1;
-                    self.item_fields >>= 1;
-                    self.array_fields >>= 1;
-                    self.array_index = 0;
+                    self.advance();
                 }
                 if (self.item_fields & 0x1 == 0x1 and self.array_fields & 0x1 == 0x1) {
                     const item_idx = self.item_index;
@@ -349,20 +353,14 @@ pub const Instruction = union(InstructionName) {
                     const list = self.insn.nth_union_list(item_idx).?;
                     self.array_index += 1;
                     if (ary_idx >= list.items.len) {
-                        self.item_index += 1;
-                        self.item_fields >>= 1;
-                        self.array_fields >>= 1;
-                        self.array_index = 0;
+                        self.advance();
                         return next(self);
                     } else {
                         return list.items[ary_idx];
                     }
                 } else {
                     const idx = self.item_index;
-                    self.item_index += 1;
-                    self.item_fields >>= 1;
-                    self.array_fields >>= 1;
-                    self.array_index = 0;
+                    self.advance();
                     return self.insn.nth_union_field(idx);
                 }
             }
