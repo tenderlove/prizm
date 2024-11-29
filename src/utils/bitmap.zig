@@ -121,6 +121,25 @@ pub const BitMap = struct {
         }
     }
 
+    pub fn setIntersection(self: *BitMap, other: *BitMap) !void {
+        if (self.bits != other.bits) return error.ArgumentError;
+
+        if (self.bits > 64) {
+            const planes = ((self.bits + 63) / 64) + 1;
+            for (0..planes) |i| {
+                self.many.?[i] &= other.many.?[i];
+            }
+        } else {
+            self.single &= other.single;
+        }
+    }
+
+    pub fn intersection(self: *BitMap, other: *BitMap, mem: std.mem.Allocator) !*BitMap {
+        const new = try self.dup(mem);
+        try new.setIntersection(other);
+        return new;
+    }
+
     pub fn setNot(self: *BitMap) void {
         if (self.bits > 64) {
             const planes = ((self.bits + 63) / 64) + 1;
@@ -353,4 +372,68 @@ test "not" {
     try std.testing.expect(!new.isBitSet(1));
     try std.testing.expect(!new.isBitSet(63));
     try std.testing.expect(!new.isBitSet(70));
+}
+
+test "set intersection small" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 16);
+    defer bm1.deinit(alloc);
+    const bm2 = try BitMap.init(alloc, 16);
+    defer bm2.deinit(alloc);
+
+    try bm1.setBit(1);
+    try bm1.setBit(2);
+
+    try bm2.setBit(0);
+    try bm2.setBit(1);
+
+    try bm1.setIntersection(bm2);
+
+    try std.testing.expect(!bm1.isBitSet(0));
+    try std.testing.expect(bm1.isBitSet(1));
+    try std.testing.expect(!bm1.isBitSet(2));
+}
+
+test "set intersection large" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 128);
+    defer bm1.deinit(alloc);
+    const bm2 = try BitMap.init(alloc, 128);
+    defer bm2.deinit(alloc);
+
+    try bm1.setBit(1);
+    try bm1.setBit(2);
+    try bm1.setBit(70);
+
+    try bm2.setBit(0);
+    try bm2.setBit(1);
+    try bm2.setBit(70);
+
+    try bm1.setIntersection(bm2);
+
+    try std.testing.expect(!bm1.isBitSet(0));
+    try std.testing.expect(bm1.isBitSet(1));
+    try std.testing.expect(!bm1.isBitSet(2));
+    try std.testing.expect(bm1.isBitSet(70));
+}
+
+test "intersection" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 16);
+    defer bm1.deinit(alloc);
+    const bm2 = try BitMap.init(alloc, 16);
+    defer bm2.deinit(alloc);
+
+    try bm1.setBit(1);
+    try bm1.setBit(2);
+
+    try bm2.setBit(0);
+    try bm2.setBit(1);
+
+    const bm3 = try bm1.intersection(bm2, alloc);
+    defer bm3.deinit(alloc);
+
+    try std.testing.expect(!bm3.isBitSet(0));
+    try std.testing.expect(bm3.isBitSet(1));
+    try std.testing.expect(!bm3.isBitSet(2));
 }
