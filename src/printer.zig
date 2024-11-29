@@ -8,8 +8,7 @@ const IRPrinter = struct {
         out: *const std.io.AnyWriter,
     };
 
-    fn printOperand(op: *ir.Operand, idx: usize, nitems: usize, c: *anyopaque) void {
-        const ctx: *Context = @ptrCast(@alignCast(c));
+    fn printOperand(op: *ir.Operand, idx: usize, nitems: usize, ctx: *Context) void {
         const out = ctx.out;
 
         if (idx == 0) {
@@ -162,6 +161,23 @@ const CFGPrinter = struct {
             if (nitems > 0) {
                 var biti = blk.block.killed_set.setBitsIterator();
                 try ctx.out.print("Killed: ", .{ });
+                var i: usize = 0;
+                while (biti.next()) |opnd_id| {
+                    const opndctx = IRPrinter.Context { .out = ctx.out };
+                    const opnd = scope.operands.items[opnd_id];
+                    IRPrinter.printOperand(opnd, i, nitems, @constCast(&opndctx));
+                    i += 1;
+                }
+                try ctx.out.print("\\l", .{ });
+            }
+        }
+
+        // Print live out variables
+        {
+            const nitems = blk.block.liveout_set.popCount(); // number of variables
+            if (nitems > 0) {
+                var biti = blk.block.liveout_set.setBitsIterator();
+                try ctx.out.print("LiveOut: ", .{ });
                 var i: usize = 0;
                 while (biti.next()) |opnd_id| {
                     const opndctx = IRPrinter.Context { .out = ctx.out };

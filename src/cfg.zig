@@ -60,8 +60,8 @@ pub const CFG = struct {
         }
 
         pub fn deinit(self: *DepthFirstIterator) void {
-            self.seen.deinit();
             self.work.deinit();
+            self.seen.deinit();
         }
     };
 
@@ -152,6 +152,55 @@ pub const BasicBlock = union(BasicBlockType) {
         return self.block.upward_exposed_set.popCount();
     }
 
+    fn childLo(_: *BasicBlock, child: *BasicBlock, alloc: std.mem.Allocator) !*bitmap.BitMap {
+        const ue = child.block.upward_exposed_set;
+        const lo = child.block.liveout_set;
+        const varkill = child.block.killed_set;
+
+        const notkill = try varkill.not(alloc);
+        defer alloc.destroy(notkill);
+
+        const lonk = try lo.intersection(notkill, alloc);
+        defer alloc.destroy(lonk);
+
+        const newlo = try ue.Union(lonk, alloc);
+        return newlo;
+    }
+
+    // Update the LiveOut set.  If the set changes, returns true
+    pub fn updateLiveOut(self: *BasicBlock, alloc: std.mem.Allocator) !bool {
+        // Engineering a compiler, 3rd ed, 8.6, "Defining the Data-Flow Problem" (page 419)
+        // Also Figure 8.15
+        if (self.block.out) |child1| {
+            const newlo = try self.childLo(child1, alloc);
+            defer alloc.destroy(newlo);
+
+            if (self.block.out2) |child2| {
+                const newlo2 = try self.childLo(child2, alloc);
+                defer alloc.destroy(newlo2);
+
+                const bothlo = try newlo.Union(newlo2, alloc);
+                defer alloc.destroy(bothlo);
+
+                if (self.block.liveout_set.eq(bothlo)) {
+                    return false;
+                } else {
+                    try self.block.liveout_set.replace(bothlo);
+                    return true;
+                }
+            } else {
+                if (self.block.liveout_set.eq(newlo)) {
+                    return false;
+                } else {
+                    try self.block.liveout_set.replace(newlo);
+                    return true;
+                }
+            }
+        } else {
+            return false;
+        }
+    }
+
     const InstructionIter = struct {
         current: ?*ir.InstructionList.Node,
         finish: *ir.InstructionList.Node,
@@ -178,7 +227,7 @@ pub const BasicBlock = union(BasicBlockType) {
         return .{ .current = self.block.start, .finish = self.block.finish, .done = false };
     }
 
-    pub fn fillVarSets(self: *BasicBlock) void {
+    pub fn fillVarSets(self: *BasicBlock) !void {
         var iter = self.instructionIter();
 
         while (iter.next()) |insn| {
@@ -190,13 +239,13 @@ pub const BasicBlock = union(BasicBlockType) {
                 // the operand to the "upward exposed" set.  This means the operand
                 // _must_ have been defined in a block that dominates this block.
                 if (op.isVariable() and !self.block.killed_set.isBitSet(op.getID())) {
-                    self.block.upward_exposed_set.setBit(op.getID());
+                    try self.block.upward_exposed_set.setBit(op.getID());
                 }
             }
 
             if (insn.data.outVar()) |v| {
                 if (v.isVariable()) {
-                    self.block.killed_set.setBit(v.getID());
+                    try self.block.killed_set.setBit(v.getID());
                 }
             }
         }
@@ -382,7 +431,21 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     defer iter.deinit();
 
     while (try iter.next()) |bb| {
-        bb.fillVarSets();
+        try bb.fillVarSets();
+    }
+
+
+    var changed = true;
+    while (changed) {
+        var liveout_iter = try cfg.depthFirstIterator();
+        defer liveout_iter.deinit();
+
+        changed = false;
+        while (try liveout_iter.next()) |bb| {
+            if (try bb.updateLiveOut(allocator)) {
+                changed = true;
+            }
+        }
     }
 
     return cfg;
@@ -627,6 +690,48 @@ test "complex loop with if" {
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
+}
+
+test "live out passes through if statement" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code =
+\\ def foo y, z
+\\   x = z + 5
+\\   if y < 123
+\\     y = 1
+\\   else
+\\     y = 2
+\\   end
+\\   x + y
+\\ end
+;
+    const scope = try compileScope(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func.scope.value;
+
+    const opnd = try method_scope.getLocalName("x");
+
+    const methodcfg = try buildCFG(allocator, method_scope);
+    defer methodcfg.deinit();
+
+    var iter = try methodcfg.depthFirstIterator();
+    defer iter.deinit();
+
+    while (try iter.next()) |bb| {
+        if (bb.block.out) |_| {
+            try std.testing.expect(bb.block.liveout_set.isBitSet(opnd.local.id));
+        }
+    }
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
