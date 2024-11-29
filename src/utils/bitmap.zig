@@ -17,6 +17,19 @@ pub const BitMap = struct {
         return bm;
     }
 
+    pub fn dup(orig: *BitMap, mem: std.mem.Allocator) !*BitMap {
+        const new = try mem.create(BitMap);
+        const bits = orig.bits;
+        new.* = .{ .bits = bits, .single = orig.single, .many = null };
+        if (bits > 64) {
+            const planes = ((bits + 63) / 64) + 1;
+            const memory = try mem.alloc(u64, planes);
+            @memcpy(memory, orig.many.?);
+            new.*.many = memory;
+        }
+        return new;
+    }
+
     pub fn popCount(self: *BitMap) usize {
         if (self.bits > 64) {
             var count: usize = 0;
@@ -29,7 +42,9 @@ pub const BitMap = struct {
         }
     }
 
-    pub fn setBit(self: *BitMap, bit: u64) void {
+    pub fn setBit(self: *BitMap, bit: u64) !void {
+        if (bit >= self.bits) return error.OutOfBoundsError;
+
         if (self.bits > 64) {
             const plane = bit / 64;
             const theBit: u6 = @intCast(@mod(bit, 64));
@@ -79,7 +94,9 @@ pub const BitMap = struct {
         };
     }
 
-    pub fn unsetBit(self: *BitMap, bit: u64) void {
+    pub fn unsetBit(self: *BitMap, bit: u64) !void {
+        if (bit >= self.bits) return error.OutOfBoundsError;
+
         if (self.bits > 64) {
             const plane = bit / 64;
             const theBit: u6 = @intCast(@mod(bit, 64));
@@ -91,6 +108,8 @@ pub const BitMap = struct {
     }
 
     pub fn isBitSet(self: *BitMap, bit: u64) bool {
+        if (bit >= self.bits) return false;
+
         if (self.bits > 64) {
             const plane = bit / 64;
             const theBit: u6 = @intCast(@mod(bit, 64));
@@ -100,6 +119,24 @@ pub const BitMap = struct {
             const v = (@as(u64, 1) << @as(u6, @intCast(bit)));
             return v == (self.single & v);
         }
+    }
+
+    pub fn setNot(self: *BitMap) void {
+        if (self.bits > 64) {
+            const planes = ((self.bits + 63) / 64) + 1;
+            for (0..planes) |i| {
+                const plane = self.many.?[i];
+                self.many.?[i] = ~plane;
+            }
+        } else {
+            self.single = ~self.single;
+        }
+    }
+
+    pub fn not(self: *BitMap, mem: std.mem.Allocator) !*BitMap {
+        const new = try self.dup(mem);
+        new.setNot();
+        return new;
     }
 
     pub fn deinit(self: *BitMap, mem: std.mem.Allocator) void {
@@ -116,12 +153,12 @@ test "create bitmap" {
     const bm = try BitMap.init(alloc, 32);
     defer bm.deinit(alloc);
 
-    bm.setBit(1);
+    try bm.setBit(1);
 
     try std.testing.expect(bm.isBitSet(1));
     try std.testing.expect(!bm.isBitSet(0));
 
-    bm.unsetBit(1);
+    try bm.unsetBit(1);
     try std.testing.expect(!bm.isBitSet(1));
 }
 
@@ -131,16 +168,16 @@ test "create bitmap with 100 bits" {
     const bm = try BitMap.init(alloc, 100);
     defer bm.deinit(alloc);
 
-    bm.setBit(1);
-    bm.setBit(70);
+    try bm.setBit(1);
+    try bm.setBit(70);
 
     try std.testing.expect(bm.isBitSet(1));
     try std.testing.expect(bm.isBitSet(70));
     try std.testing.expect(!bm.isBitSet(0));
     try std.testing.expect(!bm.isBitSet(71));
 
-    bm.unsetBit(1);
-    bm.unsetBit(70);
+    try bm.unsetBit(1);
+    try bm.unsetBit(70);
     try std.testing.expect(!bm.isBitSet(1));
     try std.testing.expect(!bm.isBitSet(70));
 }
@@ -151,16 +188,16 @@ test "create bitmap with 64 bits" {
     const bm = try BitMap.init(alloc, 64);
     defer bm.deinit(alloc);
 
-    bm.setBit(1);
-    bm.setBit(63);
+    try bm.setBit(1);
+    try bm.setBit(63);
 
     try std.testing.expect(bm.isBitSet(1));
     try std.testing.expect(bm.isBitSet(63));
     try std.testing.expect(!bm.isBitSet(0));
     try std.testing.expect(!bm.isBitSet(62));
 
-    bm.unsetBit(1);
-    bm.unsetBit(63);
+    try bm.unsetBit(1);
+    try bm.unsetBit(63);
 
     try std.testing.expect(!bm.isBitSet(1));
     try std.testing.expect(!bm.isBitSet(63));
@@ -173,8 +210,8 @@ test "bitset iterator single plane" {
     const bm = try BitMap.init(alloc, 20);
     defer bm.deinit(alloc);
 
-    bm.setBit(1);
-    bm.setBit(15);
+    try bm.setBit(1);
+    try bm.setBit(15);
 
     var bitidx: usize = 0;
     var iter = bm.setBitsIterator();
@@ -193,10 +230,11 @@ test "bitset iterator multi plane" {
     const bm = try BitMap.init(alloc, 128);
     defer bm.deinit(alloc);
 
-    bm.setBit(1);
-    bm.setBit(63);
-    bm.setBit(64);
-    bm.setBit(128);
+    try bm.setBit(1);
+    try bm.setBit(63);
+    try bm.setBit(64);
+    try std.testing.expectError(error.OutOfBoundsError, bm.setBit(128));
+    try std.testing.expectError(error.OutOfBoundsError, bm.unsetBit(128));
 
     var bitidx: usize = 0;
     var iter = bm.setBitsIterator();
@@ -207,7 +245,6 @@ test "bitset iterator multi plane" {
     try std.testing.expectEqual(1, bits[0]);
     try std.testing.expectEqual(63, bits[1]);
     try std.testing.expectEqual(64, bits[2]);
-    try std.testing.expectEqual(128, bits[3]);
 }
 
 test "popcount single plane" {
@@ -216,8 +253,8 @@ test "popcount single plane" {
     const bm = try BitMap.init(alloc, 20);
     defer bm.deinit(alloc);
 
-    bm.setBit(1);
-    bm.setBit(15);
+    try bm.setBit(1);
+    try bm.setBit(15);
 
     try std.testing.expectEqual(2, bm.popCount());
 }
@@ -227,10 +264,93 @@ test "popcount multi-plane" {
     const bm = try BitMap.init(alloc, 128);
     defer bm.deinit(alloc);
 
-    bm.setBit(1);
-    bm.setBit(63);
-    bm.setBit(64);
-    bm.setBit(128);
+    try bm.setBit(1);
+    try bm.setBit(63);
+    try bm.setBit(64);
 
-    try std.testing.expectEqual(4, bm.popCount());
+    try std.testing.expectEqual(3, bm.popCount());
+}
+
+test "not big" {
+    const alloc = std.testing.allocator;
+    const bm = try BitMap.init(alloc, 128);
+    defer bm.deinit(alloc);
+
+    try bm.setBit(1);
+    try bm.setBit(63);
+    try bm.setBit(64);
+
+    bm.setNot();
+
+    try std.testing.expect(!bm.isBitSet(1));
+    try std.testing.expect(!bm.isBitSet(63));
+    try std.testing.expect(!bm.isBitSet(64));
+    try std.testing.expect(bm.isBitSet(0));
+    try std.testing.expect(bm.isBitSet(2));
+    try std.testing.expect(bm.isBitSet(65));
+}
+
+test "not small" {
+    const alloc = std.testing.allocator;
+    const bm = try BitMap.init(alloc, 64);
+    defer bm.deinit(alloc);
+
+    try bm.setBit(1);
+    try bm.setBit(63);
+
+    bm.setNot();
+
+    try std.testing.expect(!bm.isBitSet(1));
+    try std.testing.expect(!bm.isBitSet(63));
+    try std.testing.expect(bm.isBitSet(0));
+    try std.testing.expect(bm.isBitSet(2));
+}
+
+test "dup small" {
+    const alloc = std.testing.allocator;
+    const bm = try BitMap.init(alloc, 64);
+    defer bm.deinit(alloc);
+
+    try bm.setBit(1);
+    try bm.setBit(63);
+
+    const new = try bm.dup(alloc);
+    defer new.deinit(alloc);
+
+    try std.testing.expect(new.isBitSet(1));
+    try std.testing.expect(new.isBitSet(63));
+}
+
+test "dup big" {
+    const alloc = std.testing.allocator;
+    const bm = try BitMap.init(alloc, 128);
+    defer bm.deinit(alloc);
+
+    try bm.setBit(1);
+    try bm.setBit(63);
+    try bm.setBit(70);
+
+    const new = try bm.dup(alloc);
+    defer new.deinit(alloc);
+
+    try std.testing.expect(new.isBitSet(1));
+    try std.testing.expect(new.isBitSet(63));
+    try std.testing.expect(new.isBitSet(70));
+}
+
+test "not" {
+    const alloc = std.testing.allocator;
+    const bm = try BitMap.init(alloc, 128);
+    defer bm.deinit(alloc);
+
+    try bm.setBit(1);
+    try bm.setBit(63);
+    try bm.setBit(70);
+
+    const new = try bm.not(alloc);
+    defer new.deinit(alloc);
+
+    try std.testing.expect(!new.isBitSet(1));
+    try std.testing.expect(!new.isBitSet(63));
+    try std.testing.expect(!new.isBitSet(70));
 }
