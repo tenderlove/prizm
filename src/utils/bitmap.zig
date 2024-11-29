@@ -168,6 +168,16 @@ pub const BitMap = struct {
         return new;
     }
 
+    pub fn replace(self: *BitMap, other: *BitMap) !void {
+        if (self.bits != other.bits) return error.ArgumentError;
+
+        if (self.bits > 64) {
+            @memcpy(self.many.?, other.many.?);
+        } else {
+            self.single = other.single;
+        }
+    }
+
     pub fn Union(self: *BitMap, other: *BitMap, mem: std.mem.Allocator) !*BitMap {
         const new = try self.dup(mem);
         try new.setUnion(other);
@@ -567,4 +577,44 @@ test "eq large" {
     try std.testing.expect(bm1.eq(bm2));
     try bm2.setBit(0);
     try std.testing.expect(!bm1.eq(bm2));
+}
+
+test "replace small" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 16);
+    defer bm1.deinit(alloc);
+    const bm2 = try BitMap.init(alloc, 16);
+    defer bm2.deinit(alloc);
+
+    try bm1.setBit(0);
+    try bm1.setBit(1);
+    try bm1.setBit(15);
+
+    try std.testing.expect(!bm1.eq(bm2));
+    try std.testing.expect(!bm2.isBitSet(15));
+    try bm2.replace(bm1);
+    try std.testing.expect(bm2.isBitSet(0));
+    try std.testing.expect(bm2.isBitSet(1));
+    try std.testing.expect(bm2.isBitSet(15));
+    try std.testing.expect(bm1.eq(bm2));
+}
+
+test "replace large" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 128);
+    defer bm1.deinit(alloc);
+    const bm2 = try BitMap.init(alloc, 128);
+    defer bm2.deinit(alloc);
+
+    try bm1.setBit(1);
+    try bm1.setBit(2);
+    try bm1.setBit(70);
+
+    try std.testing.expect(!bm1.eq(bm2));
+    try std.testing.expect(!bm2.isBitSet(70));
+    try bm2.replace(bm1);
+    try std.testing.expect(bm2.isBitSet(1));
+    try std.testing.expect(bm2.isBitSet(2));
+    try std.testing.expect(bm2.isBitSet(70));
+    try std.testing.expect(bm1.eq(bm2));
 }
