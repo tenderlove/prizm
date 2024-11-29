@@ -30,6 +30,16 @@ pub const BitMap = struct {
         return new;
     }
 
+    pub fn eq(self: *BitMap, other: *BitMap) bool {
+        if (self.bits != other.bits) return false;
+
+        if (self.bits > 64) {
+            return std.mem.eql(u64, self.many.?, other.many.?);
+        } else {
+            return self.single == other.single;
+        }
+    }
+
     pub fn popCount(self: *BitMap) usize {
         if (self.bits > 64) {
             var count: usize = 0;
@@ -519,4 +529,42 @@ test "union" {
     try std.testing.expect(bm3.isBitSet(0));
     try std.testing.expect(bm3.isBitSet(1));
     try std.testing.expect(bm3.isBitSet(2));
+}
+
+test "eq small" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 16);
+    defer bm1.deinit(alloc);
+    const bm2 = try BitMap.init(alloc, 16);
+    defer bm2.deinit(alloc);
+
+    try bm1.setBit(0);
+    try bm1.setBit(1);
+
+    try bm2.setBit(0);
+    try bm2.setBit(1);
+
+    try std.testing.expect(bm1.eq(bm2));
+    try bm2.setBit(2);
+    try std.testing.expect(!bm1.eq(bm2));
+}
+
+test "eq large" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 128);
+    defer bm1.deinit(alloc);
+    const bm2 = try BitMap.init(alloc, 128);
+    defer bm2.deinit(alloc);
+
+    try bm1.setBit(1);
+    try bm1.setBit(2);
+    try bm1.setBit(70);
+
+    try bm2.setBit(1);
+    try bm2.setBit(2);
+    try bm2.setBit(70);
+
+    try std.testing.expect(bm1.eq(bm2));
+    try bm2.setBit(0);
+    try std.testing.expect(!bm1.eq(bm2));
 }
