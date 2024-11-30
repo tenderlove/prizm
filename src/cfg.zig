@@ -4,6 +4,7 @@ const ir = @import("ir.zig");
 const prism = @import("prism.zig");
 const vm = @import("vm.zig");
 const compiler = @import("compiler.zig");
+const Scope = compiler.Scope;
 const printer = @import("printer.zig");
 const assert = @import("std").debug.assert;
 const bitmap = @import("utils/bitmap.zig");
@@ -335,6 +336,24 @@ pub const BasicBlock = union(BasicBlockType) {
                 }
             }
         }
+    }
+
+    pub fn uninitializedSet(self: *BasicBlock, scope: *Scope, mem: std.mem.Allocator) !*bitmap.BitMap {
+        if (!self.block.entry) return error.ArgumentError;
+
+        const uninit = try self.block.killed_set.dup(mem);
+        uninit.setNot();
+        try uninit.setIntersection(self.block.liveout_set);
+        try uninit.setUnion(self.block.upward_exposed_set);
+
+        var biti = uninit.setBitsIterator();
+        while (biti.next()) |opnd_id| {
+            const op = scope.operands.items[opnd_id];
+            if (op.isParam()) {
+                try uninit.unsetBit(opnd_id);
+            }
+        }
+        return uninit;
     }
 };
 

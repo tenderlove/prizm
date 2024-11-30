@@ -92,6 +92,13 @@ pub const Operand = union(OperandType) {
         };
     }
 
+    pub fn isParam(self: Operand) bool {
+        return switch(self) {
+            .param => true,
+            inline else => false
+        };
+    }
+
     pub fn shortName(self: Operand) [] const u8 {
         return switch(self) {
             .constant => "k",

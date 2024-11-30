@@ -5,7 +5,7 @@ const CFG = @import("cfg.zig");
 const bm = @import("utils/bitmap.zig");
 
 const IRPrinter = struct {
-    fn printOpnd(op: *const ir.Operand, out: std.io.AnyWriter) !void {
+    fn printOpnd(op: *const ir.Operand, out: *const std.io.AnyWriter) !void {
         switch (op.*) {
             .immediate => |p| try out.print("{d}", .{p.value}),
             .string => |p| try out.print("{s}", .{p.value}),
@@ -14,7 +14,7 @@ const IRPrinter = struct {
         }
     }
 
-    fn printInsnParams(insn: ir.Instruction, out: std.io.AnyWriter) !void {
+    fn printInsnParams(insn: ir.Instruction, out: *const std.io.AnyWriter) !void {
         try out.print("(", .{});
         var opiter = insn.opIter();
         var first = true;
@@ -29,7 +29,7 @@ const IRPrinter = struct {
         try out.print(")", .{});
     }
 
-    fn printInsnName(insn: ir.Instruction, out: std.io.AnyWriter) !void {
+    fn printInsnName(insn: ir.Instruction, out: *const std.io.AnyWriter) !void {
         comptime var maxlen: usize = 0;
         comptime for (@typeInfo(ir.InstructionName).@"enum".fields) |field| {
             const name_len = field.name.len;
@@ -43,7 +43,7 @@ const IRPrinter = struct {
         });
     }
 
-    fn printInsn(insn: ir.Instruction, digits: u32, out: std.io.AnyWriter) ! void {
+    fn printInsn(insn: ir.Instruction, digits: u32, out: *const std.io.AnyWriter) ! void {
         if (insn.outVar()) |n| {
             try out.print("  {s}", .{n.shortName()});
             try out.print("{[value]d: <[width]}<- ", .{
@@ -61,7 +61,7 @@ const IRPrinter = struct {
         try printInsnParams(insn, out);
     }
 
-    pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: std.io.AnyWriter) !void {
+    pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: *const std.io.AnyWriter) !void {
         var work = std.ArrayList(*cmp.Scope).init(alloc);
         defer work.deinit();
         try work.append(scope);
@@ -125,7 +125,7 @@ const CFGPrinter = struct {
                 first = false;
 
                 const op = scope.operands.items[opnd_id];
-                try printOpnd(op, out);
+                try IRPrinter.printOpnd(op, out);
             }
             try out.print(")", .{});
             try out.print("\\l", .{ });
@@ -134,6 +134,9 @@ const CFGPrinter = struct {
 
     fn printBlock(scope: *cmp.Scope, blk: *CFG.BasicBlock, ctx: *const Context) !void {
         try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.block.name });
+        if (blk.block.entry) {
+            try ctx.out.print("color=green\n", .{});
+        }
         try ctx.out.print("label=\"BB{d}\\l", .{ blk.block.name });
 
         // Print upward exposed variables
@@ -145,6 +148,15 @@ const CFGPrinter = struct {
         // Print live out variables
         try printSet("LiveOut: ", scope, blk.block.liveout_set, ctx.out);
 
+        // Print uninitialized variables
+        if (blk.block.entry) {
+            const uninitialized = try blk.uninitializedSet(scope, scope.allocator);
+            defer scope.allocator.destroy(uninitialized);
+            if (uninitialized.popCount() > 0) {
+                try printSet("Uninitialized: ", scope, uninitialized, ctx.out);
+            }
+        }
+
         try ctx.out.print("\\l", .{ });
 
         var iter = blk.instructionIter();
@@ -152,7 +164,7 @@ const CFGPrinter = struct {
             if (ir.InstructionName.define_method == @as(ir.InstructionName, insn.data)) {
                 try ctx.work.append(insn.data.define_method.func.scope.value);
             }
-            try IRPrinter.printInsn(insn.data, ctx.var_width, ctx.out.*);
+            try IRPrinter.printInsn(insn.data, ctx.var_width, ctx.out);
             try ctx.out.print("\\l", .{});
         }
 
@@ -178,12 +190,12 @@ const CFGPrinter = struct {
 
     }
 
-    pub fn printCFG(alloc: std.mem.Allocator, scope: *cmp.Scope, out: std.io.AnyWriter) !void {
+    pub fn printCFG(alloc: std.mem.Allocator, scope: *cmp.Scope, out: *const std.io.AnyWriter) !void {
         var work = std.ArrayList(*cmp.Scope).init(alloc);
         defer work.deinit();
 
         var ctx = Context {
-            .out = &out,
+            .out = out,
             .work = &work,
             .scope = scope,
             .var_width = countDigits(scope.maxId()),
@@ -224,9 +236,9 @@ fn countDigits(num: usize) u32 {
 
 
 pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: std.io.AnyWriter) !void {
-    try IRPrinter.printIR(alloc, scope, out);
+    try IRPrinter.printIR(alloc, scope, &out);
 }
 
 pub fn printCFG(alloc: std.mem.Allocator, scope: *cmp.Scope, out: std.io.AnyWriter) !void {
-    try CFGPrinter.printCFG(alloc, scope, out);
+    try CFGPrinter.printCFG(alloc, scope, &out);
 }
