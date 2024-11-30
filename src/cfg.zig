@@ -33,9 +33,13 @@ pub const CFG = struct {
         return cfg;
     }
 
-    pub fn makeBlock(self: *CFG, start: *ir.InstructionList.Node, finish: *ir.InstructionList.Node) !*BasicBlock {
+    pub fn makeBlock(self: *CFG, start: *ir.InstructionList.Node, finish: *ir.InstructionList.Node, entry: bool) !*BasicBlock {
         const block = try BasicBlock.initBlock(self.arena.allocator(),
-            self.block_name, start, finish, self.scope.nextOpndId());
+            self.block_name,
+            start,
+            finish,
+            entry,
+            self.scope.nextOpndId());
 
         self.block_name += 1;
 
@@ -104,6 +108,7 @@ pub const BasicBlock = union(BasicBlockType) {
 
     block: struct {
         name: u64,
+        entry: bool,
         start: *ir.InstructionList.Node,
         finish: *ir.InstructionList.Node,
         predecessors: std.ArrayList(*BasicBlock),
@@ -126,7 +131,7 @@ pub const BasicBlock = union(BasicBlockType) {
         return bb;
     }
 
-    fn initBlock(alloc: std.mem.Allocator, name: u64, start: anytype, finish: anytype, vars: usize) !*BasicBlock {
+    fn initBlock(alloc: std.mem.Allocator, name: u64, start: anytype, finish: anytype, entry: bool, vars: usize) !*BasicBlock {
         const block = try alloc.create(BasicBlock);
 
         block.* = .{
@@ -134,6 +139,7 @@ pub const BasicBlock = union(BasicBlockType) {
                 .name = name,
                 .start = start,
                 .finish = finish,
+                .entry = entry,
                 .killed_set = try bitmap.BitMap.init(alloc, vars),
                 .upward_exposed_set = try bitmap.BitMap.init(alloc, vars),
                 .liveout_set = try bitmap.BitMap.init(alloc, vars),
@@ -342,9 +348,6 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     var wants_label = std.ArrayList(*BasicBlock).init(allocator);
     defer wants_label.deinit();
 
-    //var all_bbs = std.ArrayList(*BasicBlock).init(allocator);
-    //defer all_bbs.deinit();
-
     var last_block = cfg.head;
 
     const insns = scope.insns;
@@ -359,10 +362,13 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     @memset(label_to_block_lut, null);
     defer allocator.free(label_to_block_lut);
 
+    var entry = true;
+
     // For all of our instructions
     while (node) |insn| {
         // Create a new block
-        const current_block = try cfg.makeBlock(insn, insn);
+        const current_block = try cfg.makeBlock(insn, insn, entry);
+        entry = false;
 
         // Scan through following instructions until we find an instruction
         // that should end the block.
@@ -386,8 +392,6 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
                 }
             }
         }
-
-        ////try all_bbs.append(current_block);
 
         // If the previous block falls through, then we should add the
         // current block as a outgoing edge, and add the last block

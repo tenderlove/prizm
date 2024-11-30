@@ -2,6 +2,7 @@ const std = @import("std");
 const ir = @import("ir.zig");
 const cmp = @import("compiler.zig");
 const CFG = @import("cfg.zig");
+const bm = @import("utils/bitmap.zig");
 
 const IRPrinter = struct {
     const Context = struct {
@@ -134,60 +135,35 @@ const CFGPrinter = struct {
         var_width: u32,
     };
 
+    fn printSet(comptime name: []const u8, scope: *cmp.Scope, set: *bm.BitMap, out: *const std.io.AnyWriter) !void {
+        const nitems = set.popCount(); // number of variables
+        if (nitems > 0) {
+            var biti = set.setBitsIterator();
+            try out.print(name, .{ });
+            var i: usize = 0;
+            while (biti.next()) |opnd_id| {
+                const opndctx = IRPrinter.Context { .out = out };
+                const opnd = scope.operands.items[opnd_id];
+                IRPrinter.printOperand(opnd, i, nitems, @constCast(&opndctx));
+                i += 1;
+            }
+            try out.print("\\l", .{ });
+        }
+    }
+
     fn printBlock(scope: *cmp.Scope, blk: *CFG.BasicBlock, ctx: *const Context) !void {
         try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.block.name });
         try ctx.out.print("label=\"BB{d}\\l", .{ blk.block.name });
 
         // Print upward exposed variables
-        {
-            const nitems = blk.block.upward_exposed_set.popCount(); // number of variables
-            if (nitems > 0) {
-                var biti = blk.block.upward_exposed_set.setBitsIterator();
-                try ctx.out.print("UE: ", .{ });
-                var i: usize = 0;
-                while (biti.next()) |opnd_id| {
-                    const opndctx = IRPrinter.Context { .out = ctx.out };
-                    const opnd = scope.operands.items[opnd_id];
-                    IRPrinter.printOperand(opnd, i, nitems, @constCast(&opndctx));
-                    i += 1;
-                }
-                try ctx.out.print("\\l", .{ });
-            }
-        }
+        try printSet("UE: ", scope, blk.block.upward_exposed_set, ctx.out);
 
         // Print killed variables
-        {
-            const nitems = blk.block.killed_set.popCount(); // number of variables
-            if (nitems > 0) {
-                var biti = blk.block.killed_set.setBitsIterator();
-                try ctx.out.print("Killed: ", .{ });
-                var i: usize = 0;
-                while (biti.next()) |opnd_id| {
-                    const opndctx = IRPrinter.Context { .out = ctx.out };
-                    const opnd = scope.operands.items[opnd_id];
-                    IRPrinter.printOperand(opnd, i, nitems, @constCast(&opndctx));
-                    i += 1;
-                }
-                try ctx.out.print("\\l", .{ });
-            }
-        }
+        try printSet("Killed: ", scope, blk.block.killed_set, ctx.out);
 
         // Print live out variables
-        {
-            const nitems = blk.block.liveout_set.popCount(); // number of variables
-            if (nitems > 0) {
-                var biti = blk.block.liveout_set.setBitsIterator();
-                try ctx.out.print("LiveOut: ", .{ });
-                var i: usize = 0;
-                while (biti.next()) |opnd_id| {
-                    const opndctx = IRPrinter.Context { .out = ctx.out };
-                    const opnd = scope.operands.items[opnd_id];
-                    IRPrinter.printOperand(opnd, i, nitems, @constCast(&opndctx));
-                    i += 1;
-                }
-                try ctx.out.print("\\l", .{ });
-            }
-        }
+        try printSet("LiveOut: ", scope, blk.block.liveout_set, ctx.out);
+
         try ctx.out.print("\\l", .{ });
 
         var iter = blk.instructionIter();
