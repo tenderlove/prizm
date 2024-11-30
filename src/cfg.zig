@@ -349,6 +349,8 @@ pub const BasicBlock = union(BasicBlockType) {
         var biti = uninit.setBitsIterator();
         while (biti.next()) |opnd_id| {
             const op = scope.operands.items[opnd_id];
+            // Remove parameters from the uninitialized set. They should
+            // be initialized by the caller
             if (op.isParam()) {
                 try uninit.unsetBit(opnd_id);
             }
