@@ -5,35 +5,6 @@ const CFG = @import("cfg.zig");
 const bm = @import("utils/bitmap.zig");
 
 const IRPrinter = struct {
-    const Context = struct {
-        out: *const std.io.AnyWriter,
-    };
-
-    fn printOperand(op: *ir.Operand, idx: usize, nitems: usize, ctx: *Context) void {
-        const out = ctx.out;
-
-        if (idx == 0) {
-            out.print("(", .{}) catch { };
-        }
-
-        switch (op.*) {
-            .immediate => |p| out.print("{d}", .{p.value}) catch { },
-            .string => |p| out.print("{s}", .{p.value}) catch { },
-            .scope => |payload| out.print("{s}{d}", .{ op.shortName(), payload.value.name }) catch { },
-            inline else => |payload| out.print("{s}{d}", .{ op.shortName(), payload.name }) catch { },
-        }
-
-        if (nitems > 0 and idx != (nitems - 1)) {
-            out.print(", ", .{}) catch { };
-        }
-
-        if (idx == (nitems - 1)) {
-            out.print(")", .{}) catch { };
-        }
-
-        return;
-    }
-
     fn printInsnParams(insn: ir.Instruction, out: std.io.AnyWriter) !void {
         try out.print("(", .{});
         var opiter = insn.opIter();
@@ -140,13 +111,27 @@ const CFGPrinter = struct {
         if (nitems > 0) {
             var biti = set.setBitsIterator();
             try out.print(name, .{ });
+            try out.print("(", .{});
+
             var i: usize = 0;
+            var first = true;
             while (biti.next()) |opnd_id| {
-                const opndctx = IRPrinter.Context { .out = out };
-                const opnd = scope.operands.items[opnd_id];
-                IRPrinter.printOperand(opnd, i, nitems, @constCast(&opndctx));
+                if (!first) {
+                    try out.print(", ", .{});
+                }
+                first = false;
+
+                const op = scope.operands.items[opnd_id];
+                switch (op.*) {
+                    .immediate => |p| try out.print("{d}", .{p.value}),
+                    .string => |p| try out.print("{s}", .{p.value}),
+                    .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.name }),
+                    inline else => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.name }),
+                }
+
                 i += 1;
             }
+            try out.print(")", .{});
             try out.print("\\l", .{ });
         }
     }
