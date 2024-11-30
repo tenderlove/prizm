@@ -5,6 +5,15 @@ const CFG = @import("cfg.zig");
 const bm = @import("utils/bitmap.zig");
 
 const IRPrinter = struct {
+    fn printOpnd(op: *const ir.Operand, out: std.io.AnyWriter) !void {
+        switch (op.*) {
+            .immediate => |p| try out.print("{d}", .{p.value}),
+            .string => |p| try out.print("{s}", .{p.value}),
+            .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.name }),
+            inline else => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.name }),
+        }
+    }
+
     fn printInsnParams(insn: ir.Instruction, out: std.io.AnyWriter) !void {
         try out.print("(", .{});
         var opiter = insn.opIter();
@@ -15,12 +24,7 @@ const IRPrinter = struct {
                 try out.print(", ", .{});
             }
             first = false;
-            switch (op.*) {
-                .immediate => |p| try out.print("{d}", .{p.value}),
-                .string => |p| try out.print("{s}", .{p.value}),
-                .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.name }),
-                inline else => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.name }),
-            }
+            try printOpnd(op, out);
         }
         try out.print(")", .{});
     }
@@ -113,7 +117,6 @@ const CFGPrinter = struct {
             try out.print(name, .{ });
             try out.print("(", .{});
 
-            var i: usize = 0;
             var first = true;
             while (biti.next()) |opnd_id| {
                 if (!first) {
@@ -122,14 +125,7 @@ const CFGPrinter = struct {
                 first = false;
 
                 const op = scope.operands.items[opnd_id];
-                switch (op.*) {
-                    .immediate => |p| try out.print("{d}", .{p.value}),
-                    .string => |p| try out.print("{s}", .{p.value}),
-                    .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.name }),
-                    inline else => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.name }),
-                }
-
-                i += 1;
+                try printOpnd(op, out);
             }
             try out.print(")", .{});
             try out.print("\\l", .{ });
