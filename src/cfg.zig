@@ -82,6 +82,84 @@ pub const CFG = struct {
         };
     }
 
+    // Fill in VarKilled and UE var sets for all BBs
+    pub fn fillVarSets(self: *CFG) !void {
+        var iter = try self.depthFirstIterator();
+        defer iter.deinit();
+
+        while (try iter.next()) |bb| {
+            try bb.fillVarSets();
+        }
+    }
+
+    // Fill in dominator sets on all BBs
+    pub fn fillDominators(self: *CFG) !void {
+        const list = try self.reversePostorderBlocks(self.mem);
+        defer self.mem.free(list);
+
+        for (list) |maybebb| {
+            if (maybebb) |bb| {
+                if (bb.entry) {
+                    bb.dom = try bitmap.BitMap.init(self.arena.allocator(), self.block_name);
+                    // Entry blocks dominate themselves, and nothing else
+                    // dominates an entry block.
+                    try bb.dom.?.setBit(bb.name);
+                } else {
+                    // Default blocks to "everything dominates this block"
+                    bb.dom = try bitmap.BitMap.init(self.arena.allocator(), self.block_name);
+                    bb.dom.?.setNot();
+                }
+            }
+        }
+
+        var changed = true;
+        while (changed) {
+            changed = false;
+
+            for (list) |maybebb| {
+                if (maybebb) |bb| {
+                    if (bb.entry) continue;
+
+                    const temp = try bitmap.BitMap.init(self.mem, self.block_name);
+                    defer self.mem.destroy(temp);
+
+                    try temp.setBit(bb.name);
+
+                    const intersect = try bitmap.BitMap.init(self.mem, self.block_name);
+                    intersect.setNot();
+                    defer self.mem.destroy(intersect);
+
+                    for (bb.predecessors.items) |pred| {
+                        try intersect.setIntersection(pred.dom.?);
+                    }
+
+                    try temp.setUnion(intersect);
+
+                    if (!temp.eq(bb.dom.?)) {
+                        try bb.dom.?.replace(temp);
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fill LiveOut information to all BBs
+    pub fn fillLiveOut(self: *CFG) !void {
+        var changed = true;
+        while (changed) {
+            var liveout_iter = try self.depthFirstIterator();
+            defer liveout_iter.deinit();
+
+            changed = false;
+            while (try liveout_iter.next()) |bb| {
+                if (try bb.updateLiveOut(self.mem)) {
+                    changed = true;
+                }
+            }
+        }
+    }
+
     pub fn blockList(self: *CFG, mem: std.mem.Allocator) ![]?*BasicBlock {
         const blocklist: []?*BasicBlock = try mem.alloc(?*BasicBlock, self.block_name);
         @memset(blocklist, null);
@@ -458,74 +536,9 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     // calculating the VarKilled and UEVars.  Haven't implemented the
     // peephole optimization step yet. Maybe we don't need it and can avoid
     // the extra loops here?
-    var iter = try cfg.depthFirstIterator();
-    defer iter.deinit();
-
-    while (try iter.next()) |bb| {
-        try bb.fillVarSets();
-    }
-
-    const list = try cfg.reversePostorderBlocks(cfg.mem);
-    defer cfg.mem.free(list);
-
-    for (list) |maybebb| {
-        if (maybebb) |bb| {
-            if (bb.entry) {
-                bb.dom = try bitmap.BitMap.init(cfg.arena.allocator(), cfg.block_name);
-                // Entry blocks dominate themselves, and nothing else
-                // dominates an entry block.
-                try bb.dom.?.setBit(bb.name);
-            } else {
-                // Default blocks to "everything dominates this block"
-                bb.dom = try bitmap.BitMap.init(cfg.arena.allocator(), cfg.block_name);
-                bb.dom.?.setNot();
-            }
-        }
-    }
-
-    var changed = true;
-    while (changed) {
-        changed = false;
-
-        for (list) |maybebb| {
-            if (maybebb) |bb| {
-                if (bb.entry) continue;
-
-                const temp = try bitmap.BitMap.init(cfg.mem, cfg.block_name);
-                defer cfg.mem.destroy(temp);
-
-                try temp.setBit(bb.name);
-
-                const intersect = try bitmap.BitMap.init(cfg.mem, cfg.block_name);
-                intersect.setNot();
-                defer cfg.mem.destroy(intersect);
-
-                for (bb.predecessors.items) |pred| {
-                    try intersect.setIntersection(pred.dom.?);
-                }
-
-                try temp.setUnion(intersect);
-
-                if (!temp.eq(bb.dom.?)) {
-                    try bb.dom.?.replace(temp);
-                    changed = true;
-                }
-            }
-        }
-    }
-
-    changed = true;
-    while (changed) {
-        var liveout_iter = try cfg.depthFirstIterator();
-        defer liveout_iter.deinit();
-
-        changed = false;
-        while (try liveout_iter.next()) |bb| {
-            if (try bb.updateLiveOut(allocator)) {
-                changed = true;
-            }
-        }
-    }
+    try cfg.fillVarSets();
+    try cfg.fillDominators();
+    try cfg.fillLiveOut();
 
     return cfg;
 }
