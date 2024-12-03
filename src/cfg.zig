@@ -55,8 +55,8 @@ pub const CFG = struct {
             while (self.work.popOrNull()) |bb| {
                 if (!self.seen.contains(bb.block.name)) {
                     try self.seen.put(bb.block.name, bb);
-                    if (bb.block.out2) |bb2| { try self.work.append(bb2); }
-                    if (bb.block.out) |bb1| { try self.work.append(bb1); }
+                    if (bb.block.jump_dest) |bb2| { try self.work.append(bb2); }
+                    if (bb.block.fall_through_dest) |bb1| { try self.work.append(bb1); }
                     return bb;
                 }
             }
@@ -72,7 +72,7 @@ pub const CFG = struct {
 
     pub fn depthFirstIterator(self: *CFG) !DepthFirstIterator {
         var worklist = std.ArrayList(*BasicBlock).init(self.mem);
-        try worklist.append(self.head.head.out.?);
+        try worklist.append(self.head.head.fall_through_dest.?);
 
         return .{
             .seen = std.AutoHashMap(u64, *BasicBlock).init(self.mem),
@@ -104,7 +104,7 @@ const BasicBlockType = enum {
 pub const BasicBlock = union(BasicBlockType) {
     head: struct {
         name: u64,
-        out: ?*BasicBlock = null,
+        fall_through_dest: ?*BasicBlock = null,
     },
 
     block: struct {
@@ -116,8 +116,8 @@ pub const BasicBlock = union(BasicBlockType) {
         killed_set: *bitmap.BitMap,
         upward_exposed_set: *bitmap.BitMap,
         liveout_set: *bitmap.BitMap,
-        out: ?*BasicBlock = null,
-        out2: ?*BasicBlock = null,
+        fall_through_dest: ?*BasicBlock = null,
+        jump_dest: ?*BasicBlock = null,
     },
 
     fn initHead(alloc: std.mem.Allocator, name: u64) !*BasicBlock {
@@ -178,11 +178,11 @@ pub const BasicBlock = union(BasicBlockType) {
     pub fn updateLiveOut(self: *BasicBlock, alloc: std.mem.Allocator) !bool {
         // Engineering a compiler, 3rd ed, 8.6, "Defining the Data-Flow Problem" (page 419)
         // Also Figure 8.15
-        if (self.block.out) |child1| {
+        if (self.block.fall_through_dest) |child1| {
             const newlo = try self.childLo(child1, alloc);
             defer alloc.destroy(newlo);
 
-            if (self.block.out2) |child2| {
+            if (self.block.jump_dest) |child2| {
                 const newlo2 = try self.childLo(child2, alloc);
                 defer alloc.destroy(newlo2);
 
@@ -204,7 +204,19 @@ pub const BasicBlock = union(BasicBlockType) {
                 }
             }
         } else {
-            return false;
+            if (self.block.jump_dest) |child2| {
+                const newlo = try self.childLo(child2, alloc);
+                defer alloc.destroy(newlo);
+
+                if (self.block.liveout_set.eq(newlo)) {
+                    return false;
+                } else {
+                    try self.block.liveout_set.replace(newlo);
+                    return true;
+                }
+            } else {
+                return false;
+            }
         }
     }
 
@@ -315,24 +327,35 @@ pub const BasicBlock = union(BasicBlockType) {
         try self.block.predecessors.append(predecessor);
     }
 
-    fn addEdge(self: *BasicBlock, child: *BasicBlock) void {
+    fn setJumpDest(self: *BasicBlock, child: *BasicBlock) void {
         switch(self.*) {
             .head => {
-                if (self.head.out) |_| {
+                unreachable;
+            },
+            .block => {
+                if (self.block.jump_dest) |_| {
                     unreachable;
                 } else {
-                    self.head.out = child;
+                    self.block.jump_dest = child;
+                }
+            }
+        }
+    }
+
+    fn setFallThroughDest(self: *BasicBlock, child: *BasicBlock) void {
+        switch(self.*) {
+            .head => {
+                if (self.head.fall_through_dest) |_| {
+                    unreachable;
+                } else {
+                    self.head.fall_through_dest = child;
                 }
             },
             .block => {
-                if (self.block.out) |_| {
-                    if (self.block.out2) |_| {
-                        unreachable;
-                    } else {
-                        self.block.out2 = child;
-                    }
+                if (self.block.fall_through_dest) |_| {
+                    unreachable;
                 } else {
-                    self.block.out = child;
+                    self.block.fall_through_dest = child;
                 }
             }
         }
@@ -418,7 +441,7 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
         // current block as a outgoing edge, and add the last block
         // as a predecessor to this block.
         if (last_block.fallsThrough()) {
-            last_block.addEdge(current_block);
+            last_block.setFallThroughDest(current_block);
             try current_block.addPredecessor(last_block);
         }
 
@@ -441,7 +464,7 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     for (wants_label.items) |want_label| {
         const dest_label = want_label.jumpTarget();
         const target = label_to_block_lut[dest_label.label.name].?;
-        want_label.addEdge(target);
+        want_label.setJumpDest(target);
     }
 
     // TODO: sweep unreachable blocks?
@@ -496,12 +519,12 @@ test "basic block one instruction" {
     defer cfg.deinit();
 
     try std.testing.expectEqual(BasicBlockType.head, @as(BasicBlockType, cfg.head.*));
-    const bb = cfg.head.head.out.?;
+    const bb = cfg.head.head.fall_through_dest.?;
 
     try std.testing.expectEqual(scope.insns.first.?, bb.block.start);
     try std.testing.expectEqual(scope.insns.first.?, bb.block.finish);
-    try std.testing.expectEqual(null, bb.block.out);
-    try std.testing.expectEqual(null, bb.block.out2);
+    try std.testing.expectEqual(null, bb.block.fall_through_dest);
+    try std.testing.expectEqual(null, bb.block.jump_dest);
 }
 
 test "basic block two instruction" {
@@ -514,7 +537,7 @@ test "basic block two instruction" {
     const cfg = try buildCFG(std.testing.allocator, scope);
     defer cfg.deinit();
 
-    const bb = cfg.head.head.out.?;
+    const bb = cfg.head.head.fall_through_dest.?;
 
     try std.testing.expectEqual(scope.insns.first.?, bb.block.start);
     try std.testing.expectEqual(scope.insns.last.?, bb.block.finish);
@@ -533,7 +556,7 @@ test "CFG from compiler" {
     const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
-    const bb = cfg.head.head.out.?;
+    const bb = cfg.head.head.fall_through_dest.?;
     const start_type: ir.InstructionName = bb.block.start.data;
     try std.testing.expectEqual(ir.InstructionName.loadi, start_type);
 
@@ -557,7 +580,7 @@ test "if statement should have 2 children blocks" {
     const cfg = try buildCFG(allocator, method_scope);
     defer cfg.deinit();
 
-    const block = cfg.head.head.out.?;
+    const block = cfg.head.head.fall_through_dest.?;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.jumpunless,
@@ -566,7 +589,7 @@ test "if statement should have 2 children blocks" {
     try std.testing.expect(block.fallsThrough());
     try std.testing.expectEqual(1, block.instructionCount());
 
-    var child = block.block.out.?;
+    var child = block.block.fall_through_dest.?;
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
         ir.Instruction.jump,
@@ -575,13 +598,13 @@ test "if statement should have 2 children blocks" {
     try std.testing.expectEqual(2, child.instructionCount());
     try std.testing.expect(!child.fallsThrough());
 
-    child = block.block.out2.?;
+    child = block.block.jump_dest.?;
     try std.testing.expectEqual(2, child.instructionCount());
     try std.testing.expectEqual(ir.Instruction.putlabel, @as(ir.InstructionName, child.block.start.data));
     try std.testing.expectEqual(ir.Instruction.loadi, @as(ir.InstructionName, child.block.finish.data));
 
     // Last block via fallthrough then jump
-    const last_block = block.block.out.?.block.out.?;
+    const last_block = block.block.fall_through_dest.?.block.jump_dest.?;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.putlabel,
@@ -590,7 +613,7 @@ test "if statement should have 2 children blocks" {
     }, last_block);
 
     // block via jump then fallthrough
-    const last_block2 = block.block.out2.?.block.out.?;
+    const last_block2 = block.block.jump_dest.?.block.fall_through_dest.?;
     try std.testing.expectEqual(last_block, last_block2);
 }
 
@@ -753,7 +776,7 @@ test "live out passes through if statement" {
     defer iter.deinit();
 
     while (try iter.next()) |bb| {
-        if (bb.block.out) |_| {
+        if (bb.block.fall_through_dest) |_| {
             try std.testing.expect(bb.block.liveout_set.isBitSet(opnd.local.id));
         }
     }

@@ -170,8 +170,8 @@ const CFGPrinter = struct {
 
         try ctx.out.print("\"];\n", .{ });
 
-        if (blk.block.out) |left| {
-            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"out1\"];\n", .{
+        if (blk.block.fall_through_dest) |left| {
+            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"fall through\"];\n", .{
                 ctx.scope.name,
                 blk.block.name,
                 ctx.scope.name,
@@ -179,8 +179,8 @@ const CFGPrinter = struct {
             });
         }
 
-        if (blk.block.out2) |right| {
-            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"out1\"];\n", .{
+        if (blk.block.jump_dest) |right| {
+            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"jump\"];\n", .{
                 ctx.scope.name,
                 blk.block.name,
                 ctx.scope.name,
