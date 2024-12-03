@@ -26,7 +26,7 @@ pub const CFG = struct {
         cfg.* = CFG {
             .arena = arena,
             .mem = mem,
-            .block_name = 1,
+            .block_name = 0,
             .head = bb,
             .scope = scope,
         };
