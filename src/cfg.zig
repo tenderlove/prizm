@@ -8,12 +8,14 @@ const Scope = compiler.Scope;
 const printer = @import("printer.zig");
 const assert = @import("std").debug.assert;
 const bitmap = @import("utils/bitmap.zig");
+const BitMap = bitmap.BitMap;
 
 pub const CFG = struct {
     arena: std.heap.ArenaAllocator,
     mem: std.mem.Allocator,
     block_name: u32,
     head: *BasicBlock,
+    blocks: ?[] const *BasicBlock,
     scope: *compiler.Scope,
 
     pub fn init(mem: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
@@ -28,6 +30,7 @@ pub const CFG = struct {
             .mem = mem,
             .block_name = 0,
             .head = bb,
+            .blocks = null,
             .scope = scope,
         };
 
@@ -80,6 +83,43 @@ pub const CFG = struct {
         };
     }
 
+    pub fn blockList(self: *CFG, mem: std.mem.Allocator) ![]?*BasicBlock {
+        const blocklist: []?*BasicBlock = try mem.alloc(?*BasicBlock, self.block_name);
+        @memset(blocklist, null);
+
+        var iter = try self.depthFirstIterator();
+        defer iter.deinit();
+        while (try iter.next()) |bb| {
+            blocklist[bb.block.name] = bb;
+        }
+        return blocklist;
+    }
+
+    fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *u32) !void {
+        if (blk == null) return;
+        if (seen.isBitSet(blk.?.block.name)) return;
+        try seen.setBit(blk.?.block.name);
+        try traverseReversePostorder(blk.?.block.fall_through_dest, seen, list, counter);
+        try traverseReversePostorder(blk.?.block.jump_dest, seen, list, counter);
+
+        // Decrement the counter so we set the block in reverse post order
+        counter.* -= 1;
+        list[counter.*] = blk;
+    }
+
+    pub fn reversePostorderBlocks(self: *CFG, mem: std.mem.Allocator) ![]?*BasicBlock {
+        const blocklist: []?*BasicBlock = try mem.alloc(?*BasicBlock, self.block_name);
+        @memset(blocklist, null);
+
+        const seen = try BitMap.init(mem, self.block_name);
+        defer seen.deinit(mem);
+        var counter = self.block_name;
+
+        try traverseReversePostorder(self.head.head.fall_through_dest, seen, blocklist, &counter);
+
+        return blocklist;
+    }
+
     pub fn liveBlockCount(self: *CFG) !usize {
         var dfi = try self.depthFirstIterator();
         defer dfi.deinit();
@@ -116,6 +156,7 @@ pub const BasicBlock = union(BasicBlockType) {
         killed_set: *bitmap.BitMap,
         upward_exposed_set: *bitmap.BitMap,
         liveout_set: *bitmap.BitMap,
+        dom: ?*bitmap.BitMap = null,
         fall_through_dest: ?*BasicBlock = null,
         jump_dest: ?*BasicBlock = null,
     },
@@ -442,7 +483,9 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
         // as a predecessor to this block.
         if (last_block.fallsThrough()) {
             last_block.setFallThroughDest(current_block);
-            try current_block.addPredecessor(last_block);
+            if (!current_block.block.entry) {
+                try current_block.addPredecessor(last_block);
+            }
         }
 
         // If this block has a label at the top, register it so that
@@ -465,6 +508,7 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
         const dest_label = want_label.jumpTarget();
         const target = label_to_block_lut[dest_label.label.name].?;
         want_label.setJumpDest(target);
+        try target.addPredecessor(want_label);
     }
 
     // TODO: sweep unreachable blocks?
@@ -482,8 +526,56 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
         try bb.fillVarSets();
     }
 
+    const list = try cfg.reversePostorderBlocks(cfg.mem);
+    defer cfg.mem.free(list);
+
+    for (list) |maybebb| {
+        if (maybebb) |bb| {
+            if (bb.block.entry) {
+                bb.block.dom = try bitmap.BitMap.init(cfg.arena.allocator(), cfg.block_name);
+                // Entry blocks dominate themselves, and nothing else
+                // dominates an entry block.
+                try bb.block.dom.?.setBit(bb.block.name);
+            } else {
+                // Default blocks to "everything dominates this block"
+                bb.block.dom = try bitmap.BitMap.init(cfg.arena.allocator(), cfg.block_name);
+                bb.block.dom.?.setNot();
+            }
+        }
+    }
 
     var changed = true;
+    while (changed) {
+        changed = false;
+
+        for (list) |maybebb| {
+            if (maybebb) |bb| {
+                if (bb.block.entry) continue;
+
+                const temp = try bitmap.BitMap.init(cfg.mem, cfg.block_name);
+                defer cfg.mem.destroy(temp);
+
+                try temp.setBit(bb.block.name);
+
+                const intersect = try bitmap.BitMap.init(cfg.mem, cfg.block_name);
+                intersect.setNot();
+                defer cfg.mem.destroy(intersect);
+
+                for (bb.block.predecessors.items) |pred| {
+                    try intersect.setIntersection(pred.block.dom.?);
+                }
+
+                try temp.setUnion(intersect);
+
+                if (!temp.eq(bb.block.dom.?)) {
+                    try bb.block.dom.?.replace(temp);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    changed = true;
     while (changed) {
         var liveout_iter = try cfg.depthFirstIterator();
         defer liveout_iter.deinit();
@@ -780,6 +872,110 @@ test "live out passes through if statement" {
             try std.testing.expect(bb.block.liveout_set.isBitSet(opnd.local.id));
         }
     }
+}
+
+test "jumps targets get predecessors" {
+    const allocator = std.testing.allocator;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code =
+\\ def foo y
+\\   if y < 3
+\\     y + 1
+\\   else
+\\     y + 4
+\\   end
+\\ end
+;
+    const scope = try compileScope(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func.scope.value;
+
+    const methodcfg = try buildCFG(allocator, method_scope);
+    defer methodcfg.deinit();
+
+    // We should have 4 blocks
+    const blocks = try methodcfg.blockList(allocator);
+    defer allocator.free(blocks);
+
+    try std.testing.expectEqual(4, blocks.len);
+    try std.testing.expectEqual(0, blocks[0].?.block.predecessors.items.len);
+    try std.testing.expectEqual(1, blocks[1].?.block.predecessors.items.len);
+    try std.testing.expectEqual(1, blocks[2].?.block.predecessors.items.len);
+    try std.testing.expectEqual(2, blocks[3].?.block.predecessors.items.len);
+
+    // Block 1 should point at block 0
+    try std.testing.expectEqual(blocks[0].?, blocks[1].?.block.predecessors.items[0]);
+
+    // Block 2 should point at block 0
+    try std.testing.expectEqual(blocks[0].?, blocks[2].?.block.predecessors.items[0]);
+
+    // Block 3 should point at block 1 and 2
+    const preds = blocks[3].?.block.predecessors.items;
+
+    try std.testing.expect(preds[0] == blocks[1].? or preds[1] == blocks[1].?);
+    try std.testing.expect(preds[0] == blocks[2].? or preds[1] == blocks[2].?);
+}
+
+test "blocks have dominators" {
+    const allocator = std.testing.allocator;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code =
+\\ def foo y
+\\   if y < 3
+\\     y + 1
+\\   else
+\\     y + 4
+\\   end
+\\ end
+;
+    const scope = try compileScope(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func.scope.value;
+
+    const methodcfg = try buildCFG(allocator, method_scope);
+    defer methodcfg.deinit();
+
+    const blocks = try methodcfg.blockList(allocator);
+    defer allocator.free(blocks);
+
+    // We should have 4 blocks
+    try std.testing.expectEqual(4, blocks.len);
+    try std.testing.expect(blocks[0].?.block.entry);
+
+    // Entry dominates itself
+    try std.testing.expectEqual(1, blocks[0].?.block.dom.?.popCount());
+    try std.testing.expect(blocks[0].?.block.dom.?.isBitSet(0));
+
+    // BB1 dominated by self and BB0
+    try std.testing.expectEqual(2, blocks[1].?.block.dom.?.popCount());
+    try std.testing.expect(blocks[1].?.block.dom.?.isBitSet(0));
+    try std.testing.expect(blocks[1].?.block.dom.?.isBitSet(1));
+
+    // BB2 dominated by self and BB0
+    try std.testing.expectEqual(2, blocks[1].?.block.dom.?.popCount());
+    try std.testing.expect(blocks[2].?.block.dom.?.isBitSet(0));
+    try std.testing.expect(blocks[2].?.block.dom.?.isBitSet(2));
+
+    // BB3 dominated by self and BB0
+    try std.testing.expectEqual(2, blocks[1].?.block.dom.?.popCount());
+    try std.testing.expect(blocks[3].?.block.dom.?.isBitSet(0));
+    try std.testing.expect(blocks[3].?.block.dom.?.isBitSet(3));
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {

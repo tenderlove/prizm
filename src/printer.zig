@@ -132,6 +132,26 @@ const CFGPrinter = struct {
         }
     }
 
+    fn printBlockSet(comptime name: []const u8, set: *bm.BitMap, out: *const std.io.AnyWriter) !void {
+        const nitems = set.popCount(); // number of variables
+        if (nitems > 0) {
+            var biti = set.setBitsIterator();
+            try out.print(name, .{ });
+            try out.print("(", .{});
+
+            var first = true;
+            while (biti.next()) |block_id| {
+                if (!first) {
+                    try out.print(", ", .{});
+                }
+                first = false;
+                try out.print("BB{d}", .{ block_id });
+            }
+            try out.print(")", .{});
+            try out.print("\\l", .{ });
+        }
+    }
+
     fn printBlock(scope: *cmp.Scope, blk: *CFG.BasicBlock, ctx: *const Context) !void {
         try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.block.name });
         if (blk.block.entry) {
@@ -147,6 +167,8 @@ const CFGPrinter = struct {
 
         // Print live out variables
         try printSet("LiveOut: ", scope, blk.block.liveout_set, ctx.out);
+
+        try printBlockSet("DOM: ", blk.block.dom.?, ctx.out);
 
         // Print uninitialized variables
         if (blk.block.entry) {
