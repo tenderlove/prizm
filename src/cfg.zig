@@ -14,7 +14,7 @@ pub const CFG = struct {
     arena: std.heap.ArenaAllocator,
     mem: std.mem.Allocator,
     block_name: u32,
-    head: *BasicBlock,
+    head: ?*BasicBlock,
     blocks: ?[] const *BasicBlock,
     scope: *compiler.Scope,
 
@@ -23,13 +23,12 @@ pub const CFG = struct {
         var arena = std.heap.ArenaAllocator.init(mem);
 
         const cfg = try arena.allocator().create(CFG);
-        const bb = try BasicBlock.initHead(arena.allocator(), 0);
 
         cfg.* = CFG {
             .arena = arena,
             .mem = mem,
             .block_name = 0,
-            .head = bb,
+            .head = null,
             .blocks = null,
             .scope = scope,
         };
@@ -56,10 +55,10 @@ pub const CFG = struct {
 
         pub fn next(self: *DepthFirstIterator) !?*BasicBlock {
             while (self.work.popOrNull()) |bb| {
-                if (!self.seen.contains(bb.block.name)) {
-                    try self.seen.put(bb.block.name, bb);
-                    if (bb.block.jump_dest) |bb2| { try self.work.append(bb2); }
-                    if (bb.block.fall_through_dest) |bb1| { try self.work.append(bb1); }
+                if (!self.seen.contains(bb.name)) {
+                    try self.seen.put(bb.name, bb);
+                    if (bb.jump_dest) |bb2| { try self.work.append(bb2); }
+                    if (bb.fall_through_dest) |bb1| { try self.work.append(bb1); }
                     return bb;
                 }
             }
@@ -75,7 +74,7 @@ pub const CFG = struct {
 
     pub fn depthFirstIterator(self: *CFG) !DepthFirstIterator {
         var worklist = std.ArrayList(*BasicBlock).init(self.mem);
-        try worklist.append(self.head.head.fall_through_dest.?);
+        try worklist.append(self.head.?);
 
         return .{
             .seen = std.AutoHashMap(u64, *BasicBlock).init(self.mem),
@@ -90,21 +89,22 @@ pub const CFG = struct {
         var iter = try self.depthFirstIterator();
         defer iter.deinit();
         while (try iter.next()) |bb| {
-            blocklist[bb.block.name] = bb;
+            blocklist[bb.name] = bb;
         }
         return blocklist;
     }
 
     fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *u32) !void {
-        if (blk == null) return;
-        if (seen.isBitSet(blk.?.block.name)) return;
-        try seen.setBit(blk.?.block.name);
-        try traverseReversePostorder(blk.?.block.fall_through_dest, seen, list, counter);
-        try traverseReversePostorder(blk.?.block.jump_dest, seen, list, counter);
+        if (blk) |bb| {
+            if (seen.isBitSet(bb.name)) return;
+            try seen.setBit(bb.name);
+            try traverseReversePostorder(bb.fall_through_dest, seen, list, counter);
+            try traverseReversePostorder(bb.jump_dest, seen, list, counter);
 
-        // Decrement the counter so we set the block in reverse post order
-        counter.* -= 1;
-        list[counter.*] = blk;
+            // Decrement the counter so we set the block in reverse post order
+            counter.* -= 1;
+            list[counter.*] = bb;
+        }
     }
 
     pub fn reversePostorderBlocks(self: *CFG, mem: std.mem.Allocator) ![]?*BasicBlock {
@@ -115,7 +115,7 @@ pub const CFG = struct {
         defer seen.deinit(mem);
         var counter = self.block_name;
 
-        try traverseReversePostorder(self.head.head.fall_through_dest, seen, blocklist, &counter);
+        try traverseReversePostorder(self.head.?, seen, blocklist, &counter);
 
         return blocklist;
     }
@@ -136,74 +136,48 @@ pub const CFG = struct {
     }
 };
 
-const BasicBlockType = enum {
-    head,
-    block,
-};
-
-pub const BasicBlock = union(BasicBlockType) {
-    head: struct {
-        name: u64,
-        fall_through_dest: ?*BasicBlock = null,
-    },
-
-    block: struct {
-        name: u64,
-        entry: bool,
-        start: *ir.InstructionList.Node,
-        finish: *ir.InstructionList.Node,
-        predecessors: std.ArrayList(*BasicBlock),
-        killed_set: *bitmap.BitMap,
-        upward_exposed_set: *bitmap.BitMap,
-        liveout_set: *bitmap.BitMap,
-        dom: ?*bitmap.BitMap = null,
-        fall_through_dest: ?*BasicBlock = null,
-        jump_dest: ?*BasicBlock = null,
-    },
-
-    fn initHead(alloc: std.mem.Allocator, name: u64) !*BasicBlock {
-        const bb = try alloc.create(BasicBlock);
-
-        bb.* = BasicBlock {
-            .head = .{
-                .name = name,
-            }
-        };
-
-        return bb;
-    }
+pub const BasicBlock = struct {
+    name: u64,
+    entry: bool,
+    start: *ir.InstructionList.Node,
+    finish: *ir.InstructionList.Node,
+    predecessors: std.ArrayList(*BasicBlock),
+    killed_set: *bitmap.BitMap,
+    upward_exposed_set: *bitmap.BitMap,
+    liveout_set: *bitmap.BitMap,
+    dom: ?*bitmap.BitMap = null,
+    fall_through_dest: ?*BasicBlock = null,
+    jump_dest: ?*BasicBlock = null,
 
     fn initBlock(alloc: std.mem.Allocator, name: u64, start: anytype, finish: anytype, entry: bool, vars: usize) !*BasicBlock {
         const block = try alloc.create(BasicBlock);
 
         block.* = .{
-            .block = .{
-                .name = name,
-                .start = start,
-                .finish = finish,
-                .entry = entry,
-                .killed_set = try bitmap.BitMap.init(alloc, vars),
-                .upward_exposed_set = try bitmap.BitMap.init(alloc, vars),
-                .liveout_set = try bitmap.BitMap.init(alloc, vars),
-                .predecessors = std.ArrayList(*BasicBlock).init(alloc),
-            }
+            .name = name,
+            .start = start,
+            .finish = finish,
+            .entry = entry,
+            .killed_set = try bitmap.BitMap.init(alloc, vars),
+            .upward_exposed_set = try bitmap.BitMap.init(alloc, vars),
+            .liveout_set = try bitmap.BitMap.init(alloc, vars),
+            .predecessors = std.ArrayList(*BasicBlock).init(alloc),
         };
 
         return block;
     }
 
     pub fn killedVariableCount(self: *BasicBlock) usize {
-        return self.block.killed_set.popCount();
+        return self.killed_set.popCount();
     }
 
     pub fn upwardExposedCount(self: *BasicBlock) usize {
-        return self.block.upward_exposed_set.popCount();
+        return self.upward_exposed_set.popCount();
     }
 
     fn childLo(_: *BasicBlock, child: *BasicBlock, alloc: std.mem.Allocator) !*bitmap.BitMap {
-        const ue = child.block.upward_exposed_set;
-        const lo = child.block.liveout_set;
-        const varkill = child.block.killed_set;
+        const ue = child.upward_exposed_set;
+        const lo = child.liveout_set;
+        const varkill = child.killed_set;
 
         const notkill = try varkill.not(alloc);
         defer alloc.destroy(notkill);
@@ -219,40 +193,40 @@ pub const BasicBlock = union(BasicBlockType) {
     pub fn updateLiveOut(self: *BasicBlock, alloc: std.mem.Allocator) !bool {
         // Engineering a compiler, 3rd ed, 8.6, "Defining the Data-Flow Problem" (page 419)
         // Also Figure 8.15
-        if (self.block.fall_through_dest) |child1| {
+        if (self.fall_through_dest) |child1| {
             const newlo = try self.childLo(child1, alloc);
             defer alloc.destroy(newlo);
 
-            if (self.block.jump_dest) |child2| {
+            if (self.jump_dest) |child2| {
                 const newlo2 = try self.childLo(child2, alloc);
                 defer alloc.destroy(newlo2);
 
                 const bothlo = try newlo.Union(newlo2, alloc);
                 defer alloc.destroy(bothlo);
 
-                if (self.block.liveout_set.eq(bothlo)) {
+                if (self.liveout_set.eq(bothlo)) {
                     return false;
                 } else {
-                    try self.block.liveout_set.replace(bothlo);
+                    try self.liveout_set.replace(bothlo);
                     return true;
                 }
             } else {
-                if (self.block.liveout_set.eq(newlo)) {
+                if (self.liveout_set.eq(newlo)) {
                     return false;
                 } else {
-                    try self.block.liveout_set.replace(newlo);
+                    try self.liveout_set.replace(newlo);
                     return true;
                 }
             }
         } else {
-            if (self.block.jump_dest) |child2| {
+            if (self.jump_dest) |child2| {
                 const newlo = try self.childLo(child2, alloc);
                 defer alloc.destroy(newlo);
 
-                if (self.block.liveout_set.eq(newlo)) {
+                if (self.liveout_set.eq(newlo)) {
                     return false;
                 } else {
-                    try self.block.liveout_set.replace(newlo);
+                    try self.liveout_set.replace(newlo);
                     return true;
                 }
             } else {
@@ -284,7 +258,7 @@ pub const BasicBlock = union(BasicBlockType) {
     };
 
     pub fn instructionIter(self: *BasicBlock) InstructionIter {
-        return .{ .current = self.block.start, .finish = self.block.finish, .done = false };
+        return .{ .current = self.start, .finish = self.finish, .done = false };
     }
 
     pub fn fillVarSets(self: *BasicBlock) !void {
@@ -298,117 +272,80 @@ pub const BasicBlock = union(BasicBlockType) {
                 // (in other words it hasn't been defined in this BB), then add
                 // the operand to the "upward exposed" set.  This means the operand
                 // _must_ have been defined in a block that dominates this block.
-                if (op.isVariable() and !self.block.killed_set.isBitSet(op.getID())) {
-                    try self.block.upward_exposed_set.setBit(op.getID());
+                if (op.isVariable() and !self.killed_set.isBitSet(op.getID())) {
+                    try self.upward_exposed_set.setBit(op.getID());
                 }
             }
 
             if (insn.data.outVar()) |v| {
                 if (v.isVariable()) {
-                    try self.block.killed_set.setBit(v.getID());
+                    try self.killed_set.setBit(v.getID());
                 }
             }
         }
     }
 
     fn addInstruction(self: *BasicBlock, insn: *ir.InstructionList.Node) void {
-        self.block.finish = insn;
+        self.finish = insn;
     }
 
     fn fallsThrough(self: *BasicBlock) bool {
-        return switch(self.*) {
-            .head => true,
-            .block => switch(self.block.finish.data) {
-                .jump, .leave => false,
-                else => true
-            }
+        return switch(self.finish.data) {
+            .jump, .leave => false,
+            else => true
         };
     }
 
     fn hasJumpTarget(self: *BasicBlock) bool {
-        if (BasicBlockType.head == @as(BasicBlockType, self.*)) {
-            return false;
-        } else {
-            return self.block.finish.data.isJump();
-        }
+        return self.finish.data.isJump();
     }
 
     fn hasLabeledEntry(self: *BasicBlock) bool {
-        if (BasicBlockType.head == @as(BasicBlockType, self.*)) {
-            return false;
-        } else {
-            return ir.InstructionName.putlabel == @as(ir.InstructionName, self.block.start.data);
-        }
+        return ir.InstructionName.putlabel == @as(ir.InstructionName, self.start.data);
     }
 
     fn instructionCount(self: *BasicBlock) u32 {
-        if (BasicBlockType.head == @as(BasicBlockType, self.*)) {
-            return 0;
-        } else {
-            var count: u32 = 0;
-            var iter = self.instructionIter();
+        var count: u32 = 0;
+        var iter = self.instructionIter();
 
-            while(iter.next()) |_| {
-                count += 1;
-            }
-
-            return count;
+        while(iter.next()) |_| {
+            count += 1;
         }
+
+        return count;
     }
 
     fn jumpTarget(self: *BasicBlock) *ir.Operand {
-        if (BasicBlockType.head == @as(BasicBlockType, self.*)) {
-            unreachable;
-        } else {
-            return self.block.finish.data.jumpTarget();
-        }
+        return self.finish.data.jumpTarget();
     }
 
     fn addPredecessor(self: *BasicBlock, predecessor: *BasicBlock) !void {
-        try self.block.predecessors.append(predecessor);
+        try self.predecessors.append(predecessor);
     }
 
     fn setJumpDest(self: *BasicBlock, child: *BasicBlock) void {
-        switch(self.*) {
-            .head => {
-                unreachable;
-            },
-            .block => {
-                if (self.block.jump_dest) |_| {
-                    unreachable;
-                } else {
-                    self.block.jump_dest = child;
-                }
-            }
+        if (self.jump_dest) |_| {
+            unreachable;
+        } else {
+            self.jump_dest = child;
         }
     }
 
     fn setFallThroughDest(self: *BasicBlock, child: *BasicBlock) void {
-        switch(self.*) {
-            .head => {
-                if (self.head.fall_through_dest) |_| {
-                    unreachable;
-                } else {
-                    self.head.fall_through_dest = child;
-                }
-            },
-            .block => {
-                if (self.block.fall_through_dest) |_| {
-                    unreachable;
-                } else {
-                    self.block.fall_through_dest = child;
-                }
-            }
+        if (self.fall_through_dest) |_| {
+            unreachable;
+        } else {
+            self.fall_through_dest = child;
         }
     }
 
     pub fn uninitializedSet(self: *BasicBlock, scope: *Scope, mem: std.mem.Allocator) !*bitmap.BitMap {
-        if (!self.block.entry) return error.ArgumentError;
+        if (!self.entry) return error.ArgumentError;
 
-        const uninit = try self.block.killed_set.dup(mem);
+        const uninit = try self.killed_set.dup(mem);
         uninit.setNot();
-        try uninit.setIntersection(self.block.liveout_set);
-        try uninit.setUnion(self.block.upward_exposed_set);
+        try uninit.setIntersection(self.liveout_set);
+        try uninit.setUnion(self.upward_exposed_set);
 
         var biti = uninit.setBitsIterator();
         while (biti.next()) |opnd_id| {
@@ -481,17 +418,19 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
         // If the previous block falls through, then we should add the
         // current block as a outgoing edge, and add the last block
         // as a predecessor to this block.
-        if (last_block.fallsThrough()) {
-            last_block.setFallThroughDest(current_block);
-            if (!current_block.block.entry) {
-                try current_block.addPredecessor(last_block);
+        if (current_block.entry) {
+            cfg.head = current_block;
+        } else {
+            if (last_block.?.fallsThrough()) {
+                last_block.?.setFallThroughDest(current_block);
+                try current_block.addPredecessor(last_block.?);
             }
         }
 
         // If this block has a label at the top, register it so that
         // we can link other blocks to this one
         if (current_block.hasLabeledEntry()) {
-            const label_name = current_block.block.start.data.putlabel.name.label.name;
+            const label_name = current_block.start.data.putlabel.name.label.name;
             label_to_block_lut[label_name] = current_block;
         }
 
@@ -531,15 +470,15 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
 
     for (list) |maybebb| {
         if (maybebb) |bb| {
-            if (bb.block.entry) {
-                bb.block.dom = try bitmap.BitMap.init(cfg.arena.allocator(), cfg.block_name);
+            if (bb.entry) {
+                bb.dom = try bitmap.BitMap.init(cfg.arena.allocator(), cfg.block_name);
                 // Entry blocks dominate themselves, and nothing else
                 // dominates an entry block.
-                try bb.block.dom.?.setBit(bb.block.name);
+                try bb.dom.?.setBit(bb.name);
             } else {
                 // Default blocks to "everything dominates this block"
-                bb.block.dom = try bitmap.BitMap.init(cfg.arena.allocator(), cfg.block_name);
-                bb.block.dom.?.setNot();
+                bb.dom = try bitmap.BitMap.init(cfg.arena.allocator(), cfg.block_name);
+                bb.dom.?.setNot();
             }
         }
     }
@@ -550,25 +489,25 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
 
         for (list) |maybebb| {
             if (maybebb) |bb| {
-                if (bb.block.entry) continue;
+                if (bb.entry) continue;
 
                 const temp = try bitmap.BitMap.init(cfg.mem, cfg.block_name);
                 defer cfg.mem.destroy(temp);
 
-                try temp.setBit(bb.block.name);
+                try temp.setBit(bb.name);
 
                 const intersect = try bitmap.BitMap.init(cfg.mem, cfg.block_name);
                 intersect.setNot();
                 defer cfg.mem.destroy(intersect);
 
-                for (bb.block.predecessors.items) |pred| {
-                    try intersect.setIntersection(pred.block.dom.?);
+                for (bb.predecessors.items) |pred| {
+                    try intersect.setIntersection(pred.dom.?);
                 }
 
                 try temp.setUnion(intersect);
 
-                if (!temp.eq(bb.block.dom.?)) {
-                    try bb.block.dom.?.replace(temp);
+                if (!temp.eq(bb.dom.?)) {
+                    try bb.dom.?.replace(temp);
                     changed = true;
                 }
             }
@@ -598,7 +537,7 @@ test "empty basic block" {
     const cfg = try buildCFG(std.testing.allocator, scope);
     defer cfg.deinit();
 
-    try std.testing.expectEqual(BasicBlockType.head, @as(BasicBlockType, cfg.head.*));
+    try std.testing.expectEqual(null, cfg.head);
 }
 
 test "basic block one instruction" {
@@ -610,13 +549,12 @@ test "basic block one instruction" {
     const cfg = try buildCFG(std.testing.allocator, scope);
     defer cfg.deinit();
 
-    try std.testing.expectEqual(BasicBlockType.head, @as(BasicBlockType, cfg.head.*));
-    const bb = cfg.head.head.fall_through_dest.?;
+    const bb = cfg.head.?;
 
-    try std.testing.expectEqual(scope.insns.first.?, bb.block.start);
-    try std.testing.expectEqual(scope.insns.first.?, bb.block.finish);
-    try std.testing.expectEqual(null, bb.block.fall_through_dest);
-    try std.testing.expectEqual(null, bb.block.jump_dest);
+    try std.testing.expectEqual(scope.insns.first.?, bb.start);
+    try std.testing.expectEqual(scope.insns.first.?, bb.finish);
+    try std.testing.expectEqual(null, bb.fall_through_dest);
+    try std.testing.expectEqual(null, bb.jump_dest);
 }
 
 test "basic block two instruction" {
@@ -629,10 +567,10 @@ test "basic block two instruction" {
     const cfg = try buildCFG(std.testing.allocator, scope);
     defer cfg.deinit();
 
-    const bb = cfg.head.head.fall_through_dest.?;
+    const bb = cfg.head.?;
 
-    try std.testing.expectEqual(scope.insns.first.?, bb.block.start);
-    try std.testing.expectEqual(scope.insns.last.?, bb.block.finish);
+    try std.testing.expectEqual(scope.insns.first.?, bb.start);
+    try std.testing.expectEqual(scope.insns.last.?, bb.finish);
 }
 
 test "CFG from compiler" {
@@ -648,11 +586,11 @@ test "CFG from compiler" {
     const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
-    const bb = cfg.head.head.fall_through_dest.?;
-    const start_type: ir.InstructionName = bb.block.start.data;
+    const bb = cfg.head.?;
+    const start_type: ir.InstructionName = bb.start.data;
     try std.testing.expectEqual(ir.InstructionName.loadi, start_type);
 
-    const finish_type: ir.InstructionName = bb.block.finish.data;
+    const finish_type: ir.InstructionName = bb.finish.data;
     try std.testing.expectEqual(ir.InstructionName.leave, finish_type);
 }
 
@@ -672,16 +610,16 @@ test "if statement should have 2 children blocks" {
     const cfg = try buildCFG(allocator, method_scope);
     defer cfg.deinit();
 
-    const block = cfg.head.head.fall_through_dest.?;
+    const block = cfg.head.?;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.jumpunless,
     }, block);
-    try std.testing.expectEqual(block.block.finish, block.block.start);
+    try std.testing.expectEqual(block.finish, block.start);
     try std.testing.expect(block.fallsThrough());
     try std.testing.expectEqual(1, block.instructionCount());
 
-    var child = block.block.fall_through_dest.?;
+    var child = block.fall_through_dest.?;
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
         ir.Instruction.jump,
@@ -690,13 +628,13 @@ test "if statement should have 2 children blocks" {
     try std.testing.expectEqual(2, child.instructionCount());
     try std.testing.expect(!child.fallsThrough());
 
-    child = block.block.jump_dest.?;
+    child = block.jump_dest.?;
     try std.testing.expectEqual(2, child.instructionCount());
-    try std.testing.expectEqual(ir.Instruction.putlabel, @as(ir.InstructionName, child.block.start.data));
-    try std.testing.expectEqual(ir.Instruction.loadi, @as(ir.InstructionName, child.block.finish.data));
+    try std.testing.expectEqual(ir.Instruction.putlabel, @as(ir.InstructionName, child.start.data));
+    try std.testing.expectEqual(ir.Instruction.loadi, @as(ir.InstructionName, child.finish.data));
 
     // Last block via fallthrough then jump
-    const last_block = block.block.fall_through_dest.?.block.jump_dest.?;
+    const last_block = block.fall_through_dest.?.jump_dest.?;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.putlabel,
@@ -705,7 +643,7 @@ test "if statement should have 2 children blocks" {
     }, last_block);
 
     // block via jump then fallthrough
-    const last_block2 = block.block.jump_dest.?.block.fall_through_dest.?;
+    const last_block2 = block.jump_dest.?.fall_through_dest.?;
     try std.testing.expectEqual(last_block, last_block2);
 }
 
@@ -868,8 +806,8 @@ test "live out passes through if statement" {
     defer iter.deinit();
 
     while (try iter.next()) |bb| {
-        if (bb.block.fall_through_dest) |_| {
-            try std.testing.expect(bb.block.liveout_set.isBitSet(opnd.local.id));
+        if (bb.fall_through_dest) |_| {
+            try std.testing.expect(bb.liveout_set.isBitSet(opnd.local.id));
         }
     }
 }
@@ -906,19 +844,19 @@ test "jumps targets get predecessors" {
     defer allocator.free(blocks);
 
     try std.testing.expectEqual(4, blocks.len);
-    try std.testing.expectEqual(0, blocks[0].?.block.predecessors.items.len);
-    try std.testing.expectEqual(1, blocks[1].?.block.predecessors.items.len);
-    try std.testing.expectEqual(1, blocks[2].?.block.predecessors.items.len);
-    try std.testing.expectEqual(2, blocks[3].?.block.predecessors.items.len);
+    try std.testing.expectEqual(0, blocks[0].?.predecessors.items.len);
+    try std.testing.expectEqual(1, blocks[1].?.predecessors.items.len);
+    try std.testing.expectEqual(1, blocks[2].?.predecessors.items.len);
+    try std.testing.expectEqual(2, blocks[3].?.predecessors.items.len);
 
     // Block 1 should point at block 0
-    try std.testing.expectEqual(blocks[0].?, blocks[1].?.block.predecessors.items[0]);
+    try std.testing.expectEqual(blocks[0].?, blocks[1].?.predecessors.items[0]);
 
     // Block 2 should point at block 0
-    try std.testing.expectEqual(blocks[0].?, blocks[2].?.block.predecessors.items[0]);
+    try std.testing.expectEqual(blocks[0].?, blocks[2].?.predecessors.items[0]);
 
     // Block 3 should point at block 1 and 2
-    const preds = blocks[3].?.block.predecessors.items;
+    const preds = blocks[3].?.predecessors.items;
 
     try std.testing.expect(preds[0] == blocks[1].? or preds[1] == blocks[1].?);
     try std.testing.expect(preds[0] == blocks[2].? or preds[1] == blocks[2].?);
@@ -956,26 +894,26 @@ test "blocks have dominators" {
 
     // We should have 4 blocks
     try std.testing.expectEqual(4, blocks.len);
-    try std.testing.expect(blocks[0].?.block.entry);
+    try std.testing.expect(blocks[0].?.entry);
 
     // Entry dominates itself
-    try std.testing.expectEqual(1, blocks[0].?.block.dom.?.popCount());
-    try std.testing.expect(blocks[0].?.block.dom.?.isBitSet(0));
+    try std.testing.expectEqual(1, blocks[0].?.dom.?.popCount());
+    try std.testing.expect(blocks[0].?.dom.?.isBitSet(0));
 
     // BB1 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].?.block.dom.?.popCount());
-    try std.testing.expect(blocks[1].?.block.dom.?.isBitSet(0));
-    try std.testing.expect(blocks[1].?.block.dom.?.isBitSet(1));
+    try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
+    try std.testing.expect(blocks[1].?.dom.?.isBitSet(0));
+    try std.testing.expect(blocks[1].?.dom.?.isBitSet(1));
 
     // BB2 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].?.block.dom.?.popCount());
-    try std.testing.expect(blocks[2].?.block.dom.?.isBitSet(0));
-    try std.testing.expect(blocks[2].?.block.dom.?.isBitSet(2));
+    try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
+    try std.testing.expect(blocks[2].?.dom.?.isBitSet(0));
+    try std.testing.expect(blocks[2].?.dom.?.isBitSet(2));
 
     // BB3 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].?.block.dom.?.popCount());
-    try std.testing.expect(blocks[3].?.block.dom.?.isBitSet(0));
-    try std.testing.expect(blocks[3].?.block.dom.?.isBitSet(3));
+    try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
+    try std.testing.expect(blocks[3].?.dom.?.isBitSet(0));
+    try std.testing.expect(blocks[3].?.dom.?.isBitSet(3));
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
@@ -1024,7 +962,7 @@ fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8)
 }
 
 fn expectInstructionList(expected: []const ir.InstructionName, block: *BasicBlock) !void {
-    var insn: ?*ir.InstructionList.Node = block.block.start;
+    var insn: ?*ir.InstructionList.Node = block.start;
     for (expected) |expected_insn| {
         try std.testing.expectEqual(expected_insn, @as(ir.InstructionName, insn.?.data));
         insn = insn.?.next;

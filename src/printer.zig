@@ -153,25 +153,25 @@ const CFGPrinter = struct {
     }
 
     fn printBlock(scope: *cmp.Scope, blk: *CFG.BasicBlock, ctx: *const Context) !void {
-        try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.block.name });
-        if (blk.block.entry) {
+        try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.name });
+        if (blk.entry) {
             try ctx.out.print("color=green\n", .{});
         }
-        try ctx.out.print("label=\"BB{d}\\l", .{ blk.block.name });
+        try ctx.out.print("label=\"BB{d}\\l", .{ blk.name });
 
         // Print upward exposed variables
-        try printSet("UE: ", scope, blk.block.upward_exposed_set, ctx.out);
+        try printSet("UE: ", scope, blk.upward_exposed_set, ctx.out);
 
         // Print killed variables
-        try printSet("Killed: ", scope, blk.block.killed_set, ctx.out);
+        try printSet("Killed: ", scope, blk.killed_set, ctx.out);
 
         // Print live out variables
-        try printSet("LiveOut: ", scope, blk.block.liveout_set, ctx.out);
+        try printSet("LiveOut: ", scope, blk.liveout_set, ctx.out);
 
-        try printBlockSet("DOM: ", blk.block.dom.?, ctx.out);
+        try printBlockSet("DOM: ", blk.dom.?, ctx.out);
 
         // Print uninitialized variables
-        if (blk.block.entry) {
+        if (blk.entry) {
             const uninitialized = try blk.uninitializedSet(scope, scope.allocator);
             defer scope.allocator.destroy(uninitialized);
             if (uninitialized.popCount() > 0) {
@@ -192,21 +192,21 @@ const CFGPrinter = struct {
 
         try ctx.out.print("\"];\n", .{ });
 
-        if (blk.block.fall_through_dest) |left| {
+        if (blk.fall_through_dest) |left| {
             try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"fall through\"];\n", .{
                 ctx.scope.name,
-                blk.block.name,
+                blk.name,
                 ctx.scope.name,
-                left.block.name
+                left.name
             });
         }
 
-        if (blk.block.jump_dest) |right| {
+        if (blk.jump_dest) |right| {
             try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"jump\"];\n", .{
                 ctx.scope.name,
-                blk.block.name,
+                blk.name,
                 ctx.scope.name,
-                right.block.name
+                right.name
             });
         }
 
