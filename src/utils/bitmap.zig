@@ -79,7 +79,7 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn dup(orig: *Self, mem: std.mem.Allocator) !*Self {
+        pub fn dup(orig: Self, mem: std.mem.Allocator) !*Self {
             const bm = try mem.create(Self);
             bm.* = try fillBm(mem, 0, orig.getBits());
             switch(bm.*) {
