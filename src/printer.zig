@@ -15,18 +15,21 @@ const IRPrinter = struct {
     }
 
     fn printInsnParams(insn: ir.Instruction, out: *const std.io.AnyWriter) !void {
-        try out.print("(", .{});
         var opiter = insn.opIter();
         var first = true;
 
         while (opiter.next()) |op| {
-            if (!first) {
+            if (first) {
+                try out.print("(", .{});
+            } else {
                 try out.print(", ", .{});
             }
             first = false;
             try printOpnd(op, out);
         }
-        try out.print(")", .{});
+        if (!first) {
+            try out.print(")", .{});
+        }
     }
 
     fn printInsnName(insn: ir.Instruction, out: *const std.io.AnyWriter) !void {
