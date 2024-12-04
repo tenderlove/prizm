@@ -1,13 +1,15 @@
 const std = @import("std");
 
 pub const BitMap = struct {
+    const Self = @This();
+
     bits: usize,
     single: u64,
     many: ?[]u64,
     comptime T: type = u64,
 
-    pub fn init(mem: std.mem.Allocator, bits: usize) !*BitMap {
-        const bm = try mem.create(BitMap);
+    pub fn init(mem: std.mem.Allocator, bits: usize) !*Self {
+        const bm = try mem.create(Self);
         bm.* = .{ .bits = bits, .single = 0, .many = null };
 
         if (bits > 64) {
@@ -20,20 +22,20 @@ pub const BitMap = struct {
         return bm;
     }
 
-    pub fn fsb(self: BitMap) usize {
+    pub fn fsb(self: Self) usize {
         return self.bits - self.clz() - 1;
     }
 
-    fn bitStorage(self: BitMap) usize {
+    fn bitStorage(self: Self) usize {
         const mask: usize = 63;
         return (self.bits + 63) & ~mask;
     }
 
-    fn planes(self: BitMap) usize {
+    fn planes(self: Self) usize {
         return self.bitStorage() / 64;
     }
 
-    pub fn clz(self: BitMap) usize {
+    pub fn clz(self: Self) usize {
         const mask: usize = 63;
         const bit_storage = (self.bits + 63) & ~mask;
         const padding = bit_storage - self.bits;
@@ -57,8 +59,8 @@ pub const BitMap = struct {
         }
     }
 
-    pub fn dup(orig: *BitMap, mem: std.mem.Allocator) !*BitMap {
-        const new = try mem.create(BitMap);
+    pub fn dup(orig: *Self, mem: std.mem.Allocator) !*Self {
+        const new = try mem.create(Self);
         const bits = orig.bits;
         new.* = .{ .bits = bits, .single = orig.single, .many = null, .T = orig.T };
         if (bits > 64) {
@@ -69,7 +71,7 @@ pub const BitMap = struct {
         return new;
     }
 
-    pub fn eq(self: *BitMap, other: *BitMap) bool {
+    pub fn eq(self: *Self, other: *Self) bool {
         if (self.bits != other.bits) return false;
 
         if (self.bits > 64) {
@@ -79,7 +81,7 @@ pub const BitMap = struct {
         }
     }
 
-    pub fn popCount(self: *BitMap) usize {
+    pub fn popCount(self: *Self) usize {
         if (self.bits > 64) {
             var count: usize = 0;
             for (self.many.?) |plane| {
@@ -91,7 +93,7 @@ pub const BitMap = struct {
         }
     }
 
-    pub fn setBit(self: *BitMap, bit: u64) !void {
+    pub fn setBit(self: *Self, bit: u64) !void {
         if (bit >= self.bits) return error.OutOfBoundsError;
 
         if (self.bits > 64) {
@@ -107,7 +109,7 @@ pub const BitMap = struct {
         bit_index: usize,
         plane_index: usize,
         current_plane: u64,
-        bm: *BitMap,
+        bm: *Self,
 
         pub fn next(self: *SetBitsIterator) ?usize {
             while (self.bit_index <= self.bm.bits) {
@@ -137,7 +139,7 @@ pub const BitMap = struct {
         }
     };
 
-    pub fn setBitsIterator(self: *BitMap) SetBitsIterator {
+    pub fn setBitsIterator(self: *Self) SetBitsIterator {
         const plane = if (self.bits > 64) self.many.?[0] else self.single;
 
         return .{
@@ -148,7 +150,7 @@ pub const BitMap = struct {
         };
     }
 
-    pub fn unsetBit(self: *BitMap, bit: u64) !void {
+    pub fn unsetBit(self: *Self, bit: u64) !void {
         if (bit >= self.bits) return error.OutOfBoundsError;
 
         if (self.bits > 64) {
@@ -161,7 +163,7 @@ pub const BitMap = struct {
         }
     }
 
-    pub fn isBitSet(self: *BitMap, bit: u64) bool {
+    pub fn isBitSet(self: *Self, bit: u64) bool {
         if (bit >= self.bits) return false;
 
         if (self.bits > 64) {
@@ -175,7 +177,7 @@ pub const BitMap = struct {
         }
     }
 
-    pub fn setIntersection(self: *BitMap, other: *BitMap) !void {
+    pub fn setIntersection(self: *Self, other: *Self) !void {
         if (self.bits != other.bits) return error.ArgumentError;
 
         if (self.bits > 64) {
@@ -187,13 +189,13 @@ pub const BitMap = struct {
         }
     }
 
-    pub fn intersection(self: *BitMap, other: *BitMap, mem: std.mem.Allocator) !*BitMap {
+    pub fn intersection(self: *Self, other: *Self, mem: std.mem.Allocator) !*Self {
         const new = try self.dup(mem);
         try new.setIntersection(other);
         return new;
     }
 
-    pub fn setNot(self: *BitMap) void {
+    pub fn setNot(self: *Self) void {
         if (self.bits > 64) {
             for (0..self.many.?.len) |i| {
                 const plane = self.many.?[i];
@@ -204,13 +206,13 @@ pub const BitMap = struct {
         }
     }
 
-    pub fn not(self: *BitMap, mem: std.mem.Allocator) !*BitMap {
+    pub fn not(self: *Self, mem: std.mem.Allocator) !*Self {
         const new = try self.dup(mem);
         new.setNot();
         return new;
     }
 
-    pub fn replace(self: *BitMap, other: *BitMap) !void {
+    pub fn replace(self: *Self, other: *Self) !void {
         if (self.bits != other.bits) return error.ArgumentError;
 
         if (self.bits > 64) {
@@ -220,13 +222,13 @@ pub const BitMap = struct {
         }
     }
 
-    pub fn Union(self: *BitMap, other: *BitMap, mem: std.mem.Allocator) !*BitMap {
+    pub fn Union(self: *Self, other: *Self, mem: std.mem.Allocator) !*Self {
         const new = try self.dup(mem);
         try new.setUnion(other);
         return new;
     }
 
-    pub fn setUnion(self: *BitMap, other: *BitMap) !void {
+    pub fn setUnion(self: *Self, other: *Self) !void {
         if (self.bits != other.bits) return error.ArgumentError;
 
         if (self.bits > 64) {
@@ -238,7 +240,7 @@ pub const BitMap = struct {
         }
     }
 
-    pub fn deinit(self: *BitMap, mem: std.mem.Allocator) void {
+    pub fn deinit(self: *Self, mem: std.mem.Allocator) void {
         if (self.bits > 64) {
             mem.free(self.many.?);
         }
