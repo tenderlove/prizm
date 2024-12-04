@@ -8,6 +8,7 @@ const BitMapTypes = enum {
 pub fn BitMapSized(comptime T: type) type {
     return union(BitMapTypes) {
         const Self = @This();
+        const AtomBits = @typeInfo(T).int.bits;
 
         single: struct {
             bits: usize,
@@ -32,10 +33,10 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         fn fillBm(mem: std.mem.Allocator, single: T, bits: usize) !Self {
-            if (bits > 64) {
-                const mask: usize = 63;
-                const storage: usize = (bits + 63) & ~mask;
-                const pls = storage / 64;
+            if (bits > AtomBits) {
+                const mask: usize = AtomBits - 1;
+                const storage: usize = (bits + mask) & ~mask;
+                const pls = storage / AtomBits;
                 const memory = try mem.alloc(T, pls);
                 return .{ .heap = .{ .bits = bits, .buff = memory } };
             } else {
@@ -54,8 +55,8 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         pub fn clz(self: Self) usize {
-            const mask: usize = 63;
-            const bit_storage = (self.getBits() + 63) & ~mask;
+            const mask: usize = AtomBits - 1;
+            const bit_storage = (self.getBits() + mask) & ~mask;
             const padding = bit_storage - self.getBits();
 
             switch(self) {
@@ -67,7 +68,7 @@ pub fn BitMapSized(comptime T: type) type {
                         i -= 1;
                         const plane = payload.buff[i];
                         if (plane == 0) {
-                            acc += 64;
+                            acc += AtomBits;
                         } else {
                             acc += @clz(plane);
                             break;
@@ -110,15 +111,14 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn setBit(self: *Self, bit: u64) !void {
+        pub fn setBit(self: *Self, bit: T) !void {
             if (bit >= self.getBits()) return error.OutOfBoundsError;
 
             switch(self.*) {
-                .single => self.single.buff |= (@as(u64, 1) << @as(u6, @intCast(bit))),
+                .single => self.single.buff |= (@as(T, 1) << @intCast(bit)),
                 .heap => {
-                    const plane = bit / 64;
-                    const theBit: u6 = @intCast(@mod(bit, 64));
-                    self.heap.buff[plane] |= (@as(u64, 1) << theBit);
+                    const plane = bit / AtomBits;
+                    self.heap.buff[plane] |= (@as(T, 1) << @intCast(@mod(bit, AtomBits)));
                 }
             }
         }
@@ -126,7 +126,7 @@ pub fn BitMapSized(comptime T: type) type {
         const SetBitsIterator = struct {
             bit_index: usize,
             plane_index: usize,
-            current_plane: u64,
+            current_plane: T,
             bm: *const Self,
 
             pub fn next(self: *SetBitsIterator) ?usize {
@@ -139,8 +139,8 @@ pub fn BitMapSized(comptime T: type) type {
 
                     self.bit_index += 1;
 
-                    if (@mod(self.bit_index, 64) == 0) {
-                        self.plane_index = self.bit_index / 64;
+                    if (@mod(self.bit_index, AtomBits) == 0) {
+                        self.plane_index = self.bit_index / AtomBits;
 
                         if (self.bit_index < self.bm.getBits()) {
                             self.current_plane = self.bm.heap.buff[self.plane_index];
@@ -171,34 +171,32 @@ pub fn BitMapSized(comptime T: type) type {
             };
         }
 
-        pub fn unsetBit(self: *Self, bit: u64) !void {
+        pub fn unsetBit(self: *Self, bit: T) !void {
             if (bit >= self.getBits()) return error.OutOfBoundsError;
 
             switch(self.*) {
                 .single => {
-                    const mask = ~(@as(u64, 1) << @as(u6, @intCast(bit)));
+                    const mask = ~(@as(T, 1) << @intCast(bit));
                     self.single.buff &= mask;
                 },
                 .heap => {
-                    const plane = bit / 64;
-                    const theBit: u6 = @intCast(@mod(bit, 64));
-                    self.heap.buff[plane] &= ~(@as(u64, 1) << theBit);
+                    const plane = bit / AtomBits;
+                    self.heap.buff[plane] &= ~(@as(T, 1) << @intCast(@mod(bit, AtomBits)));
                 }
             }
         }
 
-        pub fn isBitSet(self: Self, bit: u64) bool {
+        pub fn isBitSet(self: Self, bit: T) bool {
             if (bit >= self.getBits()) return false;
 
             switch(self) {
                 .single => |p| {
-                    const v = (@as(u64, 1) << @as(u6, @intCast(bit)));
+                    const v = (@as(T, 1) << @intCast(bit));
                     return v == (p.buff & v);
                 },
                 .heap => |p| {
-                    const plane = bit / 64;
-                    const theBit: u6 = @intCast(@mod(bit, 64));
-                    const mask = (@as(u64, 1) << theBit);
+                    const plane = bit / AtomBits;
+                    const mask = (@as(T, 1) << @intCast(@mod(bit, AtomBits)));
                     return mask == (p.buff[plane] & mask);
                 }
             }
@@ -279,6 +277,20 @@ pub fn BitMapSized(comptime T: type) type {
 }
 
 pub const BitMap = BitMapSized(u64);
+
+test "works with smaller ints" {
+    const alloc = std.testing.allocator;
+
+    const bmu8 = try BitMapSized(u8).init(alloc, 8);
+    defer bmu8.deinit(alloc);
+    try bmu8.setBit(1);
+    try std.testing.expect(bmu8.isBitSet(1));
+
+    const bmu832 = try BitMapSized(u8).init(alloc, 32);
+    defer bmu832.deinit(alloc);
+    try bmu832.setBit(31);
+    try std.testing.expect(bmu832.isBitSet(31));
+}
 
 test "create bitmap" {
     const alloc = std.testing.allocator;
