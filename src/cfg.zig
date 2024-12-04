@@ -97,6 +97,7 @@ pub const CFG = struct {
         const list = try self.reversePostorderBlocks(self.mem);
         defer self.mem.free(list);
 
+        // Setup initial dominator bitmaps
         for (list) |maybebb| {
             if (maybebb) |bb| {
                 if (bb.entry) {
@@ -112,6 +113,7 @@ pub const CFG = struct {
             }
         }
 
+        // Calculate dominators
         var changed = true;
         while (changed) {
             changed = false;
@@ -140,6 +142,22 @@ pub const CFG = struct {
                         changed = true;
                     }
                 }
+            }
+        }
+
+        // Set idom on each bb
+        for (list) |maybebb| {
+            if (maybebb) |bb| {
+                if (bb.entry) continue;
+
+                assert(bb.dom.?.isBitSet(bb.name));
+                // Unset ourselves real quick
+                try bb.dom.?.unsetBit(bb.name);
+
+                bb.idom = bb.dom.?.fsb();
+
+                // Set ourselves back
+                try bb.dom.?.setBit(bb.name);
             }
         }
     }
@@ -226,6 +244,7 @@ pub const BasicBlock = struct {
     dom: ?*bitmap.BitMap = null,
     fall_through_dest: ?*BasicBlock = null,
     jump_dest: ?*BasicBlock = null,
+    idom: ?u64 = null,
 
     fn initBlock(alloc: std.mem.Allocator, name: u64, start: anytype, finish: anytype, entry: bool, vars: usize) !*BasicBlock {
         const block = try alloc.create(BasicBlock);
@@ -912,21 +931,25 @@ test "blocks have dominators" {
     // Entry dominates itself
     try std.testing.expectEqual(1, blocks[0].?.dom.?.popCount());
     try std.testing.expect(blocks[0].?.dom.?.isBitSet(0));
+    try std.testing.expectEqual(null, blocks[0].?.idom);
 
     // BB1 dominated by self and BB0
     try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
     try std.testing.expect(blocks[1].?.dom.?.isBitSet(0));
     try std.testing.expect(blocks[1].?.dom.?.isBitSet(1));
+    try std.testing.expectEqual(0, blocks[1].?.idom.?);
 
     // BB2 dominated by self and BB0
     try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
     try std.testing.expect(blocks[2].?.dom.?.isBitSet(0));
     try std.testing.expect(blocks[2].?.dom.?.isBitSet(2));
+    try std.testing.expectEqual(0, blocks[1].?.idom.?);
 
     // BB3 dominated by self and BB0
     try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
     try std.testing.expect(blocks[3].?.dom.?.isBitSet(0));
     try std.testing.expect(blocks[3].?.dom.?.isBitSet(3));
+    try std.testing.expectEqual(0, blocks[1].?.idom.?);
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {

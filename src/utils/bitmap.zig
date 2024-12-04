@@ -20,6 +20,10 @@ pub const BitMap = struct {
         return bm;
     }
 
+    pub fn fsb(self: BitMap) usize {
+        return self.bits - self.clz() - 1;
+    }
+
     fn bitStorage(self: BitMap) usize {
         const mask: usize = 63;
         return (self.bits + 63) & ~mask;
@@ -29,7 +33,7 @@ pub const BitMap = struct {
         return self.bitStorage() / 64;
     }
 
-    pub fn clz(self: *BitMap) usize {
+    pub fn clz(self: BitMap) usize {
         const mask: usize = 63;
         const bit_storage = (self.bits + 63) & ~mask;
         const padding = bit_storage - self.bits;
@@ -692,4 +696,32 @@ test "clz large" {
     try std.testing.expectEqual(68, bm1.clz());
     try bm1.setBit(69);
     try std.testing.expectEqual(0, bm1.clz());
+}
+
+test "fsb" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 16);
+    defer bm1.deinit(alloc);
+
+    try bm1.setBit(0);
+    try std.testing.expectEqual(0, bm1.fsb());
+    try bm1.setBit(1);
+    try std.testing.expectEqual(1, bm1.fsb());
+    try bm1.setBit(15);
+    try std.testing.expectEqual(15, bm1.fsb());
+}
+
+test "fsb large" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 70);
+    defer bm1.deinit(alloc);
+
+    try bm1.setBit(0);
+    try std.testing.expectEqual(0, bm1.fsb());
+    try bm1.setBit(1);
+    try std.testing.expectEqual(1, bm1.fsb());
+    try bm1.setBit(15);
+    try std.testing.expectEqual(15, bm1.fsb());
+    try bm1.setBit(64);
+    try std.testing.expectEqual(64, bm1.fsb());
 }

@@ -447,7 +447,7 @@ pub const Compiler = struct {
                     try cc.pushJumpUnless(val.?, then_label);
                     return PredicateType.unknown;
                 },
-                c.PM_INTEGER_NODE => {
+                c.PM_INTEGER_NODE, c.PM_TRUE_NODE => {
                     return PredicateType.always_true;
                 },
                 c.PM_NIL_NODE, c.PM_FALSE_NODE => {
@@ -547,7 +547,9 @@ pub const Compiler = struct {
         switch (predicate) {
             .always_false => { },
             .always_true, .unknown => {
-                _ = try cc.compileNode(@ptrCast(node.*.statements), popped);
+                if (node.*.statements) |stmt| {
+                    _ = try cc.compileNode(@ptrCast(stmt), popped);
+                }
             }
         }
 
@@ -991,6 +993,27 @@ test "while loop" {
         ir.Instruction.jumpunless,
         ir.Instruction.getself,
         ir.Instruction.call,
+        ir.Instruction.jump,
+        ir.Instruction.putlabel,
+        ir.Instruction.loadnil,
+        ir.Instruction.leave,
+    }, method_scope.insns);
+}
+
+test "empty while loop" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "def foo; while true; end; end");
+    defer scope.deinit();
+
+    const method_scope: *Scope = scope.insns.first.?.data.define_method.func.scope.value;
+
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.putlabel,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
         ir.Instruction.loadnil,

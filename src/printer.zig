@@ -169,6 +169,9 @@ const CFGPrinter = struct {
         try printSet("LiveOut: ", scope, blk.liveout_set, ctx.out);
 
         try printBlockSet("DOM: ", blk.dom.?, ctx.out);
+        if (blk.idom) |idom| {
+            try ctx.out.print("IDOM: BB{d}\\l", . {idom});
+        }
 
         // Print uninitialized variables
         if (blk.entry) {
