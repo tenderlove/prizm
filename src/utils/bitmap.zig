@@ -1,252 +1,255 @@
 const std = @import("std");
 
-pub const BitMap = struct {
-    const Self = @This();
+pub fn BitMapSized(comptime T: type) type {
+    return struct {
+        const Self = @This();
 
-    bits: usize,
-    single: u64,
-    many: ?[]u64,
-    comptime T: type = u64,
+        bits: usize,
+        single: T,
+        many: ?[]T,
 
-    pub fn init(mem: std.mem.Allocator, bits: usize) !*Self {
-        const bm = try mem.create(Self);
-        bm.* = .{ .bits = bits, .single = 0, .many = null };
+        pub fn init(mem: std.mem.Allocator, bits: usize) !*Self {
+            const bm = try mem.create(Self);
+            bm.* = .{ .bits = bits, .single = 0, .many = null };
 
-        if (bits > 64) {
-            // Round up to nearest 64
-            const pls = bm.planes();
-            const memory = try mem.alloc(bm.*.T, pls);
-            @memset(memory, 0);
-            bm.*.many = memory;
-        }
-        return bm;
-    }
-
-    pub fn fsb(self: Self) usize {
-        return self.bits - self.clz() - 1;
-    }
-
-    fn bitStorage(self: Self) usize {
-        const mask: usize = 63;
-        return (self.bits + 63) & ~mask;
-    }
-
-    fn planes(self: Self) usize {
-        return self.bitStorage() / 64;
-    }
-
-    pub fn clz(self: Self) usize {
-        const mask: usize = 63;
-        const bit_storage = (self.bits + 63) & ~mask;
-        const padding = bit_storage - self.bits;
-
-        if (self.bits > 64) {
-            var i = self.many.?.len;
-            var acc: usize = 0;
-            while (i > 0) {
-                i -= 1;
-                const plane = self.many.?[i];
-                if (plane == 0) {
-                    acc += 64;
-                } else {
-                    acc += @clz(plane);
-                    break;
-                }
+            if (bits > 64) {
+                // Round up to nearest 64
+                const pls = bm.planes();
+                const memory = try mem.alloc(T, pls);
+                @memset(memory, 0);
+                bm.*.many = memory;
             }
-            return acc - padding;
-        } else {
-            return @clz(self.single) - padding;
+            return bm;
         }
-    }
 
-    pub fn dup(orig: *Self, mem: std.mem.Allocator) !*Self {
-        const new = try mem.create(Self);
-        const bits = orig.bits;
-        new.* = .{ .bits = bits, .single = orig.single, .many = null, .T = orig.T };
-        if (bits > 64) {
-            const memory = try mem.alloc(new.*.T, new.planes());
-            @memcpy(memory, orig.many.?);
-            new.*.many = memory;
+        pub fn fsb(self: Self) usize {
+            return self.bits - self.clz() - 1;
         }
-        return new;
-    }
 
-    pub fn eq(self: *Self, other: *Self) bool {
-        if (self.bits != other.bits) return false;
-
-        if (self.bits > 64) {
-            return std.mem.eql(self.T, self.many.?, other.many.?);
-        } else {
-            return self.single == other.single;
+        fn bitStorage(self: Self) usize {
+            const mask: usize = 63;
+            return (self.bits + 63) & ~mask;
         }
-    }
 
-    pub fn popCount(self: *Self) usize {
-        if (self.bits > 64) {
-            var count: usize = 0;
-            for (self.many.?) |plane| {
-                count += @popCount(plane);
-            }
-            return count;
-        } else {
-            return @popCount(self.single);
+        fn planes(self: Self) usize {
+            return self.bitStorage() / 64;
         }
-    }
 
-    pub fn setBit(self: *Self, bit: u64) !void {
-        if (bit >= self.bits) return error.OutOfBoundsError;
+        pub fn clz(self: Self) usize {
+            const mask: usize = 63;
+            const bit_storage = (self.bits + 63) & ~mask;
+            const padding = bit_storage - self.bits;
 
-        if (self.bits > 64) {
-            const plane = bit / 64;
-            const theBit: u6 = @intCast(@mod(bit, 64));
-            self.many.?[plane] |= (@as(u64, 1) << theBit);
-        } else {
-            self.single |= (@as(u64, 1) << @as(u6, @intCast(bit)));
-        }
-    }
-
-    const SetBitsIterator = struct {
-        bit_index: usize,
-        plane_index: usize,
-        current_plane: u64,
-        bm: *Self,
-
-        pub fn next(self: *SetBitsIterator) ?usize {
-            while (self.bit_index <= self.bm.bits) {
-                var idx: ?usize = null;
-
-                if (self.current_plane & 0x1 == 0x1) {
-                    idx = self.bit_index;
-                }
-
-                self.bit_index += 1;
-
-                if (@mod(self.bit_index, 64) == 0) {
-                    self.plane_index = self.bit_index / 64;
-
-                    if (self.bit_index < self.bm.bits) {
-                        self.current_plane = self.bm.many.?[self.plane_index];
+            if (self.bits > 64) {
+                var i = self.many.?.len;
+                var acc: usize = 0;
+                while (i > 0) {
+                    i -= 1;
+                    const plane = self.many.?[i];
+                    if (plane == 0) {
+                        acc += 64;
                     } else {
-                        self.current_plane = 0;
+                        acc += @clz(plane);
+                        break;
                     }
-                } else {
-                    self.current_plane >>= 1;
                 }
-
-                if (idx) |x| { return x; }
+                return acc - padding;
+            } else {
+                return @clz(self.single) - padding;
             }
-            return null;
+        }
+
+        pub fn dup(orig: *Self, mem: std.mem.Allocator) !*Self {
+            const new = try mem.create(Self);
+            const bits = orig.bits;
+            new.* = .{ .bits = bits, .single = orig.single, .many = null };
+            if (bits > 64) {
+                const memory = try mem.alloc(T, new.planes());
+                @memcpy(memory, orig.many.?);
+                new.*.many = memory;
+            }
+            return new;
+        }
+
+        pub fn eq(self: *Self, other: *Self) bool {
+            if (self.bits != other.bits) return false;
+
+            if (self.bits > 64) {
+                return std.mem.eql(T, self.many.?, other.many.?);
+            } else {
+                return self.single == other.single;
+            }
+        }
+
+        pub fn popCount(self: *Self) usize {
+            if (self.bits > 64) {
+                var count: usize = 0;
+                for (self.many.?) |plane| {
+                    count += @popCount(plane);
+                }
+                return count;
+            } else {
+                return @popCount(self.single);
+            }
+        }
+
+        pub fn setBit(self: *Self, bit: u64) !void {
+            if (bit >= self.bits) return error.OutOfBoundsError;
+
+            if (self.bits > 64) {
+                const plane = bit / 64;
+                const theBit: u6 = @intCast(@mod(bit, 64));
+                self.many.?[plane] |= (@as(u64, 1) << theBit);
+            } else {
+                self.single |= (@as(u64, 1) << @as(u6, @intCast(bit)));
+            }
+        }
+
+        const SetBitsIterator = struct {
+            bit_index: usize,
+            plane_index: usize,
+            current_plane: u64,
+            bm: *Self,
+
+            pub fn next(self: *SetBitsIterator) ?usize {
+                while (self.bit_index <= self.bm.bits) {
+                    var idx: ?usize = null;
+
+                    if (self.current_plane & 0x1 == 0x1) {
+                        idx = self.bit_index;
+                    }
+
+                    self.bit_index += 1;
+
+                    if (@mod(self.bit_index, 64) == 0) {
+                        self.plane_index = self.bit_index / 64;
+
+                        if (self.bit_index < self.bm.bits) {
+                            self.current_plane = self.bm.many.?[self.plane_index];
+                        } else {
+                            self.current_plane = 0;
+                        }
+                    } else {
+                        self.current_plane >>= 1;
+                    }
+
+                    if (idx) |x| { return x; }
+                }
+                return null;
+            }
+        };
+
+        pub fn setBitsIterator(self: *Self) SetBitsIterator {
+            const plane = if (self.bits > 64) self.many.?[0] else self.single;
+
+            return .{
+                .bit_index = 0,
+                .plane_index = 0,
+                .current_plane = plane,
+                .bm = self
+            };
+        }
+
+        pub fn unsetBit(self: *Self, bit: u64) !void {
+            if (bit >= self.bits) return error.OutOfBoundsError;
+
+            if (self.bits > 64) {
+                const plane = bit / 64;
+                const theBit: u6 = @intCast(@mod(bit, 64));
+                self.many.?[plane] &= ~(@as(u64, 1) << theBit);
+            } else {
+                const mask = ~(@as(u64, 1) << @as(u6, @intCast(bit)));
+                self.single &= mask;
+            }
+        }
+
+        pub fn isBitSet(self: *Self, bit: u64) bool {
+            if (bit >= self.bits) return false;
+
+            if (self.bits > 64) {
+                const plane = bit / 64;
+                const theBit: u6 = @intCast(@mod(bit, 64));
+                const mask = (@as(u64, 1) << theBit);
+                return mask == (self.many.?[plane] & mask);
+            } else {
+                const v = (@as(u64, 1) << @as(u6, @intCast(bit)));
+                return v == (self.single & v);
+            }
+        }
+
+        pub fn setIntersection(self: *Self, other: *Self) !void {
+            if (self.bits != other.bits) return error.ArgumentError;
+
+            if (self.bits > 64) {
+                for (0..self.many.?.len) |i| {
+                    self.many.?[i] &= other.many.?[i];
+                }
+            } else {
+                self.single &= other.single;
+            }
+        }
+
+        pub fn intersection(self: *Self, other: *Self, mem: std.mem.Allocator) !*Self {
+            const new = try self.dup(mem);
+            try new.setIntersection(other);
+            return new;
+        }
+
+        pub fn setNot(self: *Self) void {
+            if (self.bits > 64) {
+                for (0..self.many.?.len) |i| {
+                    const plane = self.many.?[i];
+                    self.many.?[i] = ~plane;
+                }
+            } else {
+                self.single = ~self.single;
+            }
+        }
+
+        pub fn not(self: *Self, mem: std.mem.Allocator) !*Self {
+            const new = try self.dup(mem);
+            new.setNot();
+            return new;
+        }
+
+        pub fn replace(self: *Self, other: *Self) !void {
+            if (self.bits != other.bits) return error.ArgumentError;
+
+            if (self.bits > 64) {
+                @memcpy(self.many.?, other.many.?);
+            } else {
+                self.single = other.single;
+            }
+        }
+
+        pub fn Union(self: *Self, other: *Self, mem: std.mem.Allocator) !*Self {
+            const new = try self.dup(mem);
+            try new.setUnion(other);
+            return new;
+        }
+
+        pub fn setUnion(self: *Self, other: *Self) !void {
+            if (self.bits != other.bits) return error.ArgumentError;
+
+            if (self.bits > 64) {
+                for (0..self.many.?.len) |i| {
+                    self.many.?[i] |= other.many.?[i];
+                }
+            } else {
+                self.single |= other.single;
+            }
+        }
+
+        pub fn deinit(self: *Self, mem: std.mem.Allocator) void {
+            if (self.bits > 64) {
+                mem.free(self.many.?);
+            }
+            mem.destroy(self);
         }
     };
+}
 
-    pub fn setBitsIterator(self: *Self) SetBitsIterator {
-        const plane = if (self.bits > 64) self.many.?[0] else self.single;
-
-        return .{
-            .bit_index = 0,
-            .plane_index = 0,
-            .current_plane = plane,
-            .bm = self
-        };
-    }
-
-    pub fn unsetBit(self: *Self, bit: u64) !void {
-        if (bit >= self.bits) return error.OutOfBoundsError;
-
-        if (self.bits > 64) {
-            const plane = bit / 64;
-            const theBit: u6 = @intCast(@mod(bit, 64));
-            self.many.?[plane] &= ~(@as(u64, 1) << theBit);
-        } else {
-            const mask = ~(@as(u64, 1) << @as(u6, @intCast(bit)));
-            self.single &= mask;
-        }
-    }
-
-    pub fn isBitSet(self: *Self, bit: u64) bool {
-        if (bit >= self.bits) return false;
-
-        if (self.bits > 64) {
-            const plane = bit / 64;
-            const theBit: u6 = @intCast(@mod(bit, 64));
-            const mask = (@as(u64, 1) << theBit);
-            return mask == (self.many.?[plane] & mask);
-        } else {
-            const v = (@as(u64, 1) << @as(u6, @intCast(bit)));
-            return v == (self.single & v);
-        }
-    }
-
-    pub fn setIntersection(self: *Self, other: *Self) !void {
-        if (self.bits != other.bits) return error.ArgumentError;
-
-        if (self.bits > 64) {
-            for (0..self.many.?.len) |i| {
-                self.many.?[i] &= other.many.?[i];
-            }
-        } else {
-            self.single &= other.single;
-        }
-    }
-
-    pub fn intersection(self: *Self, other: *Self, mem: std.mem.Allocator) !*Self {
-        const new = try self.dup(mem);
-        try new.setIntersection(other);
-        return new;
-    }
-
-    pub fn setNot(self: *Self) void {
-        if (self.bits > 64) {
-            for (0..self.many.?.len) |i| {
-                const plane = self.many.?[i];
-                self.many.?[i] = ~plane;
-            }
-        } else {
-            self.single = ~self.single;
-        }
-    }
-
-    pub fn not(self: *Self, mem: std.mem.Allocator) !*Self {
-        const new = try self.dup(mem);
-        new.setNot();
-        return new;
-    }
-
-    pub fn replace(self: *Self, other: *Self) !void {
-        if (self.bits != other.bits) return error.ArgumentError;
-
-        if (self.bits > 64) {
-            @memcpy(self.many.?, other.many.?);
-        } else {
-            self.single = other.single;
-        }
-    }
-
-    pub fn Union(self: *Self, other: *Self, mem: std.mem.Allocator) !*Self {
-        const new = try self.dup(mem);
-        try new.setUnion(other);
-        return new;
-    }
-
-    pub fn setUnion(self: *Self, other: *Self) !void {
-        if (self.bits != other.bits) return error.ArgumentError;
-
-        if (self.bits > 64) {
-            for (0..self.many.?.len) |i| {
-                self.many.?[i] |= other.many.?[i];
-            }
-        } else {
-            self.single |= other.single;
-        }
-    }
-
-    pub fn deinit(self: *Self, mem: std.mem.Allocator) void {
-        if (self.bits > 64) {
-            mem.free(self.many.?);
-        }
-        mem.destroy(self);
-    }
-};
+pub const BitMap = BitMapSized(u64);
 
 test "create bitmap" {
     const alloc = std.testing.allocator;
