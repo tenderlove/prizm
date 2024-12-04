@@ -101,13 +101,13 @@ pub const CFG = struct {
         for (list) |maybebb| {
             if (maybebb) |bb| {
                 if (bb.entry) {
-                    bb.dom = try bitmap.BitMap.init(self.arena.allocator(), self.block_name);
+                    bb.dom = try BitMap.init(self.arena.allocator(), self.block_name);
                     // Entry blocks dominate themselves, and nothing else
                     // dominates an entry block.
                     try bb.dom.?.setBit(bb.name);
                 } else {
                     // Default blocks to "everything dominates this block"
-                    bb.dom = try bitmap.BitMap.init(self.arena.allocator(), self.block_name);
+                    bb.dom = try BitMap.init(self.arena.allocator(), self.block_name);
                     bb.dom.?.setNot();
                 }
             }
@@ -122,12 +122,12 @@ pub const CFG = struct {
                 if (maybebb) |bb| {
                     if (bb.entry) continue;
 
-                    const temp = try bitmap.BitMap.init(self.mem, self.block_name);
+                    const temp = try BitMap.init(self.mem, self.block_name);
                     defer self.mem.destroy(temp);
 
                     try temp.setBit(bb.name);
 
-                    const intersect = try bitmap.BitMap.init(self.mem, self.block_name);
+                    const intersect = try BitMap.init(self.mem, self.block_name);
                     intersect.setNot();
                     defer self.mem.destroy(intersect);
 
@@ -238,10 +238,10 @@ pub const BasicBlock = struct {
     start: *ir.InstructionList.Node,
     finish: *ir.InstructionList.Node,
     predecessors: std.ArrayList(*BasicBlock),
-    killed_set: *bitmap.BitMap,
-    upward_exposed_set: *bitmap.BitMap,
-    liveout_set: *bitmap.BitMap,
-    dom: ?*bitmap.BitMap = null,
+    killed_set: *BitMap,
+    upward_exposed_set: *BitMap,
+    liveout_set: *BitMap,
+    dom: ?*BitMap = null,
     fall_through_dest: ?*BasicBlock = null,
     jump_dest: ?*BasicBlock = null,
     idom: ?u64 = null,
@@ -254,9 +254,9 @@ pub const BasicBlock = struct {
             .start = start,
             .finish = finish,
             .entry = entry,
-            .killed_set = try bitmap.BitMap.init(alloc, vars),
-            .upward_exposed_set = try bitmap.BitMap.init(alloc, vars),
-            .liveout_set = try bitmap.BitMap.init(alloc, vars),
+            .killed_set = try BitMap.init(alloc, vars),
+            .upward_exposed_set = try BitMap.init(alloc, vars),
+            .liveout_set = try BitMap.init(alloc, vars),
             .predecessors = std.ArrayList(*BasicBlock).init(alloc),
         };
 
@@ -271,7 +271,7 @@ pub const BasicBlock = struct {
         return self.upward_exposed_set.popCount();
     }
 
-    fn childLo(_: *BasicBlock, child: *BasicBlock, alloc: std.mem.Allocator) !*bitmap.BitMap {
+    fn childLo(_: *BasicBlock, child: *BasicBlock, alloc: std.mem.Allocator) !*BitMap {
         const ue = child.upward_exposed_set;
         const lo = child.liveout_set;
         const varkill = child.killed_set;
@@ -436,7 +436,7 @@ pub const BasicBlock = struct {
         }
     }
 
-    pub fn uninitializedSet(self: *BasicBlock, scope: *Scope, mem: std.mem.Allocator) !*bitmap.BitMap {
+    pub fn uninitializedSet(self: *BasicBlock, scope: *Scope, mem: std.mem.Allocator) !*BitMap {
         if (!self.entry) return error.ArgumentError;
 
         const uninit = try self.killed_set.dup(mem);
