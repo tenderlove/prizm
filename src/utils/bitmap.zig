@@ -127,7 +127,7 @@ pub fn BitMapSized(comptime T: type) type {
             bit_index: usize,
             plane_index: usize,
             current_plane: T,
-            bm: *const Self,
+            bm: Self,
 
             pub fn next(self: *SetBitsIterator) ?usize {
                 while (self.bit_index <= self.bm.getBits()) {
@@ -157,8 +157,8 @@ pub fn BitMapSized(comptime T: type) type {
             }
         };
 
-        pub fn setBitsIterator(self: *Self) SetBitsIterator {
-            const plane = switch(self.*) {
+        pub fn setBitsIterator(self: Self) SetBitsIterator {
+            const plane = switch(self) {
                 .heap => |p| p.buff[0],
                 .single => |p| p.buff,
             };
@@ -215,7 +215,7 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn intersection(self: *Self, other: *Self, mem: std.mem.Allocator) !*Self {
+        pub fn intersection(self: Self, other: *Self, mem: std.mem.Allocator) !*Self {
             const new = try self.dup(mem);
             try new.setIntersection(other);
             return new;
@@ -232,7 +232,7 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn not(self: *Self, mem: std.mem.Allocator) !*Self {
+        pub fn not(self: Self, mem: std.mem.Allocator) !*Self {
             const new = try self.dup(mem);
             new.setNot();
             return new;
@@ -247,7 +247,7 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn Union(self: *Self, other: *Self, mem: std.mem.Allocator) !*Self {
+        pub fn Union(self: Self, other: *Self, mem: std.mem.Allocator) !*Self {
             const new = try self.dup(mem);
             try new.setUnion(other);
             return new;
