@@ -9,12 +9,46 @@ pub const BitMap = struct {
         const bm = try mem.create(BitMap);
         bm.* = .{ .bits = bits, .single = 0, .many = null };
         if (bits > 64) {
-            const planes = ((bits + 63) / 64) + 1;
-            const memory = try mem.alloc(u64, planes);
+            // Round up to nearest 64
+            const pls = bm.planes();
+            const memory = try mem.alloc(u64, pls);
             @memset(memory, 0);
             bm.*.many = memory;
         }
         return bm;
+    }
+
+    fn bitStorage(self: BitMap) usize {
+        const mask: usize = 63;
+        return (self.bits + 63) & ~mask;
+    }
+
+    fn planes(self: BitMap) usize {
+        return self.bitStorage() / 64;
+    }
+
+    pub fn clz(self: *BitMap) usize {
+        const mask: usize = 63;
+        const bit_storage = (self.bits + 63) & ~mask;
+        const padding = bit_storage - self.bits;
+
+        if (self.bits > 64) {
+            var i = self.many.?.len;
+            var acc: usize = 0;
+            while (i > 0) {
+                i -= 1;
+                const plane = self.many.?[i];
+                if (plane == 0) {
+                    acc += 64;
+                } else {
+                    acc += @clz(plane);
+                    break;
+                }
+            }
+            return acc - padding;
+        } else {
+            return @clz(self.single) - padding;
+        }
     }
 
     pub fn dup(orig: *BitMap, mem: std.mem.Allocator) !*BitMap {
@@ -22,8 +56,7 @@ pub const BitMap = struct {
         const bits = orig.bits;
         new.* = .{ .bits = bits, .single = orig.single, .many = null };
         if (bits > 64) {
-            const planes = ((bits + 63) / 64) + 1;
-            const memory = try mem.alloc(u64, planes);
+            const memory = try mem.alloc(u64, new.planes());
             @memcpy(memory, orig.many.?);
             new.*.many = memory;
         }
@@ -80,6 +113,10 @@ pub const BitMap = struct {
 
                 self.bit_index += 1;
 
+                if (self.bit_index >= self.bm.bits) {
+                    return null;
+                }
+
                 if (@mod(self.bit_index, 64) == 0) {
                     self.plane_index = self.bit_index / 64;
                     self.current_plane = self.bm.many.?[self.plane_index];
@@ -135,8 +172,7 @@ pub const BitMap = struct {
         if (self.bits != other.bits) return error.ArgumentError;
 
         if (self.bits > 64) {
-            const planes = ((self.bits + 63) / 64) + 1;
-            for (0..planes) |i| {
+            for (0..self.many.?.len) |i| {
                 self.many.?[i] &= other.many.?[i];
             }
         } else {
@@ -152,8 +188,7 @@ pub const BitMap = struct {
 
     pub fn setNot(self: *BitMap) void {
         if (self.bits > 64) {
-            const planes = ((self.bits + 63) / 64) + 1;
-            for (0..planes) |i| {
+            for (0..self.many.?.len) |i| {
                 const plane = self.many.?[i];
                 self.many.?[i] = ~plane;
             }
@@ -188,8 +223,7 @@ pub const BitMap = struct {
         if (self.bits != other.bits) return error.ArgumentError;
 
         if (self.bits > 64) {
-            const planes = ((self.bits + 63) / 64) + 1;
-            for (0..planes) |i| {
+            for (0..self.many.?.len) |i| {
                 self.many.?[i] |= other.many.?[i];
             }
         } else {
@@ -617,4 +651,43 @@ test "replace large" {
     try std.testing.expect(bm2.isBitSet(2));
     try std.testing.expect(bm2.isBitSet(70));
     try std.testing.expect(bm1.eq(bm2));
+}
+
+test "clz small" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 16);
+    defer bm1.deinit(alloc);
+
+    try std.testing.expectEqual(16, bm1.clz());
+    try bm1.setBit(0);
+    try std.testing.expectEqual(15, bm1.clz());
+    try bm1.setBit(1);
+    try std.testing.expectEqual(14, bm1.clz());
+    try bm1.setBit(15);
+    try std.testing.expectEqual(0, bm1.clz());
+
+    const bm2 = try BitMap.init(alloc, 64);
+    defer bm2.deinit(alloc);
+
+    try std.testing.expectEqual(64, bm2.clz());
+    try bm2.setBit(0);
+    try std.testing.expectEqual(63, bm2.clz());
+    try bm2.setBit(1);
+    try std.testing.expectEqual(62, bm2.clz());
+    try bm2.setBit(63);
+    try std.testing.expectEqual(0, bm2.clz());
+}
+
+test "clz large" {
+    const alloc = std.testing.allocator;
+    const bm1 = try BitMap.init(alloc, 70);
+    defer bm1.deinit(alloc);
+
+    try std.testing.expectEqual(70, bm1.clz());
+    try bm1.setBit(0);
+    try std.testing.expectEqual(69, bm1.clz());
+    try bm1.setBit(1);
+    try std.testing.expectEqual(68, bm1.clz());
+    try bm1.setBit(69);
+    try std.testing.expectEqual(0, bm1.clz());
 }
