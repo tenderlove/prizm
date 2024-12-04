@@ -92,14 +92,46 @@ pub const CFG = struct {
         }
     }
 
+    // Fill in dominance frontier sets on all BBs
+    fn fillDominanceFrontiers(_: *CFG, bbs: []?* BasicBlock) !void {
+        for (bbs) |maybebb| {
+            if (maybebb) |bb| {
+                if (bb.entry) continue;
+
+                const idom = bb.idom.?;
+
+                if (bb.predecessors.items.len > 1) {
+                    for (bb.predecessors.items) |pred| {
+                        var runner = pred;
+
+                        while (runner.name != idom) {
+                            try runner.df.?.setBit(bb.name);
+                            const runner_idom = runner.idom.?;
+                            runner = bbs[runner_idom].?;
+                            assert(runner.name == runner_idom);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Fill in dominator sets on all BBs
     pub fn fillDominators(self: *CFG) !void {
+        var blocklist: []?*BasicBlock = try self.mem.alloc(?*BasicBlock, self.block_name);
+        @memset(blocklist, null);
+        defer self.mem.free(blocklist);
+
         const list = try self.reversePostorderBlocks(self.mem);
         defer self.mem.free(list);
 
         // Setup initial dominator bitmaps
         for (list) |maybebb| {
             if (maybebb) |bb| {
+                blocklist[bb.name] = bb;
+
+                bb.df = try BitMap.init(self.arena.allocator(), self.block_name);
+
                 if (bb.entry) {
                     bb.dom = try BitMap.init(self.arena.allocator(), self.block_name);
                     // Entry blocks dominate themselves, and nothing else
@@ -160,6 +192,7 @@ pub const CFG = struct {
                 try bb.dom.?.setBit(bb.name);
             }
         }
+        try self.fillDominanceFrontiers(blocklist);
     }
 
     // Fill LiveOut information to all BBs
@@ -242,6 +275,7 @@ pub const BasicBlock = struct {
     upward_exposed_set: *BitMap,
     liveout_set: *BitMap,
     dom: ?*BitMap = null,
+    df: ?*BitMap = null,
     fall_through_dest: ?*BasicBlock = null,
     jump_dest: ?*BasicBlock = null,
     idom: ?u64 = null,
@@ -1003,6 +1037,41 @@ test "while loop dominators" {
     try std.testing.expectEqual(7, blocks.len);
     try std.testing.expectEqual(6, blocks[6].?.name);
     try std.testing.expect(blocks[6].?.dom.?.isSet(6));
+}
+
+test "dominance frontiers" {
+    const allocator = std.testing.allocator;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code =
+\\ a = 1
+\\ while a
+\\   a = a + 1
+\\   if a > 100
+\\     z = a - 1
+\\   else
+\\     z = a + 1
+\\   end
+\\   puts z
+\\ end
+\\ puts a
+;
+    const scope = try compileScope(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const blocks = try cfg.blockList(allocator);
+    defer allocator.free(blocks);
+
+    // We should have 7 blocks
+    try std.testing.expectEqual(7, blocks.len);
+    try std.testing.expectEqual(6, blocks[6].?.name);
+    try std.testing.expect(blocks[6].?.dom.?.isBitSet(6));
+    try std.testing.expect(blocks[0].?.df.?.isBitSet(1));
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
