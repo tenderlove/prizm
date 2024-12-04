@@ -4,14 +4,16 @@ pub const BitMap = struct {
     bits: usize,
     single: u64,
     many: ?[]u64,
+    comptime T: type = u64,
 
     pub fn init(mem: std.mem.Allocator, bits: usize) !*BitMap {
         const bm = try mem.create(BitMap);
         bm.* = .{ .bits = bits, .single = 0, .many = null };
+
         if (bits > 64) {
             // Round up to nearest 64
             const pls = bm.planes();
-            const memory = try mem.alloc(u64, pls);
+            const memory = try mem.alloc(bm.*.T, pls);
             @memset(memory, 0);
             bm.*.many = memory;
         }
@@ -54,9 +56,9 @@ pub const BitMap = struct {
     pub fn dup(orig: *BitMap, mem: std.mem.Allocator) !*BitMap {
         const new = try mem.create(BitMap);
         const bits = orig.bits;
-        new.* = .{ .bits = bits, .single = orig.single, .many = null };
+        new.* = .{ .bits = bits, .single = orig.single, .many = null, .T = orig.T };
         if (bits > 64) {
-            const memory = try mem.alloc(u64, new.planes());
+            const memory = try mem.alloc(new.*.T, new.planes());
             @memcpy(memory, orig.many.?);
             new.*.many = memory;
         }
@@ -67,7 +69,7 @@ pub const BitMap = struct {
         if (self.bits != other.bits) return false;
 
         if (self.bits > 64) {
-            return std.mem.eql(u64, self.many.?, other.many.?);
+            return std.mem.eql(self.T, self.many.?, other.many.?);
         } else {
             return self.single == other.single;
         }
