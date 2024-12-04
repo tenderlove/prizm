@@ -10,29 +10,27 @@ pub fn BitMapSized(comptime T: type) type {
 
         pub fn init(mem: std.mem.Allocator, bits: usize) !*Self {
             const bm = try mem.create(Self);
-            bm.* = .{ .bits = bits, .single = 0, .many = null };
-
-            if (bits > 64) {
-                // Round up to nearest 64
-                const pls = bm.planes();
-                const memory = try mem.alloc(T, pls);
-                @memset(memory, 0);
-                bm.*.many = memory;
+            bm.* = try fillBm(mem, 0, bits);
+            if (bm.bits > 64) {
+                @memset(bm.many.?, 0);
             }
             return bm;
         }
 
+        fn fillBm(mem: std.mem.Allocator, single: T, bits: usize) !Self {
+            if (bits > 64) {
+                const mask: usize = 63;
+                const storage: usize = (bits + 63) & ~mask;
+                const pls = storage / 64;
+                const memory = try mem.alloc(T, pls);
+                return .{ .bits = bits, .single = single, .many = memory };
+            } else {
+                return .{ .bits = bits, .single = single, .many = null };
+            }
+        }
+
         pub fn fsb(self: Self) usize {
             return self.bits - self.clz() - 1;
-        }
-
-        fn bitStorage(self: Self) usize {
-            const mask: usize = 63;
-            return (self.bits + 63) & ~mask;
-        }
-
-        fn planes(self: Self) usize {
-            return self.bitStorage() / 64;
         }
 
         pub fn clz(self: Self) usize {
@@ -60,15 +58,14 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         pub fn dup(orig: *Self, mem: std.mem.Allocator) !*Self {
-            const new = try mem.create(Self);
-            const bits = orig.bits;
-            new.* = .{ .bits = bits, .single = orig.single, .many = null };
-            if (bits > 64) {
-                const memory = try mem.alloc(T, new.planes());
-                @memcpy(memory, orig.many.?);
-                new.*.many = memory;
+            const bm = try mem.create(Self);
+            bm.* = try fillBm(mem, orig.single, orig.bits);
+            if (bm.bits > 64) {
+                @memcpy(bm.many.?, orig.many.?);
+            } else {
+                bm.single = orig.single;
             }
-            return new;
+            return bm;
         }
 
         pub fn eq(self: *Self, other: *Self) bool {
