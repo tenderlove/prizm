@@ -1,19 +1,33 @@
 const std = @import("std");
 
+const BitMapTypes = enum {
+    single,
+    heap
+};
+
 pub fn BitMapSized(comptime T: type) type {
-    return struct {
+    return union(BitMapTypes) {
         const Self = @This();
 
-        bits: usize,
-        single: T,
-        many: ?[]T,
+        single: struct {
+            bits: usize,
+            buff: T,
+        },
+
+        heap: struct {
+            bits: usize,
+            buff: []T,
+        },
 
         pub fn init(mem: std.mem.Allocator, bits: usize) !*Self {
             const bm = try mem.create(Self);
             bm.* = try fillBm(mem, 0, bits);
-            if (bm.bits > 64) {
-                @memset(bm.many.?, 0);
+
+            switch(bm.*) {
+                .single => {},
+                .heap => @memset(bm.heap.buff, 0),
             }
+
             return bm;
         }
 
@@ -23,82 +37,89 @@ pub fn BitMapSized(comptime T: type) type {
                 const storage: usize = (bits + 63) & ~mask;
                 const pls = storage / 64;
                 const memory = try mem.alloc(T, pls);
-                return .{ .bits = bits, .single = single, .many = memory };
+                return .{ .heap = .{ .bits = bits, .buff = memory } };
             } else {
-                return .{ .bits = bits, .single = single, .many = null };
+                return .{ .single = .{ .bits = bits, .buff = single } };
             }
         }
 
+        fn getBits(self: Self) usize {
+            return switch(self) {
+                inline else => |payload| payload.bits
+            };
+        }
+
         pub fn fsb(self: Self) usize {
-            return self.bits - self.clz() - 1;
+            return self.getBits() - self.clz() - 1;
         }
 
         pub fn clz(self: Self) usize {
             const mask: usize = 63;
-            const bit_storage = (self.bits + 63) & ~mask;
-            const padding = bit_storage - self.bits;
+            const bit_storage = (self.getBits() + 63) & ~mask;
+            const padding = bit_storage - self.getBits();
 
-            if (self.bits > 64) {
-                var i = self.many.?.len;
-                var acc: usize = 0;
-                while (i > 0) {
-                    i -= 1;
-                    const plane = self.many.?[i];
-                    if (plane == 0) {
-                        acc += 64;
-                    } else {
-                        acc += @clz(plane);
-                        break;
+            switch(self) {
+                .single => return @clz(self.single.buff) - padding,
+                .heap => |payload| {
+                    var i = payload.buff.len;
+                    var acc: usize = 0;
+                    while (i > 0) {
+                        i -= 1;
+                        const plane = payload.buff[i];
+                        if (plane == 0) {
+                            acc += 64;
+                        } else {
+                            acc += @clz(plane);
+                            break;
+                        }
                     }
+                    return acc - padding;
                 }
-                return acc - padding;
-            } else {
-                return @clz(self.single) - padding;
             }
         }
 
         pub fn dup(orig: *Self, mem: std.mem.Allocator) !*Self {
             const bm = try mem.create(Self);
-            bm.* = try fillBm(mem, orig.single, orig.bits);
-            if (bm.bits > 64) {
-                @memcpy(bm.many.?, orig.many.?);
-            } else {
-                bm.single = orig.single;
+            bm.* = try fillBm(mem, 0, orig.getBits());
+            switch(bm.*) {
+                .single => bm.single.buff = orig.single.buff,
+                .heap => @memcpy(bm.heap.buff, orig.heap.buff),
             }
             return bm;
         }
 
-        pub fn eq(self: *Self, other: *Self) bool {
-            if (self.bits != other.bits) return false;
+        pub fn eq(self: Self, other: *Self) bool {
+            if (self.getBits() != other.getBits()) return false;
 
-            if (self.bits > 64) {
-                return std.mem.eql(T, self.many.?, other.many.?);
-            } else {
-                return self.single == other.single;
-            }
+            return switch(self) {
+                .single => |payload| payload.buff == other.single.buff,
+                .heap => |payload| std.mem.eql(T, payload.buff, other.heap.buff),
+            };
         }
 
-        pub fn popCount(self: *Self) usize {
-            if (self.bits > 64) {
-                var count: usize = 0;
-                for (self.many.?) |plane| {
-                    count += @popCount(plane);
+        pub fn popCount(self: Self) usize {
+            switch(self) {
+                .single => |p| return @popCount(p.buff),
+                .heap => |p| {
+                    var count: usize = 0;
+                    for (p.buff) |plane| {
+                        count += @popCount(plane);
+                    }
+                    return count;
                 }
-                return count;
-            } else {
-                return @popCount(self.single);
             }
         }
 
         pub fn setBit(self: *Self, bit: u64) !void {
-            if (bit >= self.bits) return error.OutOfBoundsError;
+            if (bit >= self.getBits()) return error.OutOfBoundsError;
 
-            if (self.bits > 64) {
-                const plane = bit / 64;
-                const theBit: u6 = @intCast(@mod(bit, 64));
-                self.many.?[plane] |= (@as(u64, 1) << theBit);
-            } else {
-                self.single |= (@as(u64, 1) << @as(u6, @intCast(bit)));
+            switch(self.*) {
+                .single => self.single.buff |= (@as(u64, 1) << @as(u6, @intCast(bit))),
+                .heap => {
+                    const plane = bit / 64;
+                    const theBit: u6 = @intCast(@mod(bit, 64));
+                    self.heap.buff[plane] |= (@as(u64, 1) << theBit);
+                }
             }
         }
 
@@ -106,10 +127,10 @@ pub fn BitMapSized(comptime T: type) type {
             bit_index: usize,
             plane_index: usize,
             current_plane: u64,
-            bm: *Self,
+            bm: *const Self,
 
             pub fn next(self: *SetBitsIterator) ?usize {
-                while (self.bit_index <= self.bm.bits) {
+                while (self.bit_index <= self.bm.getBits()) {
                     var idx: ?usize = null;
 
                     if (self.current_plane & 0x1 == 0x1) {
@@ -121,8 +142,8 @@ pub fn BitMapSized(comptime T: type) type {
                     if (@mod(self.bit_index, 64) == 0) {
                         self.plane_index = self.bit_index / 64;
 
-                        if (self.bit_index < self.bm.bits) {
-                            self.current_plane = self.bm.many.?[self.plane_index];
+                        if (self.bit_index < self.bm.getBits()) {
+                            self.current_plane = self.bm.heap.buff[self.plane_index];
                         } else {
                             self.current_plane = 0;
                         }
@@ -137,7 +158,10 @@ pub fn BitMapSized(comptime T: type) type {
         };
 
         pub fn setBitsIterator(self: *Self) SetBitsIterator {
-            const plane = if (self.bits > 64) self.many.?[0] else self.single;
+            const plane = switch(self.*) {
+                .heap => |p| p.buff[0],
+                .single => |p| p.buff,
+            };
 
             return .{
                 .bit_index = 0,
@@ -148,41 +172,48 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         pub fn unsetBit(self: *Self, bit: u64) !void {
-            if (bit >= self.bits) return error.OutOfBoundsError;
+            if (bit >= self.getBits()) return error.OutOfBoundsError;
 
-            if (self.bits > 64) {
-                const plane = bit / 64;
-                const theBit: u6 = @intCast(@mod(bit, 64));
-                self.many.?[plane] &= ~(@as(u64, 1) << theBit);
-            } else {
-                const mask = ~(@as(u64, 1) << @as(u6, @intCast(bit)));
-                self.single &= mask;
+            switch(self.*) {
+                .single => {
+                    const mask = ~(@as(u64, 1) << @as(u6, @intCast(bit)));
+                    self.single.buff &= mask;
+                },
+                .heap => {
+                    const plane = bit / 64;
+                    const theBit: u6 = @intCast(@mod(bit, 64));
+                    self.heap.buff[plane] &= ~(@as(u64, 1) << theBit);
+                }
             }
         }
 
-        pub fn isBitSet(self: *Self, bit: u64) bool {
-            if (bit >= self.bits) return false;
+        pub fn isBitSet(self: Self, bit: u64) bool {
+            if (bit >= self.getBits()) return false;
 
-            if (self.bits > 64) {
-                const plane = bit / 64;
-                const theBit: u6 = @intCast(@mod(bit, 64));
-                const mask = (@as(u64, 1) << theBit);
-                return mask == (self.many.?[plane] & mask);
-            } else {
-                const v = (@as(u64, 1) << @as(u6, @intCast(bit)));
-                return v == (self.single & v);
+            switch(self) {
+                .single => |p| {
+                    const v = (@as(u64, 1) << @as(u6, @intCast(bit)));
+                    return v == (p.buff & v);
+                },
+                .heap => |p| {
+                    const plane = bit / 64;
+                    const theBit: u6 = @intCast(@mod(bit, 64));
+                    const mask = (@as(u64, 1) << theBit);
+                    return mask == (p.buff[plane] & mask);
+                }
             }
         }
 
         pub fn setIntersection(self: *Self, other: *Self) !void {
-            if (self.bits != other.bits) return error.ArgumentError;
+            if (self.getBits() != other.getBits()) return error.ArgumentError;
 
-            if (self.bits > 64) {
-                for (0..self.many.?.len) |i| {
-                    self.many.?[i] &= other.many.?[i];
+            switch (self.*) {
+                .single => self.single.buff &= other.single.buff,
+                .heap => {
+                    for (0..self.heap.buff.len) |i| {
+                        self.heap.buff[i] &= other.heap.buff[i];
+                    }
                 }
-            } else {
-                self.single &= other.single;
             }
         }
 
@@ -193,13 +224,13 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         pub fn setNot(self: *Self) void {
-            if (self.bits > 64) {
-                for (0..self.many.?.len) |i| {
-                    const plane = self.many.?[i];
-                    self.many.?[i] = ~plane;
+            switch (self.*) {
+                .single => self.single.buff = ~self.single.buff,
+                .heap => {
+                    for (0..self.heap.buff.len) |i| {
+                        self.heap.buff[i] = ~self.heap.buff[i];
+                    }
                 }
-            } else {
-                self.single = ~self.single;
             }
         }
 
@@ -210,12 +241,11 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         pub fn replace(self: *Self, other: *Self) !void {
-            if (self.bits != other.bits) return error.ArgumentError;
+            if (self.getBits() != other.getBits()) return error.ArgumentError;
 
-            if (self.bits > 64) {
-                @memcpy(self.many.?, other.many.?);
-            } else {
-                self.single = other.single;
+            switch(self.*) {
+                .single => self.single.buff = other.single.buff,
+                .heap => @memcpy(self.heap.buff, other.heap.buff),
             }
         }
 
@@ -226,20 +256,22 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         pub fn setUnion(self: *Self, other: *Self) !void {
-            if (self.bits != other.bits) return error.ArgumentError;
+            if (self.getBits() != other.getBits()) return error.ArgumentError;
 
-            if (self.bits > 64) {
-                for (0..self.many.?.len) |i| {
-                    self.many.?[i] |= other.many.?[i];
+            switch(self.*) {
+                .single => self.single.buff |= other.single.buff,
+                .heap => {
+                    for (0..self.heap.buff.len) |i| {
+                        self.heap.buff[i] |= other.heap.buff[i];
+                    }
                 }
-            } else {
-                self.single |= other.single;
             }
         }
 
         pub fn deinit(self: *Self, mem: std.mem.Allocator) void {
-            if (self.bits > 64) {
-                mem.free(self.many.?);
+            switch(self.*) {
+                .heap => mem.free(self.heap.buff),
+                .single => {},
             }
             mem.destroy(self);
         }
@@ -346,7 +378,7 @@ test "bitset iterator extreme" {
 
 test "bitset iterator multi plane" {
     const alloc = std.testing.allocator;
-    var bits = [_]usize { 0, 0, 0, 0 };
+    var bits = [_]usize { 0, 0, 0, 0, 0 };
 
     const bm = try BitMap.init(alloc, 128);
     defer bm.deinit(alloc);
@@ -354,6 +386,7 @@ test "bitset iterator multi plane" {
     try bm.setBit(1);
     try bm.setBit(63);
     try bm.setBit(64);
+    try bm.setBit(127);
     try std.testing.expectError(error.OutOfBoundsError, bm.setBit(128));
     try std.testing.expectError(error.OutOfBoundsError, bm.unsetBit(128));
 
@@ -366,6 +399,7 @@ test "bitset iterator multi plane" {
     try std.testing.expectEqual(1, bits[0]);
     try std.testing.expectEqual(63, bits[1]);
     try std.testing.expectEqual(64, bits[2]);
+    try std.testing.expectEqual(127, bits[3]);
 }
 
 test "popcount single plane" {
