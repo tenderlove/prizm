@@ -119,13 +119,14 @@ pub const BitMap = struct {
 
                 self.bit_index += 1;
 
-                if (self.bit_index >= self.bm.bits) {
-                    return null;
-                }
-
                 if (@mod(self.bit_index, 64) == 0) {
                     self.plane_index = self.bit_index / 64;
-                    self.current_plane = self.bm.many.?[self.plane_index];
+
+                    if (self.bit_index < self.bm.bits) {
+                        self.current_plane = self.bm.many.?[self.plane_index];
+                    } else {
+                        self.current_plane = 0;
+                    }
                 } else {
                     self.current_plane >>= 1;
                 }
@@ -319,6 +320,26 @@ test "bitset iterator single plane" {
     }
     try std.testing.expectEqual(1, bits[0]);
     try std.testing.expectEqual(15, bits[1]);
+}
+
+test "bitset iterator extreme" {
+    const alloc = std.testing.allocator;
+    var bits = [_]usize { 0, 0 };
+
+    const bm = try BitMap.init(alloc, 7);
+    defer bm.deinit(alloc);
+
+    try bm.setBit(1);
+    try bm.setBit(6);
+
+    var bitidx: usize = 0;
+    var iter = bm.setBitsIterator();
+    while (iter.next()) |num| {
+        bits[bitidx] = num;
+        bitidx += 1;
+    }
+    try std.testing.expectEqual(1, bits[0]);
+    try std.testing.expectEqual(6, bits[1]);
 }
 
 test "bitset iterator multi plane" {

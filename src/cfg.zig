@@ -952,6 +952,40 @@ test "blocks have dominators" {
     try std.testing.expectEqual(0, blocks[1].?.idom.?);
 }
 
+test "while loop dominators" {
+    const allocator = std.testing.allocator;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code =
+\\ a = 1
+\\ while a
+\\   a = a + 1
+\\   if a > 100
+\\     z = a - 1
+\\   else
+\\     z = a + 1
+\\   end
+\\   puts z
+\\ end
+\\ puts a
+;
+    const scope = try compileScope(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const blocks = try cfg.blockList(allocator);
+    defer allocator.free(blocks);
+
+    // We should have 7 blocks
+    try std.testing.expectEqual(7, blocks.len);
+    try std.testing.expectEqual(6, blocks[6].?.name);
+    try std.testing.expect(blocks[6].?.dom.?.isBitSet(6));
+}
+
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
     var iter = try cfg.depthFirstIterator();
     defer iter.deinit();
