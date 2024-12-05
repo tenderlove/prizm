@@ -2,7 +2,8 @@ const std = @import("std");
 
 const BitMapTypes = enum {
     single,
-    heap
+    heap,
+    shared,
 };
 
 pub fn BitMapSized(comptime T: type) type {
@@ -20,6 +21,15 @@ pub fn BitMapSized(comptime T: type) type {
             buff: []T,
         },
 
+        shared: struct {
+            bits: usize,
+            buff: []const T,
+        },
+
+        pub fn initShared(bits: usize, buff: []const T) Self {
+            return .{ .shared = .{ .bits = bits, .buff = buff } };
+        }
+
         pub fn init(mem: std.mem.Allocator, bits: usize) !*Self {
             const bm = try mem.create(Self);
             bm.* = try fillBm(mem, 0, bits);
@@ -27,6 +37,7 @@ pub fn BitMapSized(comptime T: type) type {
             switch(bm.*) {
                 .single => {},
                 .heap => @memset(bm.heap.buff, 0),
+                .shared => unreachable,
             }
 
             return bm;
@@ -61,7 +72,7 @@ pub fn BitMapSized(comptime T: type) type {
 
             switch(self) {
                 .single => return @clz(self.single.buff) - padding,
-                .heap => |payload| {
+                inline .shared, .heap => |payload| {
                     var i = payload.buff.len;
                     var acc: usize = 0;
                     while (i > 0) {
@@ -84,7 +95,7 @@ pub fn BitMapSized(comptime T: type) type {
             bm.* = try fillBm(mem, 0, orig.getBits());
             switch(bm.*) {
                 .single => bm.single.buff = orig.single.buff,
-                .heap => @memcpy(bm.heap.buff, orig.heap.buff),
+                .shared, .heap => @memcpy(bm.heap.buff, orig.heap.buff),
             }
             return bm;
         }
@@ -95,13 +106,14 @@ pub fn BitMapSized(comptime T: type) type {
             return switch(self) {
                 .single => |payload| payload.buff == other.single.buff,
                 .heap => |payload| std.mem.eql(T, payload.buff, other.heap.buff),
+                .shared => |payload| std.mem.eql(T, payload.buff, other.shared.buff),
             };
         }
 
         pub fn popCount(self: Self) usize {
             switch(self) {
                 .single => |p| return @popCount(p.buff),
-                .heap => |p| {
+                inline .shared, .heap => |p| {
                     var count: usize = 0;
                     for (p.buff) |plane| {
                         count += @popCount(plane);
@@ -119,7 +131,8 @@ pub fn BitMapSized(comptime T: type) type {
                 .heap => {
                     const plane = bit / AtomBits;
                     self.heap.buff[plane] |= (@as(T, 1) << @intCast(@mod(bit, AtomBits)));
-                }
+                },
+                .shared => unreachable,
             }
         }
 
@@ -143,7 +156,12 @@ pub fn BitMapSized(comptime T: type) type {
                         self.plane_index = self.bit_index / AtomBits;
 
                         if (self.bit_index < self.bm.getBits()) {
-                            self.current_plane = self.bm.heap.buff[self.plane_index];
+                            switch(self.bm) {
+                                .single => unreachable,
+                                inline .heap, .shared => |p| {
+                                    self.current_plane = p.buff[self.plane_index];
+                                }
+                            }
                         } else {
                             self.current_plane = 0;
                         }
@@ -159,7 +177,7 @@ pub fn BitMapSized(comptime T: type) type {
 
         pub fn setBitsIterator(self: Self) SetBitsIterator {
             const plane = switch(self) {
-                .heap => |p| p.buff[0],
+                inline .shared, .heap => |p| p.buff[0],
                 .single => |p| p.buff,
             };
 
@@ -182,7 +200,8 @@ pub fn BitMapSized(comptime T: type) type {
                 .heap => {
                     const plane = bit / AtomBits;
                     self.heap.buff[plane] &= ~(@as(T, 1) << @intCast(@mod(bit, AtomBits)));
-                }
+                },
+                .shared => unreachable,
             }
         }
 
@@ -194,7 +213,7 @@ pub fn BitMapSized(comptime T: type) type {
                     const v = (@as(T, 1) << @intCast(bit));
                     return v == (p.buff & v);
                 },
-                .heap => |p| {
+                inline .shared, .heap => |p| {
                     const plane = bit / AtomBits;
                     const mask = (@as(T, 1) << @intCast(@mod(bit, AtomBits)));
                     return mask == (p.buff[plane] & mask);
@@ -211,7 +230,8 @@ pub fn BitMapSized(comptime T: type) type {
                     for (0..self.heap.buff.len) |i| {
                         self.heap.buff[i] &= other.heap.buff[i];
                     }
-                }
+                },
+                .shared => unreachable,
             }
         }
 
@@ -228,7 +248,8 @@ pub fn BitMapSized(comptime T: type) type {
                     for (0..self.heap.buff.len) |i| {
                         self.heap.buff[i] = ~self.heap.buff[i];
                     }
-                }
+                },
+                .shared => unreachable,
             }
         }
 
@@ -244,6 +265,7 @@ pub fn BitMapSized(comptime T: type) type {
             switch(self.*) {
                 .single => self.single.buff = other.single.buff,
                 .heap => @memcpy(self.heap.buff, other.heap.buff),
+                .shared => unreachable,
             }
         }
 
@@ -262,13 +284,15 @@ pub fn BitMapSized(comptime T: type) type {
                     for (0..self.heap.buff.len) |i| {
                         self.heap.buff[i] |= other.heap.buff[i];
                     }
-                }
+                },
+                .shared => unreachable,
             }
         }
 
         pub fn deinit(self: *Self, mem: std.mem.Allocator) void {
             switch(self.*) {
                 .heap => mem.free(self.heap.buff),
+                .shared => {},
                 .single => {},
             }
             mem.destroy(self);
@@ -793,4 +817,30 @@ test "fsb large" {
     try std.testing.expectEqual(15, bm1.fsb());
     try bm1.setBit(64);
     try std.testing.expectEqual(64, bm1.fsb());
+}
+
+test "init shared" {
+    const bits = [_]u64 { 0b1, 0b1 };
+    const bm = BitMapSized(u64).initShared(128, &bits);
+    try std.testing.expect(bm.isBitSet(0));
+    try std.testing.expect(!bm.isBitSet(1));
+    try std.testing.expect(bm.isBitSet(64));
+}
+
+test "iterate shared" {
+    const bits = [_]u64 { 0b1, 0b1 };
+    const bm = BitMapSized(u64).initShared(128, &bits);
+    try std.testing.expect(bm.isBitSet(0));
+    try std.testing.expect(bm.isBitSet(64));
+
+    var check = [_]usize { 0, 0 };
+
+    var bitidx: usize = 0;
+    var iter = bm.setBitsIterator();
+    while (iter.next()) |num| {
+        check[bitidx] = num;
+        bitidx += 1;
+    }
+    try std.testing.expectEqual(0, check[0]);
+    try std.testing.expectEqual(64, check[1]);
 }
