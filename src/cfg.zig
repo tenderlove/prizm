@@ -88,6 +88,7 @@ pub const CFG = struct {
         defer iter.deinit();
 
         while (try iter.next()) |bb| {
+            bb.reachable = true;
             try bb.fillVarSets();
         }
     }
@@ -211,16 +212,8 @@ pub const CFG = struct {
         }
     }
 
-    pub fn blockList(self: *CFG, mem: std.mem.Allocator) ![]?*BasicBlock {
-        const blocklist: []?*BasicBlock = try mem.alloc(?*BasicBlock, self.block_name);
-        @memset(blocklist, null);
-
-        var iter = try self.depthFirstIterator();
-        defer iter.deinit();
-        while (try iter.next()) |bb| {
-            blocklist[bb.name] = bb;
-        }
-        return blocklist;
+    pub fn blockList(self: *CFG) []const *BasicBlock {
+        return self.blocks.?;
     }
 
     fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *u32) !void {
@@ -261,6 +254,9 @@ pub const CFG = struct {
     }
 
     pub fn deinit(self: *CFG) void {
+        if (self.blocks) |x| {
+            self.mem.free(x);
+        }
         self.arena.deinit();
     }
 };
@@ -268,6 +264,7 @@ pub const CFG = struct {
 pub const BasicBlock = struct {
     name: u64,
     entry: bool,
+    reachable: bool = false,
     start: *ir.InstructionList.Node,
     finish: *ir.InstructionList.Node,
     predecessors: std.ArrayList(*BasicBlock),
@@ -501,6 +498,9 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     var wants_label = std.ArrayList(*BasicBlock).init(allocator);
     defer wants_label.deinit();
 
+    var all_blocks = std.ArrayList(*BasicBlock).init(allocator);
+    defer all_blocks.deinit();
+
     var last_block = cfg.head;
 
     const insns = scope.insns;
@@ -521,6 +521,7 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     while (node) |insn| {
         // Create a new block
         const current_block = try cfg.makeBlock(insn, insn, entry);
+        try all_blocks.append(current_block);
         entry = false;
 
         // Scan through following instructions until we find an instruction
@@ -580,6 +581,8 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
         want_label.setJumpDest(target);
         try target.addPredecessor(want_label);
     }
+
+    cfg.blocks = try all_blocks.toOwnedSlice();
 
     // TODO: sweep unreachable blocks?
 
@@ -925,26 +928,25 @@ test "jumps targets get predecessors" {
     defer methodcfg.deinit();
 
     // We should have 4 blocks
-    const blocks = try methodcfg.blockList(allocator);
-    defer allocator.free(blocks);
+    const blocks = methodcfg.blockList();
 
     try std.testing.expectEqual(4, blocks.len);
-    try std.testing.expectEqual(0, blocks[0].?.predecessors.items.len);
-    try std.testing.expectEqual(1, blocks[1].?.predecessors.items.len);
-    try std.testing.expectEqual(1, blocks[2].?.predecessors.items.len);
-    try std.testing.expectEqual(2, blocks[3].?.predecessors.items.len);
+    try std.testing.expectEqual(0, blocks[0].predecessors.items.len);
+    try std.testing.expectEqual(1, blocks[1].predecessors.items.len);
+    try std.testing.expectEqual(1, blocks[2].predecessors.items.len);
+    try std.testing.expectEqual(2, blocks[3].predecessors.items.len);
 
     // Block 1 should point at block 0
-    try std.testing.expectEqual(blocks[0].?, blocks[1].?.predecessors.items[0]);
+    try std.testing.expectEqual(blocks[0], blocks[1].predecessors.items[0]);
 
     // Block 2 should point at block 0
-    try std.testing.expectEqual(blocks[0].?, blocks[2].?.predecessors.items[0]);
+    try std.testing.expectEqual(blocks[0], blocks[2].predecessors.items[0]);
 
     // Block 3 should point at block 1 and 2
-    const preds = blocks[3].?.predecessors.items;
+    const preds = blocks[3].predecessors.items;
 
-    try std.testing.expect(preds[0] == blocks[1].? or preds[1] == blocks[1].?);
-    try std.testing.expect(preds[0] == blocks[2].? or preds[1] == blocks[2].?);
+    try std.testing.expect(preds[0] == blocks[1] or preds[1] == blocks[1]);
+    try std.testing.expect(preds[0] == blocks[2] or preds[1] == blocks[2]);
 }
 
 test "blocks have dominators" {
@@ -974,35 +976,34 @@ test "blocks have dominators" {
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
 
-    const blocks = try methodcfg.blockList(allocator);
-    defer allocator.free(blocks);
+    const blocks = methodcfg.blockList();
 
     // We should have 4 blocks
     try std.testing.expectEqual(4, blocks.len);
-    try std.testing.expect(blocks[0].?.entry);
+    try std.testing.expect(blocks[0].entry);
 
     // Entry dominates itself
-    try std.testing.expectEqual(1, blocks[0].?.dom.?.popCount());
-    try std.testing.expect(blocks[0].?.dom.?.isSet(0));
-    try std.testing.expectEqual(null, blocks[0].?.idom);
+    try std.testing.expectEqual(1, blocks[0].dom.?.popCount());
+    try std.testing.expect(blocks[0].dom.?.isSet(0));
+    try std.testing.expectEqual(null, blocks[0].idom);
 
     // BB1 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
-    try std.testing.expect(blocks[1].?.dom.?.isSet(0));
-    try std.testing.expect(blocks[1].?.dom.?.isSet(1));
-    try std.testing.expectEqual(0, blocks[1].?.idom.?);
+    try std.testing.expectEqual(2, blocks[1].dom.?.popCount());
+    try std.testing.expect(blocks[1].dom.?.isSet(0));
+    try std.testing.expect(blocks[1].dom.?.isSet(1));
+    try std.testing.expectEqual(0, blocks[1].idom.?);
 
     // BB2 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
-    try std.testing.expect(blocks[2].?.dom.?.isSet(0));
-    try std.testing.expect(blocks[2].?.dom.?.isSet(2));
-    try std.testing.expectEqual(0, blocks[1].?.idom.?);
+    try std.testing.expectEqual(2, blocks[1].dom.?.popCount());
+    try std.testing.expect(blocks[2].dom.?.isSet(0));
+    try std.testing.expect(blocks[2].dom.?.isSet(2));
+    try std.testing.expectEqual(0, blocks[1].idom.?);
 
     // BB3 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
-    try std.testing.expect(blocks[3].?.dom.?.isSet(0));
-    try std.testing.expect(blocks[3].?.dom.?.isSet(3));
-    try std.testing.expectEqual(0, blocks[1].?.idom.?);
+    try std.testing.expectEqual(2, blocks[1].dom.?.popCount());
+    try std.testing.expect(blocks[3].dom.?.isSet(0));
+    try std.testing.expect(blocks[3].dom.?.isSet(3));
+    try std.testing.expectEqual(0, blocks[1].idom.?);
 }
 
 test "while loop dominators" {
@@ -1030,13 +1031,12 @@ test "while loop dominators" {
     const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
-    const blocks = try cfg.blockList(allocator);
-    defer allocator.free(blocks);
+    const blocks = cfg.blockList();
 
     // We should have 7 blocks
     try std.testing.expectEqual(7, blocks.len);
-    try std.testing.expectEqual(6, blocks[6].?.name);
-    try std.testing.expect(blocks[6].?.dom.?.isSet(6));
+    try std.testing.expectEqual(6, blocks[6].name);
+    try std.testing.expect(blocks[6].dom.?.isSet(6));
 }
 
 test "dominance frontiers" {
@@ -1079,21 +1079,26 @@ test "dominance frontiers" {
     const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
-    const blocks = try cfg.blockList(allocator);
-    defer allocator.free(blocks);
+    const blocks = cfg.blockList();
 
-    // Block 8 isn't reachable via DFS, so we allocate
-    // 9 elements, but don't insert block 8.
     try std.testing.expectEqual(9, blocks.len);
-    try std.testing.expectEqual(6, blocks[6].?.name);
-    try std.testing.expect(blocks[1].?.df.?.isSet(1));
-    try std.testing.expect(blocks[2].?.df.?.isSet(7));
-    try std.testing.expect(blocks[3].?.df.?.isSet(7));
-    try std.testing.expect(blocks[4].?.df.?.isSet(6));
-    try std.testing.expect(blocks[5].?.df.?.isSet(6));
-    try std.testing.expect(blocks[6].?.df.?.isSet(7));
-    try std.testing.expect(blocks[7].?.df.?.isSet(1));
-    try std.testing.expectEqual(0, blocks[0].?.df.?.popCount());
+    try std.testing.expectEqual(6, blocks[6].name);
+    try std.testing.expect(blocks[1].df.?.isSet(1));
+    try std.testing.expect(blocks[2].df.?.isSet(7));
+    try std.testing.expect(blocks[3].df.?.isSet(7));
+    try std.testing.expect(blocks[4].df.?.isSet(6));
+    try std.testing.expect(blocks[5].df.?.isSet(6));
+    try std.testing.expect(blocks[6].df.?.isSet(7));
+    try std.testing.expect(blocks[7].df.?.isSet(1));
+
+    for (0..blocks.len) |i| {
+        if (i == 8) {
+            try std.testing.expect(!blocks[i].reachable);
+        } else {
+            try std.testing.expect(blocks[i].reachable);
+        }
+    }
+    try std.testing.expectEqual(0, blocks[0].df.?.popCount());
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
