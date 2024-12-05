@@ -1046,17 +1046,32 @@ test "dominance frontiers" {
     defer machine.deinit(allocator);
 
     const code =
-\\ a = 1
-\\ while a
-\\   a = a + 1
-\\   if a > 100
-\\     z = a - 1
+\\ i = 1
+\\ while true
+\\   a = i
+\\   c = i + 3
+\\ 
+\\   if c > 5
+\\     b = 15
+\\     c = i + 5
+\\     d = 16
 \\   else
-\\     z = a + 1
+\\     a = 789
+\\     d = 222
+\\ 
+\\     if c < 2
+\\       d = 111
+\\     else
+\\       c = 15
+\\     end
+\\ 
+\\     b = 888
 \\   end
-\\   puts z
+\\ 
+\\   y = a + b
+\\   z = c + d
+\\   i = i + 1
 \\ end
-\\ puts a
 ;
     const scope = try compileScope(allocator, machine, code);
     defer scope.deinit();
@@ -1067,11 +1082,18 @@ test "dominance frontiers" {
     const blocks = try cfg.blockList(allocator);
     defer allocator.free(blocks);
 
-    // We should have 7 blocks
-    try std.testing.expectEqual(7, blocks.len);
+    // Block 8 isn't reachable via DFS, so we allocate
+    // 9 elements, but don't insert block 8.
+    try std.testing.expectEqual(9, blocks.len);
     try std.testing.expectEqual(6, blocks[6].?.name);
-    try std.testing.expect(blocks[6].?.dom.?.isBitSet(6));
-    try std.testing.expect(blocks[0].?.df.?.isBitSet(1));
+    try std.testing.expect(blocks[1].?.df.?.isSet(1));
+    try std.testing.expect(blocks[2].?.df.?.isSet(7));
+    try std.testing.expect(blocks[3].?.df.?.isSet(7));
+    try std.testing.expect(blocks[4].?.df.?.isSet(6));
+    try std.testing.expect(blocks[5].?.df.?.isSet(6));
+    try std.testing.expect(blocks[6].?.df.?.isSet(7));
+    try std.testing.expect(blocks[7].?.df.?.isSet(1));
+    try std.testing.expectEqual(0, blocks[0].?.df.?.popCount());
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
