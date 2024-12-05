@@ -150,7 +150,7 @@ pub const CFG = struct {
             if (maybebb) |bb| {
                 if (bb.entry) continue;
 
-                assert(bb.dom.?.isBitSet(bb.name));
+                assert(bb.dom.?.isSet(bb.name));
                 // Unset ourselves real quick
                 try bb.dom.?.unsetBit(bb.name);
 
@@ -192,7 +192,7 @@ pub const CFG = struct {
 
     fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *u32) !void {
         if (blk) |bb| {
-            if (seen.isBitSet(bb.name)) return;
+            if (seen.isSet(bb.name)) return;
             try seen.setBit(bb.name);
             try traverseReversePostorder(bb.fall_through_dest, seen, list, counter);
             try traverseReversePostorder(bb.jump_dest, seen, list, counter);
@@ -369,7 +369,7 @@ pub const BasicBlock = struct {
                 // (in other words it hasn't been defined in this BB), then add
                 // the operand to the "upward exposed" set.  This means the operand
                 // _must_ have been defined in a block that dominates this block.
-                if (op.isVariable() and !self.killed_set.isBitSet(op.getID())) {
+                if (op.isVariable() and !self.killed_set.isSet(op.getID())) {
                     try self.upward_exposed_set.setBit(op.getID());
                 }
             }
@@ -839,7 +839,7 @@ test "live out passes through if statement" {
 
     while (try iter.next()) |bb| {
         if (bb.fall_through_dest) |_| {
-            try std.testing.expect(bb.liveout_set.isBitSet(opnd.local.id));
+            try std.testing.expect(bb.liveout_set.isSet(opnd.local.id));
         }
     }
 }
@@ -930,25 +930,25 @@ test "blocks have dominators" {
 
     // Entry dominates itself
     try std.testing.expectEqual(1, blocks[0].?.dom.?.popCount());
-    try std.testing.expect(blocks[0].?.dom.?.isBitSet(0));
+    try std.testing.expect(blocks[0].?.dom.?.isSet(0));
     try std.testing.expectEqual(null, blocks[0].?.idom);
 
     // BB1 dominated by self and BB0
     try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
-    try std.testing.expect(blocks[1].?.dom.?.isBitSet(0));
-    try std.testing.expect(blocks[1].?.dom.?.isBitSet(1));
+    try std.testing.expect(blocks[1].?.dom.?.isSet(0));
+    try std.testing.expect(blocks[1].?.dom.?.isSet(1));
     try std.testing.expectEqual(0, blocks[1].?.idom.?);
 
     // BB2 dominated by self and BB0
     try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
-    try std.testing.expect(blocks[2].?.dom.?.isBitSet(0));
-    try std.testing.expect(blocks[2].?.dom.?.isBitSet(2));
+    try std.testing.expect(blocks[2].?.dom.?.isSet(0));
+    try std.testing.expect(blocks[2].?.dom.?.isSet(2));
     try std.testing.expectEqual(0, blocks[1].?.idom.?);
 
     // BB3 dominated by self and BB0
     try std.testing.expectEqual(2, blocks[1].?.dom.?.popCount());
-    try std.testing.expect(blocks[3].?.dom.?.isBitSet(0));
-    try std.testing.expect(blocks[3].?.dom.?.isBitSet(3));
+    try std.testing.expect(blocks[3].?.dom.?.isSet(0));
+    try std.testing.expect(blocks[3].?.dom.?.isSet(3));
     try std.testing.expectEqual(0, blocks[1].?.idom.?);
 }
 
@@ -983,7 +983,7 @@ test "while loop dominators" {
     // We should have 7 blocks
     try std.testing.expectEqual(7, blocks.len);
     try std.testing.expectEqual(6, blocks[6].?.name);
-    try std.testing.expect(blocks[6].?.dom.?.isBitSet(6));
+    try std.testing.expect(blocks[6].?.dom.?.isSet(6));
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {

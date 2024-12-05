@@ -55,7 +55,7 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        fn getBits(self: Self) usize {
+        pub fn getBits(self: Self) usize {
             return switch(self) {
                 inline else => |payload| payload.bits
             };
@@ -205,7 +205,7 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn isBitSet(self: Self, bit: T) bool {
+        pub fn isSet(self: Self, bit: T) bool {
             if (bit >= self.getBits()) return false;
 
             switch(self) {
@@ -308,12 +308,12 @@ test "works with smaller ints" {
     const bmu8 = try BitMapSized(u8).init(alloc, 8);
     defer bmu8.deinit(alloc);
     try bmu8.setBit(1);
-    try std.testing.expect(bmu8.isBitSet(1));
+    try std.testing.expect(bmu8.isSet(1));
 
     const bmu832 = try BitMapSized(u8).init(alloc, 32);
     defer bmu832.deinit(alloc);
     try bmu832.setBit(31);
-    try std.testing.expect(bmu832.isBitSet(31));
+    try std.testing.expect(bmu832.isSet(31));
 }
 
 test "create bitmap" {
@@ -324,11 +324,11 @@ test "create bitmap" {
 
     try bm.setBit(1);
 
-    try std.testing.expect(bm.isBitSet(1));
-    try std.testing.expect(!bm.isBitSet(0));
+    try std.testing.expect(bm.isSet(1));
+    try std.testing.expect(!bm.isSet(0));
 
     try bm.unsetBit(1);
-    try std.testing.expect(!bm.isBitSet(1));
+    try std.testing.expect(!bm.isSet(1));
 }
 
 test "create bitmap with 100 bits" {
@@ -340,15 +340,15 @@ test "create bitmap with 100 bits" {
     try bm.setBit(1);
     try bm.setBit(70);
 
-    try std.testing.expect(bm.isBitSet(1));
-    try std.testing.expect(bm.isBitSet(70));
-    try std.testing.expect(!bm.isBitSet(0));
-    try std.testing.expect(!bm.isBitSet(71));
+    try std.testing.expect(bm.isSet(1));
+    try std.testing.expect(bm.isSet(70));
+    try std.testing.expect(!bm.isSet(0));
+    try std.testing.expect(!bm.isSet(71));
 
     try bm.unsetBit(1);
     try bm.unsetBit(70);
-    try std.testing.expect(!bm.isBitSet(1));
-    try std.testing.expect(!bm.isBitSet(70));
+    try std.testing.expect(!bm.isSet(1));
+    try std.testing.expect(!bm.isSet(70));
 }
 
 test "create bitmap with 64 bits" {
@@ -360,16 +360,16 @@ test "create bitmap with 64 bits" {
     try bm.setBit(1);
     try bm.setBit(63);
 
-    try std.testing.expect(bm.isBitSet(1));
-    try std.testing.expect(bm.isBitSet(63));
-    try std.testing.expect(!bm.isBitSet(0));
-    try std.testing.expect(!bm.isBitSet(62));
+    try std.testing.expect(bm.isSet(1));
+    try std.testing.expect(bm.isSet(63));
+    try std.testing.expect(!bm.isSet(0));
+    try std.testing.expect(!bm.isSet(62));
 
     try bm.unsetBit(1);
     try bm.unsetBit(63);
 
-    try std.testing.expect(!bm.isBitSet(1));
-    try std.testing.expect(!bm.isBitSet(63));
+    try std.testing.expect(!bm.isSet(1));
+    try std.testing.expect(!bm.isSet(63));
 }
 
 test "bitset iterator single plane" {
@@ -473,12 +473,12 @@ test "not big" {
 
     bm.setNot();
 
-    try std.testing.expect(!bm.isBitSet(1));
-    try std.testing.expect(!bm.isBitSet(63));
-    try std.testing.expect(!bm.isBitSet(64));
-    try std.testing.expect(bm.isBitSet(0));
-    try std.testing.expect(bm.isBitSet(2));
-    try std.testing.expect(bm.isBitSet(65));
+    try std.testing.expect(!bm.isSet(1));
+    try std.testing.expect(!bm.isSet(63));
+    try std.testing.expect(!bm.isSet(64));
+    try std.testing.expect(bm.isSet(0));
+    try std.testing.expect(bm.isSet(2));
+    try std.testing.expect(bm.isSet(65));
 }
 
 test "not small" {
@@ -491,10 +491,10 @@ test "not small" {
 
     bm.setNot();
 
-    try std.testing.expect(!bm.isBitSet(1));
-    try std.testing.expect(!bm.isBitSet(63));
-    try std.testing.expect(bm.isBitSet(0));
-    try std.testing.expect(bm.isBitSet(2));
+    try std.testing.expect(!bm.isSet(1));
+    try std.testing.expect(!bm.isSet(63));
+    try std.testing.expect(bm.isSet(0));
+    try std.testing.expect(bm.isSet(2));
 }
 
 test "dup small" {
@@ -508,8 +508,8 @@ test "dup small" {
     const new = try bm.dup(alloc);
     defer new.deinit(alloc);
 
-    try std.testing.expect(new.isBitSet(1));
-    try std.testing.expect(new.isBitSet(63));
+    try std.testing.expect(new.isSet(1));
+    try std.testing.expect(new.isSet(63));
 }
 
 test "dup big" {
@@ -524,9 +524,9 @@ test "dup big" {
     const new = try bm.dup(alloc);
     defer new.deinit(alloc);
 
-    try std.testing.expect(new.isBitSet(1));
-    try std.testing.expect(new.isBitSet(63));
-    try std.testing.expect(new.isBitSet(70));
+    try std.testing.expect(new.isSet(1));
+    try std.testing.expect(new.isSet(63));
+    try std.testing.expect(new.isSet(70));
 }
 
 test "not" {
@@ -541,9 +541,9 @@ test "not" {
     const new = try bm.not(alloc);
     defer new.deinit(alloc);
 
-    try std.testing.expect(!new.isBitSet(1));
-    try std.testing.expect(!new.isBitSet(63));
-    try std.testing.expect(!new.isBitSet(70));
+    try std.testing.expect(!new.isSet(1));
+    try std.testing.expect(!new.isSet(63));
+    try std.testing.expect(!new.isSet(70));
 }
 
 test "set intersection small" {
@@ -561,9 +561,9 @@ test "set intersection small" {
 
     try bm1.setIntersection(bm2);
 
-    try std.testing.expect(!bm1.isBitSet(0));
-    try std.testing.expect(bm1.isBitSet(1));
-    try std.testing.expect(!bm1.isBitSet(2));
+    try std.testing.expect(!bm1.isSet(0));
+    try std.testing.expect(bm1.isSet(1));
+    try std.testing.expect(!bm1.isSet(2));
 }
 
 test "set intersection large" {
@@ -583,10 +583,10 @@ test "set intersection large" {
 
     try bm1.setIntersection(bm2);
 
-    try std.testing.expect(!bm1.isBitSet(0));
-    try std.testing.expect(bm1.isBitSet(1));
-    try std.testing.expect(!bm1.isBitSet(2));
-    try std.testing.expect(bm1.isBitSet(70));
+    try std.testing.expect(!bm1.isSet(0));
+    try std.testing.expect(bm1.isSet(1));
+    try std.testing.expect(!bm1.isSet(2));
+    try std.testing.expect(bm1.isSet(70));
 }
 
 test "intersection" {
@@ -605,9 +605,9 @@ test "intersection" {
     const bm3 = try bm1.intersection(bm2, alloc);
     defer bm3.deinit(alloc);
 
-    try std.testing.expect(!bm3.isBitSet(0));
-    try std.testing.expect(bm3.isBitSet(1));
-    try std.testing.expect(!bm3.isBitSet(2));
+    try std.testing.expect(!bm3.isSet(0));
+    try std.testing.expect(bm3.isSet(1));
+    try std.testing.expect(!bm3.isSet(2));
 }
 
 test "set union small" {
@@ -625,9 +625,9 @@ test "set union small" {
 
     try bm1.setUnion(bm2);
 
-    try std.testing.expect(bm1.isBitSet(0));
-    try std.testing.expect(bm1.isBitSet(1));
-    try std.testing.expect(bm1.isBitSet(2));
+    try std.testing.expect(bm1.isSet(0));
+    try std.testing.expect(bm1.isSet(1));
+    try std.testing.expect(bm1.isSet(2));
 }
 
 test "set union large" {
@@ -647,10 +647,10 @@ test "set union large" {
 
     try bm1.setUnion(bm2);
 
-    try std.testing.expect(bm1.isBitSet(0));
-    try std.testing.expect(bm1.isBitSet(1));
-    try std.testing.expect(bm1.isBitSet(2));
-    try std.testing.expect(bm1.isBitSet(70));
+    try std.testing.expect(bm1.isSet(0));
+    try std.testing.expect(bm1.isSet(1));
+    try std.testing.expect(bm1.isSet(2));
+    try std.testing.expect(bm1.isSet(70));
 }
 
 test "union" {
@@ -669,9 +669,9 @@ test "union" {
     const bm3 = try bm1.Union(bm2, alloc);
     defer bm3.deinit(alloc);
 
-    try std.testing.expect(bm3.isBitSet(0));
-    try std.testing.expect(bm3.isBitSet(1));
-    try std.testing.expect(bm3.isBitSet(2));
+    try std.testing.expect(bm3.isSet(0));
+    try std.testing.expect(bm3.isSet(1));
+    try std.testing.expect(bm3.isSet(2));
 }
 
 test "eq small" {
@@ -724,11 +724,11 @@ test "replace small" {
     try bm1.setBit(15);
 
     try std.testing.expect(!bm1.eq(bm2));
-    try std.testing.expect(!bm2.isBitSet(15));
+    try std.testing.expect(!bm2.isSet(15));
     try bm2.replace(bm1);
-    try std.testing.expect(bm2.isBitSet(0));
-    try std.testing.expect(bm2.isBitSet(1));
-    try std.testing.expect(bm2.isBitSet(15));
+    try std.testing.expect(bm2.isSet(0));
+    try std.testing.expect(bm2.isSet(1));
+    try std.testing.expect(bm2.isSet(15));
     try std.testing.expect(bm1.eq(bm2));
 }
 
@@ -744,11 +744,11 @@ test "replace large" {
     try bm1.setBit(70);
 
     try std.testing.expect(!bm1.eq(bm2));
-    try std.testing.expect(!bm2.isBitSet(70));
+    try std.testing.expect(!bm2.isSet(70));
     try bm2.replace(bm1);
-    try std.testing.expect(bm2.isBitSet(1));
-    try std.testing.expect(bm2.isBitSet(2));
-    try std.testing.expect(bm2.isBitSet(70));
+    try std.testing.expect(bm2.isSet(1));
+    try std.testing.expect(bm2.isSet(2));
+    try std.testing.expect(bm2.isSet(70));
     try std.testing.expect(bm1.eq(bm2));
 }
 
@@ -822,16 +822,16 @@ test "fsb large" {
 test "init shared" {
     const bits = [_]u64 { 0b1, 0b1 };
     const bm = BitMapSized(u64).initShared(128, &bits);
-    try std.testing.expect(bm.isBitSet(0));
-    try std.testing.expect(!bm.isBitSet(1));
-    try std.testing.expect(bm.isBitSet(64));
+    try std.testing.expect(bm.isSet(0));
+    try std.testing.expect(!bm.isSet(1));
+    try std.testing.expect(bm.isSet(64));
 }
 
 test "iterate shared" {
     const bits = [_]u64 { 0b1, 0b1 };
     const bm = BitMapSized(u64).initShared(128, &bits);
-    try std.testing.expect(bm.isBitSet(0));
-    try std.testing.expect(bm.isBitSet(64));
+    try std.testing.expect(bm.isSet(0));
+    try std.testing.expect(bm.isSet(64));
 
     var check = [_]usize { 0, 0 };
 

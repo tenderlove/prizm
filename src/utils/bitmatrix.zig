@@ -1,11 +1,12 @@
 const std = @import("std");
+const bitmap = @import("bitmap.zig");
 
 pub fn BitMatrixSize(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        x: usize,
-        y: usize,
+        rows: usize,
+        columns: usize,
         row_len: usize,
         buffer: []T,
 
@@ -24,24 +25,30 @@ pub fn BitMatrixSize(comptime T: type) type {
 
             const buff = try mem.alloc(T, buff_size);
             @memset(buff, 0);
-            bm.* = .{ .x = x, .y = y, .row_len = rowlen, .buffer = buff };
+            bm.* = .{ .rows = x, .columns = y, .row_len = rowlen, .buffer = buff };
             return bm;
         }
 
-        pub fn set(self: *const Self, x: usize, y: usize) void {
-            const row = x * self.row_len;
+        pub fn set(self: *const Self, row: usize, column: usize) void {
+            const r = row * self.row_len;
             const bits = @typeInfo(T).int.bits;
-            const column = y / bits;
-            const bit = @as(T, 1) << @intCast(@mod(y, bits));
-            self.buffer[row + column] |= bit;
+            const c = column / bits;
+            const bit = @as(T, 1) << @intCast(@mod(column, bits));
+            self.buffer[r + c] |= bit;
         }
 
-        pub fn isSet(self: *const Self, x: usize, y: usize) bool {
+        pub fn isSet(self: Self, x: usize, y: usize) bool {
             const row = x * self.row_len;
             const bits = @typeInfo(T).int.bits;
             const column = y / bits;
             const bit = @as(T, 1) << @intCast(@mod(y, bits));
             return (self.buffer[row + column] & bit) == bit;
+        }
+
+        pub fn getRow(self: Self, x: usize) bitmap.BitMapSized(T) {
+            const row = x * self.row_len;
+            const slice = self.buffer[row..(row + self.row_len)];
+            return bitmap.BitMapSized(T).initShared(self.rows, slice);
         }
 
         pub fn deinit(self: *const Self, mem: std.mem.Allocator) void {
@@ -71,8 +78,8 @@ test "can allocate" {
     const matrix = try BitMatrix.init(alloc, 8, 8);
     defer matrix.deinit(alloc);
 
-    try std.testing.expectEqual(8, matrix.x);
-    try std.testing.expectEqual(8, matrix.y);
+    try std.testing.expectEqual(8, matrix.rows);
+    try std.testing.expectEqual(8, matrix.columns);
 }
 
 test "buffer is rounded up" {
@@ -106,4 +113,26 @@ test "set x y big" {
     try std.testing.expect(matrix.isSet(0, 0));
     try std.testing.expect(matrix.isSet(7, 1024));
     try std.testing.expect(!matrix.isSet(0, 1));
+}
+
+test "get row as bitmap" {
+    const alloc = std.testing.allocator;
+
+    const matrix = try BitMatrix.init(alloc, 8, 2048);
+    defer matrix.deinit(alloc);
+
+    matrix.set(0, 0);
+    matrix.set(0, 1);
+    matrix.set(1, 4);
+    matrix.set(1, 5);
+
+    const bm = matrix.getRow(0);
+    try std.testing.expectEqual(8, bm.getBits());
+    try std.testing.expect(bm.isSet(0));
+    try std.testing.expect(bm.isSet(1));
+
+    const bm2 = matrix.getRow(1);
+    try std.testing.expectEqual(8, bm2.getBits());
+    try std.testing.expect(bm2.isSet(4));
+    try std.testing.expect(bm2.isSet(5));
 }
