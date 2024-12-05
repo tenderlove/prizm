@@ -40,7 +40,7 @@ pub const Scope = struct {
         if (info) |v| {
             return v;
         } else {
-            const lname = try self.newLocal();
+            const lname = try self.newLocal(name);
             try self.locals.put(self.allocator, name, lname);
             return lname;
         }
@@ -51,7 +51,7 @@ pub const Scope = struct {
         if (info) |v| {
             return v;
         } else {
-            const lname = try self.newParam();
+            const lname = try self.newParam(name);
             try self.params.put(self.allocator, name, lname);
             return lname;
         }
@@ -70,16 +70,16 @@ pub const Scope = struct {
         return self.operands.items.len;
     }
 
-    fn newLocal(self: *Scope) !*ir.Operand {
+    fn newLocal(self: *Scope, source_name: []const u8) !*ir.Operand {
         const name = self.local_id;
         self.local_id += 1;
-        return try self.addOpnd(try ir.Operand.initLocal(self.arena.allocator(), self.nextOpndId(), name));
+        return try self.addOpnd(try ir.Operand.initLocal(self.arena.allocator(), self.nextOpndId(), name, source_name));
     }
 
-    fn newParam(self: *Scope) !*ir.Operand {
+    fn newParam(self: *Scope, source_name: []const u8) !*ir.Operand {
         const name = self.param_id;
         self.param_id += 1;
-        return try self.addOpnd(try ir.Operand.initParam(self.arena.allocator(), self.nextOpndId(), name));
+        return try self.addOpnd(try ir.Operand.initParam(self.arena.allocator(), self.nextOpndId(), name, source_name));
     }
 
     fn newScope(self: *Scope, scope: *Scope) !*ir.Operand {

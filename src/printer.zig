@@ -8,6 +8,8 @@ const IRPrinter = struct {
     fn printOpnd(op: *const ir.Operand, out: *const std.io.AnyWriter) !void {
         switch (op.*) {
             .immediate => |p| try out.print("{d}", .{p.value}),
+            .param => |p| try out.print("{s}", .{p.source_name}),
+            .local => |p| try out.print("{s}", .{p.source_name}),
             .string => |p| try out.print("{s}", .{p.value}),
             .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.name }),
             inline else => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.name }),
@@ -48,11 +50,22 @@ const IRPrinter = struct {
 
     fn printInsn(insn: ir.Instruction, digits: u32, out: *const std.io.AnyWriter) ! void {
         if (insn.outVar()) |n| {
-            try out.print("  {s}", .{n.shortName()});
-            try out.print("{[value]d: <[width]}<- ", .{
-                .value = n.number(),
-                .width = digits + 1,
-            });
+            switch (n.*) {
+                inline .local, .param => |p| {
+                    try out.print("  {[value]s: <[width]}", .{
+                        .value = p.source_name,
+                        .width = digits + 2,
+                    });
+                },
+                else => {
+                    try out.print("  {s}", .{n.shortName()});
+                    try out.print("{[value]d: <[width]}", .{
+                        .value = n.number(),
+                        .width = digits + 1,
+                    });
+                }
+            }
+            try out.print("<- ", .{ });
         } else {
             try out.print("   {[value]s: <[width]}   ", .{
                 .value = "",

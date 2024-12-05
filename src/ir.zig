@@ -22,8 +22,8 @@ pub const Operand = union(OperandType) {
     immediate: struct { id: usize, value: u64, },
     ivar: struct { id: usize, name: usize, },
     label: struct { id: usize, name: usize, },
-    local: struct { id: usize, name: usize, },
-    param: struct { id: usize, name: usize, },
+    local: struct { id: usize, name: usize, source_name: []const u8 },
+    param: struct { id: usize, name: usize, source_name: []const u8 },
     scope: struct { id: usize, value: *cmp.Scope, },
     string: struct { id: usize, value: []const u8, },
     temp: struct { id: usize, name: usize, },
@@ -40,15 +40,15 @@ pub const Operand = union(OperandType) {
         return opnd;
     }
 
-    pub fn initLocal(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
+    pub fn initLocal(alloc: std.mem.Allocator, id: usize, name: anytype, source_name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .local = .{ .id = id, .name = name } };
+        opnd.* = .{ .local = .{ .id = id, .name = name, .source_name = source_name } };
         return opnd;
     }
 
-    pub fn initParam(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
+    pub fn initParam(alloc: std.mem.Allocator, id: usize, name: anytype, source_name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .param = .{ .id = id, .name = name } };
+        opnd.* = .{ .param = .{ .id = id, .name = name, .source_name = source_name } };
         return opnd;
     }
 
