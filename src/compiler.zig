@@ -18,16 +18,11 @@ pub const Scope = struct {
     insns: ir.InstructionList,
     parent: ?*Scope,
     children: std.ArrayList(Scope),
-    locals: std.StringHashMapUnmanaged(LocalInfo),
-    params: std.StringHashMapUnmanaged(LocalInfo),
+    locals: std.StringHashMapUnmanaged(*ir.Operand),
+    params: std.StringHashMapUnmanaged(*ir.Operand),
     operands: std.ArrayList(*ir.Operand),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
-
-    const LocalInfo = struct {
-        name: []const u8,
-        irname: *ir.Operand,
-    };
 
     pub fn maxId(self: *Scope) u32 {
         const list = [_]u32 { self.tmp_id, self.local_id, self.param_id, self.label_id }; 
@@ -43,14 +38,10 @@ pub const Scope = struct {
     pub fn getLocalName(self: *Scope, name: []const u8) !*ir.Operand {
         const info = self.locals.get(name);
         if (info) |v| {
-            return v.irname;
+            return v;
         } else {
             const lname = try self.newLocal();
-            const li: LocalInfo = .{
-                .name = name,
-                .irname = lname,
-            };
-            try self.locals.put(self.allocator, name, li);
+            try self.locals.put(self.allocator, name, lname);
             return lname;
         }
     }
@@ -58,25 +49,16 @@ pub const Scope = struct {
     pub fn registerParamName(self: *Scope, name: []const u8) !*ir.Operand {
         const info = self.params.get(name);
         if (info) |v| {
-            return v.irname;
+            return v;
         } else {
             const lname = try self.newParam();
-            const li: LocalInfo = .{
-                .name = name,
-                .irname = lname,
-            };
-            try self.params.put(self.allocator, name, li);
+            try self.params.put(self.allocator, name, lname);
             return lname;
         }
     }
 
     pub fn getParamName(self: *Scope, name: []const u8) ?*ir.Operand {
-        const info = self.params.get(name);
-        if (info) |v| {
-            return v.irname;
-        } else {
-            return null;
-        }
+        return self.params.get(name);
     }
 
     fn addOpnd(self: *Scope, opnd: *ir.Operand) !*ir.Operand {
@@ -224,8 +206,8 @@ pub const Scope = struct {
             .insns = ir.InstructionList { },
             .name = id,
             .parent = parent,
-            .locals = std.StringHashMapUnmanaged(Scope.LocalInfo){},
-            .params = std.StringHashMapUnmanaged(Scope.LocalInfo){},
+            .locals = std.StringHashMapUnmanaged(*ir.Operand){},
+            .params = std.StringHashMapUnmanaged(*ir.Operand){},
             .children = std.ArrayList(Scope).init(alloc),
             .operands = std.ArrayList(*ir.Operand).init(alloc),
             .allocator = alloc,
