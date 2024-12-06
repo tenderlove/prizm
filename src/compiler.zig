@@ -407,8 +407,19 @@ pub const Compiler = struct {
                 return try cc.compileNode(@ptrCast(node.*.subsequent), popped);
             },
             .unknown => {
+                var iftemp: ?*ir.Operand = null;
+
                 // Compile the true branch and get a return value
                 const true_branch = try cc.compileNode(@ptrCast(node.*.statements), popped);
+
+                // If anyone cares about the return value of this if statement, then
+                // we need to allocate a new temp and assign to the temp at the end
+                // of each leg of the if statement.
+                if (!popped) {
+                    iftemp = try cc.newTemp();
+                    _ = try cc.pushMov(iftemp.?, true_branch.?);
+                }
+
                 // Jump to the end of the if statement
                 try cc.pushJump(end_label);
 
@@ -416,19 +427,14 @@ pub const Compiler = struct {
                 try cc.pushLabel(then_label);
 
                 const false_branch = try cc.compileNode(@ptrCast(node.*.subsequent), popped);
+
+                if (!popped) {
+                    _ = try cc.pushMov(iftemp.?, false_branch.?);
+                }
+
                 try cc.pushLabel(end_label);
 
-                // If anyone cares about the return value of this if statement, then
-                // we know for sure we need a phi node here.  Caller might ignore it,
-                // but that's up to them.
-                if (!popped) {
-                    // If it's not popped, we know someone cares about the
-                    // return value
-                    return try cc.pushPhi(true_branch.?, false_branch.?);
-                } else {
-                    // nobody cares about the return value
-                    return null;
-                }
+                return iftemp;
             }
         }
     }
@@ -569,6 +575,10 @@ pub const Compiler = struct {
 
     fn newLabel(self: *Compiler) !*ir.Operand {
         return try self.scope.?.newLabel();
+    }
+
+    fn newTemp(self: *Compiler) !*ir.Operand {
+        return try self.scope.?.newTemp();
     }
 
     fn pushDefineMethod(self: *Compiler, name: []const u8, scope: *Scope) !*ir.Operand {
@@ -762,11 +772,12 @@ test "compile ternary statement" {
         ir.Instruction.call,
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
+        ir.Instruction.mov,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
         ir.Instruction.loadi,
+        ir.Instruction.mov,
         ir.Instruction.putlabel,
-        ir.Instruction.phi,
     }, scope.insns);
 }
 
@@ -942,11 +953,12 @@ test "local ternary" {
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
+        ir.Instruction.mov,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
         ir.Instruction.loadi,
+        ir.Instruction.mov,
         ir.Instruction.putlabel,
-        ir.Instruction.phi,
         ir.Instruction.leave,
     }, method_scope.insns);
 

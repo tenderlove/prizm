@@ -626,6 +626,25 @@ test "CFG from compiler" {
     try std.testing.expectEqual(ir.InstructionName.leave, finish_type);
 }
 
+test "no uninitialized in ternary" {
+    const allocator = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "x ? 1 : 23");
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const uninitialized = try cfg.head.?.uninitializedSet(scope, allocator);
+    defer uninitialized.deinit(allocator);
+
+    try std.testing.expectEqual(0, uninitialized.popCount());
+}
+
 test "if statement should have 2 children blocks" {
     const allocator = std.testing.allocator;
 
@@ -654,23 +673,23 @@ test "if statement should have 2 children blocks" {
     var child = block.fall_through_dest.?;
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
+        ir.Instruction.mov,
         ir.Instruction.jump,
     }, child);
 
-    try std.testing.expectEqual(2, child.instructionCount());
+    try std.testing.expectEqual(3, child.instructionCount());
     try std.testing.expect(!child.fallsThrough());
 
     child = block.jump_dest.?;
-    try std.testing.expectEqual(2, child.instructionCount());
+    try std.testing.expectEqual(3, child.instructionCount());
     try std.testing.expectEqual(ir.Instruction.putlabel, @as(ir.InstructionName, child.start.data));
-    try std.testing.expectEqual(ir.Instruction.loadi, @as(ir.InstructionName, child.finish.data));
+    try std.testing.expectEqual(ir.Instruction.mov, @as(ir.InstructionName, child.finish.data));
 
     // Last block via fallthrough then jump
     const last_block = block.fall_through_dest.?.jump_dest.?;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.putlabel,
-        ir.Instruction.phi,
         ir.Instruction.leave,
     }, last_block);
 
@@ -763,7 +782,7 @@ test "upward exposed bits get set" {
     // One for x
     try std.testing.expectEqual(1, bb.upwardExposedCount());
     // one for loadi, and return value of call
-    try std.testing.expectEqual(2, bb.killedVariableCount());
+    try std.testing.expectEqual(3, bb.killedVariableCount());
 }
 
 test "complex loop with if" {
