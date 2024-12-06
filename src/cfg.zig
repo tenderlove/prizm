@@ -617,6 +617,14 @@ pub const CompileError = error {
 };
 
 pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
+    const insns = scope.insns;
+    var node = insns.first;
+
+    // If we don't have any nodes to process, just return the empty CFG.
+    if (node == null) {
+        return CompileError.EmptyInstructionSequence;
+    }
+
     const cfg = try CFG.init(allocator, scope);
 
     var wants_label = std.ArrayList(*BasicBlock).init(allocator);
@@ -626,14 +634,6 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     defer all_blocks.deinit();
 
     var last_block = cfg.head;
-
-    const insns = scope.insns;
-    var node = insns.first;
-
-    // If we don't have any nodes to process, just return the empty CFG.
-    if (node == null) {
-        return cfg;
-    }
 
     var label_to_block_lut: []?*BasicBlock = try allocator.alloc(?*BasicBlock, scope.label_id);
     @memset(label_to_block_lut, null);
@@ -726,10 +726,7 @@ test "empty basic block" {
     const scope = try compiler.Scope.init(std.testing.allocator, 0, null);
     defer scope.deinit();
 
-    const cfg = try buildCFG(std.testing.allocator, scope);
-    defer cfg.deinit();
-
-    try std.testing.expectEqual(null, cfg.head);
+    try std.testing.expectError(CompileError.EmptyInstructionSequence, buildCFG(std.testing.allocator, scope));
 }
 
 test "basic block one instruction" {
