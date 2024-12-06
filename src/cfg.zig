@@ -241,6 +241,11 @@ pub const CFG = struct {
             }
         }
 
+        // Keeps track of what blocks have phi assignments for particular
+        // variables.  This way we can avoid doing a linear scan of
+        // the instructions in a block.
+        const phi_map = try BitMatrix.init(self.arena.allocator(), opnd_count, all_blocks.len);
+
         var global_iter = globals.setBitsIterator();
         var worklist = std.ArrayList(*BasicBlock).init(self.mem);
         defer worklist.deinit();
@@ -269,17 +274,16 @@ pub const CFG = struct {
                 var dfiter = block.df.?.setBitsIterator();
                 while (dfiter.next()) |dfi| {
                     const dfblock = all_blocks[dfi];
-                    // TODO: use a bitmap to record if a block has a phi
-                    // for a particular variable.  `hasPhiFor` is a linear
-                    // scan so using a bitmap would be faster.
-                    if (!dfblock.hasPhiFor(opnd)) {
+                    if (!phi_map.isSet(operand_num, dfblock.name)) {
                         // If it's upward exposed, we definitely need a Phi
                         if (dfblock.upward_exposed_set.isSet(operand_num)) {
                             try dfblock.addPhi(self.scope, opnd);
+                            phi_map.set(operand_num, dfblock.name);
                         } else {
                             // If it's live out, then we need a phi
                             if (dfblock.liveout_set.isSet(operand_num)) {
                                 try dfblock.addPhi(self.scope, opnd);
+                                phi_map.set(operand_num, dfblock.name);
                             }
                         }
 
