@@ -85,6 +85,13 @@ pub const Operand = union(OperandType) {
         };
     }
 
+    pub fn isTemp(self: Operand) bool {
+        return switch(self) {
+            .temp, => true,
+            inline else => false
+        };
+    }
+
     pub fn isVariable(self: Operand) bool {
         return switch(self) {
             .param, .temp, .local => true,

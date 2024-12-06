@@ -875,10 +875,9 @@ test "killed operands" {
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
-        ir.Instruction.mov,
     }, bb);
 
-    try std.testing.expectEqual(2, bb.killedVariableCount());
+    try std.testing.expectEqual(1, bb.killedVariableCount());
     try std.testing.expectEqual(0, bb.upwardExposedCount());
 }
 
@@ -904,12 +903,10 @@ test "killed operands de-duplicate" {
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
-        ir.Instruction.mov,
         ir.Instruction.loadi,
-        ir.Instruction.mov,
     }, bb);
 
-    try std.testing.expectEqual(3, bb.killedVariableCount());
+    try std.testing.expectEqual(1, bb.killedVariableCount());
     try std.testing.expectEqual(0, bb.upwardExposedCount());
 }
 

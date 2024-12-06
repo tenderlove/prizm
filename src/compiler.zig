@@ -492,7 +492,14 @@ pub const Compiler = struct {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const name = try cc.scope.?.getLocalName(lvar_name);
 
-        return try cc.pushMov(name, inreg.?);
+        if (inreg) |variable| {
+            if (variable.isTemp()) {
+                variable.* = name.*;
+                return variable;
+            } else {
+                return try cc.pushMov(name, variable);
+            }
+        } else { unreachable; }
     }
 
     fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t, _: bool) !*ir.Operand {
@@ -690,7 +697,6 @@ test "compile local set" {
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
-        ir.Instruction.mov,
         ir.Instruction.leave,
     }, scope.insns);
 }
@@ -707,7 +713,6 @@ test "compile local get w/ return" {
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
-        ir.Instruction.mov,
         ir.Instruction.leave,
     }, scope.insns);
 }
@@ -737,7 +742,6 @@ test "compile local get w/ nil return" {
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
-        ir.Instruction.mov,
         ir.Instruction.loadnil,
         ir.Instruction.leave,
     }, scope.insns);
