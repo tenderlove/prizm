@@ -15,38 +15,24 @@ const BitMatrix = bitmatrix.BitMatrix;
 pub const CFG = struct {
     arena: std.heap.ArenaAllocator,
     mem: std.mem.Allocator,
-    block_name: u32 = 0,
-    head: ?*BasicBlock = null,
-    blocks: ?[] const *BasicBlock = null,
+    head: *BasicBlock,
+    blocks: []const *BasicBlock,
+    dom_tree: ?*BitMatrix = null,
     globals: ?*BitMap = null,
     scope: *compiler.Scope,
 
-    pub fn init(mem: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
-        // Create an arena
-        var arena = std.heap.ArenaAllocator.init(mem);
-
-        const cfg = try arena.allocator().create(CFG);
+    pub fn init(mem: std.mem.Allocator, arena: std.heap.ArenaAllocator, scope: *compiler.Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
+        const cfg = try mem.create(CFG);
 
         cfg.* = CFG {
             .arena = arena,
             .mem = mem,
+            .head = head,
+            .blocks = blocks,
             .scope = scope,
         };
 
         return cfg;
-    }
-
-    pub fn makeBlock(self: *CFG, start: *ir.InstructionList.Node, finish: *ir.InstructionList.Node, entry: bool) !*BasicBlock {
-        const block = try BasicBlock.initBlock(self.arena.allocator(),
-            self.block_name,
-            start,
-            finish,
-            entry,
-            self.scope.nextOpndId());
-
-        self.block_name += 1;
-
-        return block;
     }
 
     const DepthFirstIterator = struct {
@@ -74,7 +60,7 @@ pub const CFG = struct {
 
     pub fn depthFirstIterator(self: *CFG) !DepthFirstIterator {
         var worklist = std.ArrayList(*BasicBlock).init(self.mem);
-        try worklist.append(self.head.?);
+        try worklist.append(self.head);
 
         return .{
             .seen = std.AutoHashMap(u64, *BasicBlock).init(self.mem),
@@ -119,7 +105,7 @@ pub const CFG = struct {
 
     // Fill in dominator sets on all BBs
     fn fillDominators(self: *CFG) !void {
-        var blocklist: []?*BasicBlock = try self.mem.alloc(?*BasicBlock, self.block_name);
+        var blocklist: []?*BasicBlock = try self.mem.alloc(?*BasicBlock, self.blockCount());
         @memset(blocklist, null);
         defer self.mem.free(blocklist);
 
@@ -131,16 +117,16 @@ pub const CFG = struct {
             if (maybebb) |bb| {
                 blocklist[bb.name] = bb;
 
-                bb.df = try BitMap.init(self.arena.allocator(), self.block_name);
+                bb.df = try BitMap.init(self.arena.allocator(), self.blockCount());
 
                 if (bb.entry) {
-                    bb.dom = try BitMap.init(self.arena.allocator(), self.block_name);
+                    bb.dom = try BitMap.init(self.arena.allocator(), self.blockCount());
                     // Entry blocks dominate themselves, and nothing else
                     // dominates an entry block.
                     try bb.dom.?.setBit(bb.name);
                 } else {
                     // Default blocks to "everything dominates this block"
-                    bb.dom = try BitMap.init(self.arena.allocator(), self.block_name);
+                    bb.dom = try BitMap.init(self.arena.allocator(), self.blockCount());
                     bb.dom.?.setNot();
                 }
             }
@@ -155,12 +141,12 @@ pub const CFG = struct {
                 if (maybebb) |bb| {
                     if (bb.entry) continue;
 
-                    const temp = try BitMap.init(self.mem, self.block_name);
+                    const temp = try BitMap.init(self.mem, self.blockCount());
                     defer self.mem.destroy(temp);
 
                     try temp.setBit(bb.name);
 
-                    const intersect = try BitMap.init(self.mem, self.block_name);
+                    const intersect = try BitMap.init(self.mem, self.blockCount());
                     intersect.setNot();
                     defer self.mem.destroy(intersect);
 
@@ -220,7 +206,11 @@ pub const CFG = struct {
     }
 
     pub fn blockList(self: *CFG) []const *BasicBlock {
-        return self.blocks.?;
+        return self.blocks;
+    }
+
+    pub fn blockCount(self: *CFG) usize {
+        return self.blocks.len;
     }
 
     fn placePhis(self: *CFG) !void {
@@ -305,7 +295,7 @@ pub const CFG = struct {
         self.globals = globals;
     }
 
-    fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *u32) !void {
+    fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *usize) !void {
         if (blk) |bb| {
             if (seen.isSet(bb.name)) return;
             try seen.setBit(bb.name);
@@ -319,14 +309,14 @@ pub const CFG = struct {
     }
 
     pub fn reversePostorderBlocks(self: *CFG, mem: std.mem.Allocator) ![]?*BasicBlock {
-        const blocklist: []?*BasicBlock = try mem.alloc(?*BasicBlock, self.block_name);
+        const blocklist: []?*BasicBlock = try mem.alloc(?*BasicBlock, self.blockCount());
         @memset(blocklist, null);
 
-        const seen = try BitMap.init(mem, self.block_name);
+        const seen = try BitMap.init(mem, self.blockCount());
         defer seen.deinit(mem);
-        var counter = self.block_name;
+        var counter = self.blockCount();
 
-        try traverseReversePostorder(self.head.?, seen, blocklist, &counter);
+        try traverseReversePostorder(self.head, seen, blocklist, &counter);
 
         return blocklist;
     }
@@ -343,10 +333,9 @@ pub const CFG = struct {
     }
 
     pub fn deinit(self: *CFG) void {
-        if (self.blocks) |x| {
-            self.mem.free(x);
-        }
+        self.mem.free(self.blocks);
         self.arena.deinit();
+        self.mem.destroy(self);
     }
 };
 
@@ -616,110 +605,134 @@ pub const CompileError = error {
     EmptyInstructionSequence,
 };
 
-pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
-    const insns = scope.insns;
-    var node = insns.first;
+const CFGBuilder = struct {
+    block_name: u32 = 0,
+    scope: *Scope,
 
-    // If we don't have any nodes to process, just return the empty CFG.
-    if (node == null) {
-        return CompileError.EmptyInstructionSequence;
+    fn makeBlock(self: *CFGBuilder, mem: std.mem.Allocator, start: *ir.InstructionList.Node, finish: *ir.InstructionList.Node, entry: bool) !*BasicBlock {
+        const block = try BasicBlock.initBlock(mem,
+            self.block_name,
+            start,
+            finish,
+            entry,
+            self.scope.nextOpndId());
+
+        self.block_name += 1;
+
+        return block;
     }
 
-    const cfg = try CFG.init(allocator, scope);
+    fn build(self: *CFGBuilder, allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
+        const insns = scope.insns;
+        var node = insns.first;
 
-    var wants_label = std.ArrayList(*BasicBlock).init(allocator);
-    defer wants_label.deinit();
+        // If we don't have any nodes to process, just return the empty CFG.
+        if (node == null) {
+            return CompileError.EmptyInstructionSequence;
+        }
 
-    var all_blocks = std.ArrayList(*BasicBlock).init(allocator);
-    defer all_blocks.deinit();
+        var arena = std.heap.ArenaAllocator.init(allocator);
 
-    var last_block = cfg.head;
+        var wants_label = std.ArrayList(*BasicBlock).init(allocator);
+        defer wants_label.deinit();
 
-    var label_to_block_lut: []?*BasicBlock = try allocator.alloc(?*BasicBlock, scope.label_id);
-    @memset(label_to_block_lut, null);
-    defer allocator.free(label_to_block_lut);
+        var all_blocks = std.ArrayList(*BasicBlock).init(allocator);
+        defer all_blocks.deinit();
 
-    var entry = true;
+        var last_block: ?*BasicBlock = null;
+        var head: ?*BasicBlock = null;
 
-    // For all of our instructions
-    while (node) |insn| {
-        // Create a new block
-        const current_block = try cfg.makeBlock(insn, insn, entry);
-        try all_blocks.append(current_block);
-        entry = false;
+        var label_to_block_lut: []?*BasicBlock = try allocator.alloc(?*BasicBlock, scope.label_id);
+        @memset(label_to_block_lut, null);
+        defer allocator.free(label_to_block_lut);
 
-        // Scan through following instructions until we find an instruction
-        // that should end the block.
-        while (node) |finish_insn| {
-            // Add each instruction to the current block
-            current_block.addInstruction(finish_insn);
+        var entry = true;
 
-            node = finish_insn.next;
+        // For all of our instructions
+        while (node) |insn| {
+            // Create a new block
+            const current_block = try self.makeBlock(arena.allocator(), insn, insn, entry);
+            try all_blocks.append(current_block);
+            entry = false;
 
-            const insn_node = finish_insn.data;
+            // Scan through following instructions until we find an instruction
+            // that should end the block.
+            while (node) |finish_insn| {
+                // Add each instruction to the current block
+                current_block.addInstruction(finish_insn);
 
-            // If the last instruction is a jump we should end the block
-            if (insn_node.isJump() or insn_node.isReturn()) {
-                break;
-            }
+                node = finish_insn.next;
 
-            // If the next instruction is a label we should end the block
-            if (node) |next_insn| {
-                if (next_insn.data.isLabel()) {
+                const insn_node = finish_insn.data;
+
+                // If the last instruction is a jump we should end the block
+                if (insn_node.isJump() or insn_node.isReturn()) {
                     break;
                 }
+
+                // If the next instruction is a label we should end the block
+                if (node) |next_insn| {
+                    if (next_insn.data.isLabel()) {
+                        break;
+                    }
+                }
             }
-        }
 
-        // If the previous block falls through, then we should add the
-        // current block as a outgoing edge, and add the last block
-        // as a predecessor to this block.
-        if (current_block.entry) {
-            cfg.head = current_block;
-        } else {
-            if (last_block.?.fallsThrough()) {
-                last_block.?.setFallThroughDest(current_block);
-                try current_block.addPredecessor(last_block.?);
+            // If the previous block falls through, then we should add the
+            // current block as a outgoing edge, and add the last block
+            // as a predecessor to this block.
+            if (current_block.entry) {
+                head = current_block;
+            } else {
+                if (last_block.?.fallsThrough()) {
+                    last_block.?.setFallThroughDest(current_block);
+                    try current_block.addPredecessor(last_block.?);
+                }
             }
+
+            // If this block has a label at the top, register it so that
+            // we can link other blocks to this one
+            if (current_block.hasLabeledEntry()) {
+                const label_name = current_block.start.data.putlabel.name.label.name;
+                label_to_block_lut[label_name] = current_block;
+            }
+
+            // If this block jumps to a label, register it so that we can link
+            // it to the block with the label later.
+            if (current_block.hasJumpTarget()) {
+                try wants_label.append(current_block);
+            }
+
+            last_block = current_block;
         }
 
-        // If this block has a label at the top, register it so that
-        // we can link other blocks to this one
-        if (current_block.hasLabeledEntry()) {
-            const label_name = current_block.start.data.putlabel.name.label.name;
-            label_to_block_lut[label_name] = current_block;
+        for (wants_label.items) |want_label| {
+            const dest_label = want_label.jumpTarget();
+            const target = label_to_block_lut[dest_label.label.name].?;
+            want_label.setJumpDest(target);
+            try target.addPredecessor(want_label);
         }
 
-        // If this block jumps to a label, register it so that we can link
-        // it to the block with the label later.
-        if (current_block.hasJumpTarget()) {
-            try wants_label.append(current_block);
-        }
+        const cfg = try CFG.init(allocator, arena, scope, head.?, try all_blocks.toOwnedSlice());
 
-        last_block = current_block;
+        // TODO: sweep unreachable blocks?
+
+        // TODO: We could calculate the killed set and the upward exposed set
+        // while building the basic blocks, rather than here.  But then we
+        // wouldn't have the opportunity to do a peephole optimization step before
+        // calculating the VarKilled and UEVars.  Haven't implemented the
+        // peephole optimization step yet. Maybe we don't need it and can avoid
+        // the extra loops here?
+        try cfg.analyze();
+        try cfg.placePhis();
+
+        return cfg;
     }
+};
 
-    for (wants_label.items) |want_label| {
-        const dest_label = want_label.jumpTarget();
-        const target = label_to_block_lut[dest_label.label.name].?;
-        want_label.setJumpDest(target);
-        try target.addPredecessor(want_label);
-    }
-
-    cfg.blocks = try all_blocks.toOwnedSlice();
-
-    // TODO: sweep unreachable blocks?
-
-    // TODO: We could calculate the killed set and the upward exposed set
-    // while building the basic blocks, rather than here.  But then we
-    // wouldn't have the opportunity to do a peephole optimization step before
-    // calculating the VarKilled and UEVars.  Haven't implemented the
-    // peephole optimization step yet. Maybe we don't need it and can avoid
-    // the extra loops here?
-    try cfg.analyze();
-    try cfg.placePhis();
-
-    return cfg;
+pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
+    var builder = CFGBuilder { .scope = scope };
+    return try builder.build(allocator, scope);
 }
 
 test "empty basic block" {
@@ -738,7 +751,7 @@ test "basic block one instruction" {
     const cfg = try buildCFG(std.testing.allocator, scope);
     defer cfg.deinit();
 
-    const bb = cfg.head.?;
+    const bb = cfg.head;
 
     try std.testing.expectEqual(scope.insns.first.?, bb.start);
     try std.testing.expectEqual(scope.insns.first.?, bb.finish);
@@ -756,7 +769,7 @@ test "basic block two instruction" {
     const cfg = try buildCFG(std.testing.allocator, scope);
     defer cfg.deinit();
 
-    const bb = cfg.head.?;
+    const bb = cfg.head;
 
     try std.testing.expectEqual(scope.insns.first.?, bb.start);
     try std.testing.expectEqual(scope.insns.last.?, bb.finish);
@@ -775,7 +788,7 @@ test "CFG from compiler" {
     const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
-    const bb = cfg.head.?;
+    const bb = cfg.head;
     const start_type: ir.InstructionName = bb.start.data;
     try std.testing.expectEqual(ir.InstructionName.loadi, start_type);
 
@@ -796,7 +809,7 @@ test "no uninitialized in ternary" {
     const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
-    const uninitialized = try cfg.head.?.uninitializedSet(scope, allocator);
+    const uninitialized = try cfg.head.uninitializedSet(scope, allocator);
     defer uninitialized.deinit(allocator);
 
     try std.testing.expectEqual(0, uninitialized.popCount());
@@ -818,7 +831,7 @@ test "if statement should have 2 children blocks" {
     const cfg = try buildCFG(allocator, method_scope);
     defer cfg.deinit();
 
-    const block = cfg.head.?;
+    const block = cfg.head;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.jumpunless,
