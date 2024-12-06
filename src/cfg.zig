@@ -164,6 +164,8 @@ pub const CFG = struct {
             }
         }
 
+        const dom_tree = try BitMatrix.init(self.arena.allocator(), self.blockCount(), self.blockCount());
+
         // Set idom on each bb
         for (list) |maybebb| {
             if (maybebb) |bb| {
@@ -174,11 +176,15 @@ pub const CFG = struct {
                 try bb.dom.?.unsetBit(bb.name);
 
                 bb.idom = bb.dom.?.fsb();
+                dom_tree.set(bb.idom.?, bb.name);
 
                 // Set ourselves back
                 try bb.dom.?.setBit(bb.name);
             }
         }
+
+        self.dom_tree = dom_tree;
+
         try self.fillDominanceFrontiers(blocklist);
     }
 
@@ -1175,6 +1181,73 @@ test "dominance frontiers" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
+    const code = complexExampleCFG();
+    const scope = try compileScope(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const blocks = cfg.blockList();
+
+    try std.testing.expectEqual(9, blocks.len);
+    try std.testing.expectEqual(6, blocks[6].name);
+    try std.testing.expect(blocks[1].df.?.isSet(1));
+    try std.testing.expect(blocks[2].df.?.isSet(7));
+    try std.testing.expect(blocks[3].df.?.isSet(7));
+    try std.testing.expect(blocks[4].df.?.isSet(6));
+    try std.testing.expect(blocks[5].df.?.isSet(6));
+    try std.testing.expect(blocks[6].df.?.isSet(7));
+    try std.testing.expect(blocks[7].df.?.isSet(1));
+
+    for (0..blocks.len) |i| {
+        if (i == 8) {
+            try std.testing.expect(!blocks[i].reachable);
+        } else {
+            try std.testing.expect(blocks[i].reachable);
+        }
+    }
+    try std.testing.expectEqual(0, blocks[0].df.?.popCount());
+}
+
+test "dominator tree" {
+    const allocator = std.testing.allocator;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code = complexExampleCFG();
+    const scope = try compileScope(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const dt = cfg.dom_tree.?;
+
+    // Block 0 should point to 1
+    try std.testing.expect(dt.isSet(0, 1));
+    try std.testing.expectEqual(1, dt.getRow(0).popCount());
+
+    try std.testing.expect(dt.isSet(1, 2));
+    try std.testing.expect(dt.isSet(1, 3));
+    try std.testing.expect(dt.isSet(1, 7));
+    try std.testing.expectEqual(3, dt.getRow(1).popCount());
+
+    try std.testing.expectEqual(0, dt.getRow(2).popCount());
+
+    try std.testing.expect(dt.isSet(3, 4));
+    try std.testing.expect(dt.isSet(3, 5));
+    try std.testing.expect(dt.isSet(3, 6));
+    try std.testing.expectEqual(3, dt.getRow(3).popCount());
+
+    try std.testing.expectEqual(0, dt.getRow(4).popCount());
+    try std.testing.expectEqual(0, dt.getRow(5).popCount());
+    try std.testing.expectEqual(0, dt.getRow(6).popCount());
+    try std.testing.expectEqual(0, dt.getRow(7).popCount());
+}
+
+fn complexExampleCFG() []const u8 {
     const code =
 \\ i = 1
 \\ while true
@@ -1203,32 +1276,7 @@ test "dominance frontiers" {
 \\   i = i + 1
 \\ end
 ;
-    const scope = try compileScope(allocator, machine, code);
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
-    defer cfg.deinit();
-
-    const blocks = cfg.blockList();
-
-    try std.testing.expectEqual(9, blocks.len);
-    try std.testing.expectEqual(6, blocks[6].name);
-    try std.testing.expect(blocks[1].df.?.isSet(1));
-    try std.testing.expect(blocks[2].df.?.isSet(7));
-    try std.testing.expect(blocks[3].df.?.isSet(7));
-    try std.testing.expect(blocks[4].df.?.isSet(6));
-    try std.testing.expect(blocks[5].df.?.isSet(6));
-    try std.testing.expect(blocks[6].df.?.isSet(7));
-    try std.testing.expect(blocks[7].df.?.isSet(1));
-
-    for (0..blocks.len) |i| {
-        if (i == 8) {
-            try std.testing.expect(!blocks[i].reachable);
-        } else {
-            try std.testing.expect(blocks[i].reachable);
-        }
-    }
-    try std.testing.expectEqual(0, blocks[0].df.?.popCount());
+    return code;
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
