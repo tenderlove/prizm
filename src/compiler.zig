@@ -190,11 +190,6 @@ pub const Scope = struct {
         return out;
     }
 
-    pub fn pushPhi(self: *Scope, a: *ir.Operand, b: *ir.Operand) !*ir.Operand {
-        const outreg = try self.newTemp();
-        return try self.pushInsn(.{ .phi = .{ .out = outreg, .a = a, .b = b } });
-    }
-
     pub fn insertPhi(self: *Scope, node: *ir.InstructionList.Node, op: *ir.Operand) !*ir.InstructionList.Node {
         const new_node = try self.arena.allocator().create(ir.InstructionList.Node);
         new_node.*.data = .{ .phi = .{ .out = op, .a = op, .b = op } };
@@ -401,12 +396,20 @@ pub const Compiler = struct {
                 // Compile the true branch and get a return value
                 const true_branch = try cc.compileNode(@ptrCast(node.*.statements), popped);
 
-                // If anyone cares about the return value of this if statement, then
-                // we need to allocate a new temp and assign to the temp at the end
-                // of each leg of the if statement.
+                // If we're "not popped" it means that someone is using the
+                // return value of the if statement.  We need to make sure
+                // both sides of the if statement assign the return value to
+                // the same variable so that phi placement works correctly.
                 if (!popped) {
-                    iftemp = try cc.newTemp();
-                    _ = try cc.pushMov(iftemp.?, true_branch.?);
+                    if (true_branch) |tb| {
+                        switch (tb.*) {
+                            .temp => { iftemp = tb; },
+                            else => {
+                                iftemp = try cc.newTemp();
+                                _ = try cc.pushMov(iftemp.?, tb);
+                            }
+                        }
+                    } else { unreachable; }
                 }
 
                 // Jump to the end of the if statement
@@ -418,7 +421,14 @@ pub const Compiler = struct {
                 const false_branch = try cc.compileNode(@ptrCast(node.*.subsequent), popped);
 
                 if (!popped) {
-                    _ = try cc.pushMov(iftemp.?, false_branch.?);
+                    if (false_branch) |fb| {
+                        switch (fb.*) {
+                            .temp => { fb.* = true_branch.?.*; },
+                            else => {
+                                _ = try cc.pushMov(iftemp.?, fb);
+                            }
+                        }
+                    } else { unreachable; }
                 }
 
                 try cc.pushLabel(end_label);
@@ -614,10 +624,6 @@ pub const Compiler = struct {
         return try self.scope.?.pushMov(a, b);
     }
 
-    fn pushPhi(self: *Compiler, a: *ir.Operand, b: *ir.Operand) !*ir.Operand {
-        return try self.scope.?.pushPhi(a, b);
-    }
-
     fn pushSetLocal(self: *Compiler, name: *ir.Operand, val: *ir.Operand) !void {
         return try self.scope.?.pushSetLocal(name, val);
     }
@@ -761,11 +767,9 @@ test "compile ternary statement" {
         ir.Instruction.call,
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
-        ir.Instruction.mov,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
         ir.Instruction.loadi,
-        ir.Instruction.mov,
         ir.Instruction.putlabel,
     }, scope.insns);
 }
@@ -942,11 +946,9 @@ test "local ternary" {
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
-        ir.Instruction.mov,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
         ir.Instruction.loadi,
-        ir.Instruction.mov,
         ir.Instruction.putlabel,
         ir.Instruction.leave,
     }, method_scope.insns);

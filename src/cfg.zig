@@ -269,6 +269,9 @@ pub const CFG = struct {
                 var dfiter = block.df.?.setBitsIterator();
                 while (dfiter.next()) |dfi| {
                     const dfblock = all_blocks[dfi];
+                    // TODO: use a bitmap to record if a block has a phi
+                    // for a particular variable.  `hasPhiFor` is a linear
+                    // scan so using a bitmap would be faster.
                     if (!dfblock.hasPhiFor(opnd)) {
                         // If it's upward exposed, we definitely need a Phi
                         if (dfblock.upward_exposed_set.isSet(operand_num)) {
@@ -821,17 +824,16 @@ test "if statement should have 2 children blocks" {
     var child = block.fall_through_dest.?;
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.loadi,
-        ir.Instruction.mov,
         ir.Instruction.jump,
     }, child);
 
-    try std.testing.expectEqual(3, child.instructionCount());
+    try std.testing.expectEqual(2, child.instructionCount());
     try std.testing.expect(!child.fallsThrough());
 
     child = block.jump_dest.?;
-    try std.testing.expectEqual(3, child.instructionCount());
+    try std.testing.expectEqual(2, child.instructionCount());
     try std.testing.expectEqual(ir.Instruction.putlabel, @as(ir.InstructionName, child.start.data));
-    try std.testing.expectEqual(ir.Instruction.mov, @as(ir.InstructionName, child.finish.data));
+    try std.testing.expectEqual(ir.Instruction.loadi, @as(ir.InstructionName, child.finish.data));
 
     // Last block via fallthrough then jump
     const last_block = block.fall_through_dest.?.jump_dest.?;
@@ -931,7 +933,7 @@ test "upward exposed bits get set" {
     // One for x
     try std.testing.expectEqual(1, bb.upwardExposedCount());
     // one for loadi, and return value of call
-    try std.testing.expectEqual(3, bb.killedVariableCount());
+    try std.testing.expectEqual(2, bb.killedVariableCount());
 }
 
 test "complex loop with if" {
