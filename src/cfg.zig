@@ -838,6 +838,7 @@ test "if statement should have 2 children blocks" {
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.putlabel,
+        ir.Instruction.phi,
         ir.Instruction.leave,
     }, last_block);
 
