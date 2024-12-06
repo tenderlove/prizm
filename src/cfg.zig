@@ -83,7 +83,7 @@ pub const CFG = struct {
     }
 
     // Fill in VarKilled and UE var sets for all BBs
-    pub fn fillVarSets(self: *CFG) !void {
+    fn fillVarSets(self: *CFG) !void {
         var iter = try self.depthFirstIterator();
         defer iter.deinit();
 
@@ -118,7 +118,7 @@ pub const CFG = struct {
     }
 
     // Fill in dominator sets on all BBs
-    pub fn fillDominators(self: *CFG) !void {
+    fn fillDominators(self: *CFG) !void {
         var blocklist: []?*BasicBlock = try self.mem.alloc(?*BasicBlock, self.block_name);
         @memset(blocklist, null);
         defer self.mem.free(blocklist);
@@ -212,11 +212,18 @@ pub const CFG = struct {
         }
     }
 
+    // Analyze the CFG.
+    pub fn analyze(self: *CFG) !void {
+        try self.fillVarSets();
+        try self.fillDominators();
+        try self.fillLiveOut();
+    }
+
     pub fn blockList(self: *CFG) []const *BasicBlock {
         return self.blocks.?;
     }
 
-    fn computeGlobals(self: *CFG) !void {
+    fn placePhis(self: *CFG) !void {
         const opnd_count = self.scope.operands.items.len;
         const globals = try BitMap.init(self.arena.allocator(), opnd_count);
 
@@ -709,10 +716,8 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     // calculating the VarKilled and UEVars.  Haven't implemented the
     // peephole optimization step yet. Maybe we don't need it and can avoid
     // the extra loops here?
-    try cfg.fillVarSets();
-    try cfg.fillDominators();
-    try cfg.fillLiveOut();
-    try cfg.computeGlobals();
+    try cfg.analyze();
+    try cfg.placePhis();
 
     return cfg;
 }
