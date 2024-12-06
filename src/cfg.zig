@@ -9,13 +9,16 @@ const printer = @import("printer.zig");
 const assert = @import("std").debug.assert;
 const bitmap = @import("utils/bitmap.zig");
 const BitMap = bitmap.BitMap;
+const bitmatrix = @import("utils/bitmatrix.zig");
+const BitMatrix = bitmatrix.BitMatrix;
 
 pub const CFG = struct {
     arena: std.heap.ArenaAllocator,
     mem: std.mem.Allocator,
-    block_name: u32,
-    head: ?*BasicBlock,
-    blocks: ?[] const *BasicBlock,
+    block_name: u32 = 0,
+    head: ?*BasicBlock = null,
+    blocks: ?[] const *BasicBlock = null,
+    globals: ?*BitMap = null,
     scope: *compiler.Scope,
 
     pub fn init(mem: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
@@ -27,9 +30,6 @@ pub const CFG = struct {
         cfg.* = CFG {
             .arena = arena,
             .mem = mem,
-            .block_name = 0,
-            .head = null,
-            .blocks = null,
             .scope = scope,
         };
 
@@ -214,6 +214,81 @@ pub const CFG = struct {
 
     pub fn blockList(self: *CFG) []const *BasicBlock {
         return self.blocks.?;
+    }
+
+    fn computeGlobals(self: *CFG) !void {
+        const opnd_count = self.scope.operands.items.len;
+        const globals = try BitMap.init(self.arena.allocator(), opnd_count);
+
+        const all_blocks = self.blockList();
+
+        // Create a matrix where each row in the matrix maps to a particular
+        // operand id, and the bits in the row indicate which block number
+        // defined that operand.
+        const block_set = try BitMatrix.init(self.arena.allocator(), opnd_count, all_blocks.len);
+
+        // Find "global" variables.  Global variables are variables that
+        // live between basic blocks.
+        // Engineering a Compiler: Figure 9.11
+        for (all_blocks) |block| {
+            if (block.reachable) {
+                // Upward exposed variables must cross between BBs
+                try globals.setUnion(block.upward_exposed_set);
+                var iter = block.killed_set.setBitsIterator();
+                while (iter.next()) |operand_num| {
+                    block_set.set(operand_num, block.name);
+                }
+            }
+        }
+
+        var global_iter = globals.setBitsIterator();
+        var worklist = std.ArrayList(*BasicBlock).init(self.mem);
+        defer worklist.deinit();
+
+        while (global_iter.next()) |operand_num| {
+            // We only want to process a block once per global name
+            // This bitmap keeps track of whether or not we've processed
+            // a particular block for this name.
+            const block_seen = try BitMap.init(self.mem, all_blocks.len);
+            defer block_seen.deinit(self.mem);
+
+            // Get all blocks that define this variable
+            const blocks = block_set.getRow(operand_num);
+
+            const opnd = self.scope.operands.items[operand_num];
+
+            // Add each block to our worklist
+            var biter = blocks.setBitsIterator();
+            while (biter.next()) |i| {
+                const block = all_blocks[i];
+                try block_seen.setBit(block.name);
+                try worklist.append(block);
+            }
+
+            while (worklist.popOrNull()) |block| {
+                var dfiter = block.df.?.setBitsIterator();
+                while (dfiter.next()) |dfi| {
+                    const dfblock = all_blocks[dfi];
+                    if (!dfblock.hasPhiFor(opnd)) {
+                        // If it's upward exposed, we definitely need a Phi
+                        if (dfblock.upward_exposed_set.isSet(operand_num)) {
+                            try dfblock.addPhi(self.scope, opnd);
+                        } else {
+                            // If it's live out, then we need a phi
+                            if (dfblock.liveout_set.isSet(operand_num)) {
+                                try dfblock.addPhi(self.scope, opnd);
+                            }
+                        }
+
+                        if (!block_seen.isSet(dfblock.name)) {
+                            try worklist.append(dfblock);
+                            try block_seen.setBit(dfblock.name);
+                        }
+                    }
+                }
+            }
+        }
+        self.globals = globals;
     }
 
     fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *u32) !void {
@@ -424,6 +499,41 @@ pub const BasicBlock = struct {
         };
     }
 
+    pub fn hasPhiFor(self: *BasicBlock, opnd: *ir.Operand) bool {
+        var iter = self.instructionIter();
+        while (iter.next()) |insn| {
+            switch(insn.data) {
+                .putlabel => { }, // Skip putlabel
+                .phi => |p| {
+                    if (p.out == opnd) return true;
+                },
+                else => { return false; }
+            }
+        }
+        return false;
+    }
+
+    pub fn addPhi(self: *BasicBlock, scope: *Scope, opnd: *ir.Operand) !void {
+        var iter = self.instructionIter();
+        while (iter.next()) |insn| {
+            switch(insn.data) {
+                inline .phi, .putlabel => { }, // Skip phi and putlabel
+                else => {
+                    if (insn.prev) |prev| {
+                        const phi_insn = try scope.insertPhi(prev, opnd);
+                        if (insn == self.start) {
+                            self.start = phi_insn;
+                        }
+                    } else {
+                        unreachable;
+                    }
+                    return;
+                }
+            }
+        }
+        unreachable;
+    }
+
     fn hasJumpTarget(self: *BasicBlock) bool {
         return self.finish.data.isJump();
     }
@@ -595,6 +705,7 @@ pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     try cfg.fillVarSets();
     try cfg.fillDominators();
     try cfg.fillLiveOut();
+    try cfg.computeGlobals();
 
     return cfg;
 }

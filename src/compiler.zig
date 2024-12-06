@@ -195,6 +195,13 @@ pub const Scope = struct {
         return try self.pushInsn(.{ .phi = .{ .out = outreg, .a = a, .b = b } });
     }
 
+    pub fn insertPhi(self: *Scope, node: *ir.InstructionList.Node, op: *ir.Operand) !*ir.InstructionList.Node {
+        const new_node = try self.arena.allocator().create(ir.InstructionList.Node);
+        new_node.*.data = .{ .phi = .{ .out = op, .a = op, .b = op } };
+        self.insns.insertAfter(node, new_node);
+        return new_node;
+    }
+
     pub fn pushSetLocal(self: *Scope, name: *ir.Operand, val: *ir.Operand) !void {
         return try self.pushVoidInsn(.{ .setlocal = .{ .name = name, .val = val } });
     }
