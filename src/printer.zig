@@ -5,14 +5,34 @@ const CFG = @import("cfg.zig");
 const bm = @import("utils/bitmap.zig");
 
 const IRPrinter = struct {
+    fn printIntAsSubscript(num: usize, out: *const std.io.AnyWriter) !void {
+        if (num < 10) {
+            const val: u8 = @intCast(num);
+            const bytes = [3]u8{0xE2, 0x82, 0x80 + val };
+            try out.print("{s}", .{ bytes, });
+        } else {
+            try printIntAsSubscript(num / 10, out);
+            const val: u8 = @intCast(@mod(num, 10));
+            const bytes = [3]u8{0xE2, 0x82, 0x80 + val};
+            try out.print("{s}", .{ bytes, });
+        }
+    }
+
     fn printOpnd(op: *const ir.Operand, out: *const std.io.AnyWriter) !void {
         switch (op.*) {
             .immediate => |p| try out.print("{d}", .{p.value}),
-            .param => |p| try out.print("{s}", .{p.source_name}),
-            .local => |p| try out.print("{s}", .{p.source_name}),
+            inline .local, .param => |p| {
+                try out.print("{s}", .{ p.source_name, });
+            },
             .string => |p| try out.print("{s}", .{p.value}),
             .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.name }),
-            inline else => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.name }),
+            .redef => |r| {
+                try printOpnd(r.orig, out);
+                try printIntAsSubscript(r.variant, out);
+            },
+            else => {
+                try out.print("{s}{d}", .{op.shortName(), op.number()});
+            },
         }
     }
 
@@ -48,28 +68,19 @@ const IRPrinter = struct {
         });
     }
 
-    fn printInsn(insn: ir.Instruction, digits: u32, out: *const std.io.AnyWriter) ! void {
+    fn printInsn(insn: ir.Instruction, digits: usize, out: *const std.io.AnyWriter) ! void {
         if (insn.outVar()) |n| {
-            switch (n.*) {
-                inline .local, .param => |p| {
-                    try out.print("  {[value]s: <[width]}", .{
-                        .value = p.source_name,
-                        .width = digits + 2,
-                    });
-                },
-                else => {
-                    try out.print("  {s}", .{n.shortName()});
-                    try out.print("{[value]d: <[width]}", .{
-                        .value = n.number(),
-                        .width = digits + 1,
-                    });
-                }
-            }
+            const width = outVarWidth(n);
+            const padding = digits - width;
+            try out.print("  ", .{});
+            try printOpnd(n, out);
+            try out.print("{[x]s: <[width]}", .{ .x = "", .width = padding });
             try out.print("<- ", .{ });
         } else {
-            try out.print("   {[value]s: <[width]}   ", .{
+            try out.print("  ", .{});
+            try out.print("{[value]s: <[width]}   ", .{
                 .value = "",
-                .width = digits + 1,
+                .width = digits,
             });
         }
 
@@ -92,7 +103,7 @@ const IRPrinter = struct {
             var node = work_scope.insns.first;
             try out.print("= Scope: {d} ======================\n", .{work_scope.name});
 
-            const digits = countDigits(work_scope.maxId());
+            const digits = widestOutOp(work_scope) + 1;
 
             while (node) |unwrapped| {
                 switch (unwrapped.data) {
@@ -123,7 +134,7 @@ const CFGPrinter = struct {
         out: *const std.io.AnyWriter,
         work: *std.ArrayList(*cmp.Scope),
         scope: *cmp.Scope,
-        var_width: u32,
+        var_width: usize,
     };
 
     fn printSet(comptime name: []const u8, scope: *cmp.Scope, set: *bm.BitMap, out: *const std.io.AnyWriter) !void {
@@ -252,10 +263,11 @@ const CFGPrinter = struct {
         try out.print("\n\n", .{});
         while (work.popOrNull()) |work_scope| {
             ctx.scope = work_scope;
-            ctx.var_width = countDigits(work_scope.maxId());
+            ctx.var_width = widestOutOp(work_scope);
             try out.print("subgraph cluster_{d} {{\n", .{ work_scope.name });
             try out.print("color=lightgrey;\n", .{});
             const cfg = try CFG.buildCFG(alloc, work_scope);
+            try cfg.rename();
             var iter = try cfg.depthFirstIterator();
             defer iter.deinit();
             while (try iter.next()) |bb| {
@@ -276,6 +288,30 @@ fn countDigits(num: usize) u32 {
     }
 }
 
+fn outVarWidth(opnd: *ir.Operand) usize {
+    return switch (opnd.*) {
+        inline .local, .param => |v| v.source_name.len,
+        .redef => |v| outVarWidth(v.orig) + countDigits(v.variant),
+        .string => |v| v.value.len,
+        .scope => |v| countDigits(v.id) + 1,
+        .immediate => |v| countDigits(v.value),
+        inline else => |v| countDigits(v.name) + 1
+    };
+}
+
+fn widestOutOp(scope: *cmp.Scope) usize {
+    const insns = scope.insns;
+    var node = insns.first;
+    var widest: usize = 0;
+    while (node) |insn| {
+        if (insn.data.outVar()) |variable| {
+            const len = outVarWidth(variable);
+            if (len > widest) widest = len;
+        }
+        node = insn.next;
+    }
+    return widest;
+}
 
 pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: std.io.AnyWriter) !void {
     try IRPrinter.printIR(alloc, scope, &out);
