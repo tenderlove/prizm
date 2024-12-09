@@ -60,7 +60,98 @@ pub fn BitMatrixSize(comptime T: type) type {
     };
 }
 
+pub fn BitMatrix3DSize(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        const AtomBits = @typeInfo(T).int.bits;
+
+        xbits: usize,
+        ybits: usize,
+        zbits: usize,
+        buffer: []T,
+
+        pub fn init(mem: std.mem.Allocator, xbits: usize, ybits: usize, zbits: usize) !*Self {
+            const bm = try mem.create(Self);
+
+            const roundx = (xbits + (AtomBits - 1)) & ~@as(usize, (AtomBits - 1));
+            const roundy = (ybits + (AtomBits - 1)) & ~@as(usize, (AtomBits - 1));
+            const roundz = (zbits + (AtomBits - 1)) & ~@as(usize, (AtomBits - 1));
+
+            const alloc = (roundx * roundy * roundz) / AtomBits;
+
+            const buff = try mem.alloc(T, alloc);
+            @memset(buff, 0);
+
+            bm.* = .{ .xbits = roundx, .ybits = roundy, .zbits = roundz, .buffer = buff };
+            return bm;
+        }
+
+        pub fn isSet(self: Self, x: usize, y: usize, z: usize) !bool {
+            if (x >= self.xbits) return error.ArgumentError;
+            if (y >= self.ybits) return error.ArgumentError;
+            if (z >= self.zbits) return error.ArgumentError;
+
+            const xoffset = ((self.ybits + self.zbits) / AtomBits) * x;
+            const yoffset = ((self.zbits) / AtomBits) * y;
+            const zoffset = y / AtomBits;
+            const bit = @as(T, 1) << @intCast(@mod(z, AtomBits));
+            return (self.buffer[xoffset + yoffset + zoffset] & bit) == bit;
+        }
+
+        pub fn set(self: *const Self, x: usize, y: usize, z: usize) !void {
+            if (x >= self.xbits) return error.ArgumentError;
+            if (y >= self.ybits) return error.ArgumentError;
+            if (z >= self.zbits) return error.ArgumentError;
+
+            const xoffset = ((self.ybits + self.zbits) / AtomBits) * x;
+            const yoffset = ((self.zbits) / AtomBits) * y;
+            const zoffset = y / AtomBits;
+            const bit = @as(T, 1) << @intCast(@mod(z, AtomBits));
+            self.buffer[xoffset + yoffset + zoffset] |= bit;
+        }
+
+        pub fn deinit(self: *const Self, mem: std.mem.Allocator) void {
+            mem.free(self.buffer);
+            mem.destroy(self);
+        }
+    };
+}
+
 pub const BitMatrix = BitMatrixSize(u8);
+pub const BitMatrix3D = BitMatrix3DSize(u8);
+
+test "3d matrix init" {
+    const alloc = std.testing.allocator;
+
+    const bm64 = try BitMatrix3D.init(alloc, 8, 8, 8);
+    defer bm64.deinit(alloc);
+}
+
+test "3d matrix set" {
+    const alloc = std.testing.allocator;
+
+    const bm3d = try BitMatrix3D.init(alloc, 8, 8, 8);
+    defer bm3d.deinit(alloc);
+    try std.testing.expect(!(try bm3d.isSet(1, 1, 0)));
+    try bm3d.set(1, 1, 0);
+    try bm3d.set(7, 7, 7);
+    try std.testing.expect(try bm3d.isSet(1, 1, 0));
+    try std.testing.expect(try bm3d.isSet(7, 7, 7));
+}
+
+test "3d matrix not symmetrical" {
+    const alloc = std.testing.allocator;
+
+    const bm3d = try BitMatrix3D.init(alloc, 8, 8, 16);
+    defer bm3d.deinit(alloc);
+    try std.testing.expect(!(try bm3d.isSet(1, 1, 0)));
+    try bm3d.set(1, 1, 0);
+    try bm3d.set(7, 7, 7);
+    try bm3d.set(7, 7, 15);
+    try std.testing.expect(try bm3d.isSet(1, 1, 0));
+    try std.testing.expect(try bm3d.isSet(7, 7, 7));
+    try std.testing.expect(try bm3d.isSet(7, 7, 15));
+}
 
 test "bit64" {
     const alloc = std.testing.allocator;
