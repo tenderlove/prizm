@@ -14,6 +14,7 @@ pub const OperandType = enum {
     scope,
     string,
     temp,
+    redef,
 };
 
 pub const Operand = union(OperandType) {
@@ -27,6 +28,7 @@ pub const Operand = union(OperandType) {
     scope: struct { id: usize, value: *cmp.Scope, },
     string: struct { id: usize, value: []const u8, },
     temp: struct { id: usize, name: usize, },
+    redef: struct { id: usize, variant: usize, orig: *Operand },
 
     pub fn initImmediate(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
@@ -58,6 +60,12 @@ pub const Operand = union(OperandType) {
         return opnd;
     }
 
+    pub fn initRedef(alloc: std.mem.Allocator, id: usize, variant: usize, orig: *Operand) !*Operand {
+        const opnd = try alloc.create(Operand);
+        opnd.* = .{ .redef = .{ .id = id, .variant = variant, .orig = orig } };
+        return opnd;
+    }
+
     pub fn initString(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
         opnd.* = .{ .string = .{ .id = id, .value = value } };
@@ -75,6 +83,7 @@ pub const Operand = union(OperandType) {
             .immediate => unreachable,
             .string => unreachable,
             .scope => unreachable,
+            .redef => unreachable,
             inline else => |payload| payload.name
         };
     }
@@ -118,6 +127,7 @@ pub const Operand = union(OperandType) {
             .string => "s",
             .scope => "S",
             .temp => "t",
+            .redef => "r",
         };
     }
 };
@@ -378,6 +388,17 @@ pub const Instruction = union(InstructionName) {
             .leave => null,
             inline else => |payload| payload.out
         };
+    }
+
+    pub fn getOut(self: Instruction) ?*Operand {
+        return self.outVar();
+    }
+
+    pub fn setOut(self: *Instruction, opnd: *Operand) void {
+        switch (self.*) {
+            .putlabel, .jump, .jumpunless, .setlocal, .leave => unreachable,
+            inline else => |*payload| payload.out = opnd
+        }
     }
 
     pub fn deinit(self: Instruction) void {

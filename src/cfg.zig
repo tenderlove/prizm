@@ -1,6 +1,6 @@
 const std = @import("std");
-const ssa = @import("ssa.zig");
 const ir = @import("ir.zig");
+const Operand = ir.Operand;
 const prism = @import("prism.zig");
 const vm = @import("vm.zig");
 const compiler = @import("compiler.zig");
@@ -33,6 +33,10 @@ pub const CFG = struct {
         };
 
         return cfg;
+    }
+
+    pub fn opndCount(self: @This()) usize {
+        return self.scope.operands.items.len;
     }
 
     const DepthFirstIterator = struct {
@@ -299,6 +303,115 @@ pub const CFG = struct {
             }
         }
         self.globals = globals;
+    }
+
+    const Renamer = struct {
+        counters: []u64,
+        stacks: []std.ArrayList(*Operand),
+        seen: std.AutoHashMap(*Operand, usize),
+
+        pub fn init(mem: std.mem.Allocator, global_count: usize) !Renamer {
+            const counters: []u64 = try mem.alloc(u64, global_count);
+            @memset(counters, 0);
+            var stacks: []std.ArrayList(*Operand) = try mem.alloc(std.ArrayList(*Operand), global_count);
+
+            for (0..global_count) |i| {
+                stacks[i] = std.ArrayList(*Operand).init(mem);
+            }
+
+            return .{
+                .counters = counters,
+                .stacks = stacks,
+                .seen = std.AutoHashMap(*Operand, usize).init(mem),
+            };
+        }
+
+        pub fn deinit(self: *Renamer, mem: std.mem.Allocator) void {
+            mem.free(self.counters);
+            for (self.stacks) |stack| {
+                stack.deinit();
+            }
+            self.seen.deinit();
+            mem.free(self.stacks);
+        }
+
+        pub fn fillPhiParams(_: *Renamer, bb: *BasicBlock) void {
+            var iter = bb.instructionIter();
+            while (iter.next()) |insn| {
+                switch(insn.data) {
+                    .putlabel => { }, // Skip putlabel
+                    .phi => |p| {
+                        std.debug.print("need to fix {}\n", .{ p.out });
+                    },
+                    // Quit after we've passed phi's
+                    else => { return; }
+                }
+            }
+        }
+
+        pub fn rename(self: *Renamer, cfg: *CFG, bb: *BasicBlock) !void {
+            var iter = bb.instructionIter();
+            while (iter.next()) |insn| {
+                switch(insn.data) {
+                    .putlabel => { }, // Skip putlabel
+                    .phi => |p| {
+                        std.debug.print("out {}\n", .{ p.out });
+                    },
+                    else => {
+                        var itr = insn.data.opIter();
+                        while (itr.next()) |op| {
+                            if (cfg.globals.?.isSet(op.getID())) {
+                                std.debug.print("rename operand\n", .{ });
+                            }
+                        }
+
+                        if (insn.data.getOut()) |out| {
+                            if (cfg.globals.?.isSet(out.getID())) {
+                                std.debug.print("rename out {}\n", .{ out });
+                                const newname = try self.newName(out, cfg.scope);
+                                insn.data.setOut(newname);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (bb.fall_through_dest) |succ| {
+                self.fillPhiParams(succ);
+            }
+
+            if (bb.jump_dest) |succ| {
+                self.fillPhiParams(succ);
+            }
+
+            // For each successor, fill in the phi parameters
+        }
+
+        fn newName(self: *Renamer, variable: *Operand, scope: *Scope) !*Operand {
+            const idx = try self.getStackIndex(variable);
+            const i = self.counters[idx];
+            self.counters[idx] = i + 1;
+            const new_opnd = try scope.newDefinition(variable, idx);
+            try self.stacks[idx].append(new_opnd);
+            return new_opnd;
+        }
+
+        fn getStackIndex(self: *Renamer, variable: *Operand) !usize {
+            if (self.seen.get(variable)) |idx| {
+                return idx;
+            } else {
+                const idx = self.seen.count();
+                try self.seen.put(variable, idx);
+                return idx;
+            }
+        }
+    };
+
+    pub fn rename(self: *CFG) !void {
+        const global_count = self.globals.?.popCount();
+        var renamer = try Renamer.init(self.mem, global_count);
+        defer renamer.deinit(self.mem);
+        try renamer.rename(self, self.head);
     }
 
     fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *usize) !void {
@@ -1245,6 +1358,38 @@ test "dominator tree" {
     try std.testing.expectEqual(0, dt.getRow(5).popCount());
     try std.testing.expectEqual(0, dt.getRow(6).popCount());
     try std.testing.expectEqual(0, dt.getRow(7).popCount());
+}
+
+test "rename" {
+    const allocator = std.testing.allocator;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code = complexExampleCFG();
+    const scope = try compileScope(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    try cfg.rename();
+
+    // After renaming, all assignments should be unique
+    // const seen_opnd = try BitMap.init(allocator, cfg.opndCount());
+    // defer allocator.destroy(seen_opnd);
+
+    // for (cfg.blocks) |block| {
+    //     if (!block.reachable) continue;
+
+    //     var iter = block.instructionIter();
+    //     while (iter.next()) |insn| {
+    //         if (insn.data.outVar()) |v| {
+    //             try std.testing.expect(!seen_opnd.isSet(v.getID()));
+    //             try seen_opnd.setBit(v.getID());
+    //         }
+    //     }
+    // }
 }
 
 fn complexExampleCFG() []const u8 {

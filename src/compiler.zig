@@ -90,6 +90,14 @@ pub const Scope = struct {
         return try self.addOpnd(try ir.Operand.initString(self.arena.allocator(), self.nextOpndId(), name));
     }
 
+    pub fn newDefinition(self: *Scope, opnd: *ir.Operand, variant: usize) !*ir.Operand {
+        const new = try ir.Operand.initRedef(self.arena.allocator(),
+            self.nextOpndId(),
+            variant,
+            opnd);
+        return try self.addOpnd(new);
+    }
+
     fn newTemp(self: *Scope) !*ir.Operand {
         const name = self.tmp_id;
         self.tmp_id += 1;
