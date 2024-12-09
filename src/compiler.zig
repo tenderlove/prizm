@@ -200,7 +200,8 @@ pub const Scope = struct {
 
     pub fn insertPhi(self: *Scope, node: *ir.InstructionList.Node, op: *ir.Operand) !*ir.InstructionList.Node {
         const new_node = try self.arena.allocator().create(ir.InstructionList.Node);
-        new_node.*.data = .{ .phi = .{ .out = op, .a = op, .b = op } };
+        const params = std.ArrayList(*ir.Operand).init(self.allocator);
+        new_node.*.data = .{ .phi = .{ .out = op, .params = params } };
         self.insns.insertAfter(node, new_node);
         return new_node;
     }

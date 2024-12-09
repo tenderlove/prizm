@@ -18,16 +18,40 @@ pub const OperandType = enum {
 };
 
 pub const Operand = union(OperandType) {
-    constant: struct { id: usize, name: usize, },
-    cvar: struct { id: usize, name: usize, },
-    immediate: struct { id: usize, value: u64, },
-    ivar: struct { id: usize, name: usize, },
-    label: struct { id: usize, name: usize, },
+    constant: struct {
+        id: usize,
+        name: usize,
+    },
+    cvar: struct {
+        id: usize,
+        name: usize,
+    },
+    immediate: struct {
+        id: usize,
+        value: u64,
+    },
+    ivar: struct {
+        id: usize,
+        name: usize,
+    },
+    label: struct {
+        id: usize,
+        name: usize,
+    },
     local: struct { id: usize, name: usize, source_name: []const u8 },
     param: struct { id: usize, name: usize, source_name: []const u8 },
-    scope: struct { id: usize, value: *cmp.Scope, },
-    string: struct { id: usize, value: []const u8, },
-    temp: struct { id: usize, name: usize, },
+    scope: struct {
+        id: usize,
+        value: *cmp.Scope,
+    },
+    string: struct {
+        id: usize,
+        value: []const u8,
+    },
+    temp: struct {
+        id: usize,
+        name: usize,
+    },
     redef: struct { id: usize, variant: usize, orig: *Operand },
 
     pub fn initImmediate(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
@@ -79,44 +103,53 @@ pub const Operand = union(OperandType) {
     }
 
     pub fn number(self: Operand) usize {
-        return switch(self) {
+        return switch (self) {
             .immediate => unreachable,
             .string => unreachable,
             .scope => unreachable,
             .redef => unreachable,
-            inline else => |payload| payload.name
+            inline else => |payload| payload.name,
+        };
+    }
+
+    pub fn getVar(self: *Operand) *Operand {
+        return switch (self.*) {
+            .param, .temp, .local => self,
+            .redef => |v| getVar(v.orig),
+            inline else => unreachable,
         };
     }
 
     pub fn getID(self: Operand) usize {
-        return switch(self) {
-            inline else => |payload| payload.id
+        return switch (self) {
+            inline else => |payload| payload.id,
         };
     }
 
     pub fn isTemp(self: Operand) bool {
-        return switch(self) {
-            .temp, => true,
-            inline else => false
+        return switch (self) {
+            .temp,
+            => true,
+            inline else => false,
         };
     }
 
     pub fn isVariable(self: Operand) bool {
-        return switch(self) {
+        return switch (self) {
             .param, .temp, .local => true,
-            inline else => false
+            inline else => false,
         };
     }
 
     pub fn isParam(self: Operand) bool {
-        return switch(self) {
+        return switch (self) {
             .param => true,
-            inline else => false
+            inline else => false,
         };
     }
 
-    pub fn shortName(self: Operand) [] const u8 {
-        return switch(self) {
+    pub fn shortName(self: Operand) []const u8 {
+        return switch (self) {
             .constant => "k",
             .cvar => "c",
             .immediate => "I",
@@ -150,68 +183,139 @@ pub const InstructionName = enum {
 
 pub const Instruction = union(InstructionName) {
     call: struct {
+        const Self = @This();
+
         out: *Operand,
         recv: *Operand,
         name: *Operand,
         params: std.ArrayList(*Operand),
+
+        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
+            if (self.recv == old) {
+                self.recv = new;
+            }
+            for (0..self.params.items.len) |i| {
+                if (self.params.items[i] == old) {
+                    self.params.items[i] = new;
+                }
+            }
+        }
     },
 
     define_method: struct {
+        const Self = @This();
         out: *Operand,
         name: *Operand,
         func: *Operand,
+        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
+            if (old == self.name) self.name = new;
+            if (old == self.func) self.func = new;
+        }
     },
 
     getlocal: struct {
+        const Self = @This();
         out: *Operand,
         in: *Operand,
+        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
+            if (old == self.in) self.in = new;
+        }
     },
 
     getself: struct {
+        const Self = @This();
         out: *Operand,
+        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
+            unreachable;
+        }
     },
 
     jump: struct {
+        const Self = @This();
         label: *Operand,
+        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
+            unreachable;
+        }
     },
 
     jumpunless: struct {
+        const Self = @This();
         in: *Operand,
         label: *Operand,
+        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
+            if (self.in == old) self.in = new;
+        }
     },
 
     leave: struct {
+        const Self = @This();
         in: *Operand,
+        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
+            unreachable;
+        }
     },
 
     loadi: struct {
+        const Self = @This();
         out: *Operand,
         val: *Operand,
+        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
+            unreachable;
+        }
     },
 
     loadnil: struct {
+        const Self = @This();
         out: *Operand,
+        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
+            unreachable;
+        }
     },
 
     mov: struct {
+        const Self = @This();
         out: *Operand,
         in: *Operand,
+        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
+            if (self.in == old) self.in = new;
+        }
     },
 
     phi: struct {
+        const Self = @This();
         out: *Operand,
-        a: *Operand,
-        b: *Operand,
+        params: std.ArrayList(*Operand),
+        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
+            for (0..self.params.items.len) |i| {
+                if (self.params.items[i] == old) {
+                    self.params.items[i] = new;
+                }
+            }
+        }
     },
 
     putlabel: struct {
+        const Self = @This();
         name: *Operand,
+        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
+            unreachable;
+        }
     },
 
     setlocal: struct {
+        const Self = @This();
         name: *Operand,
         val: *Operand,
+        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
+            if (self.val == old) self.val = new;
+        }
     },
+
+    pub fn replaceOpnd(self: *Instruction, old: *const Operand, new: *Operand) void {
+        switch (self.*) {
+            inline else => |*variant| variant.replaceOpnd(old, new),
+        }
+    }
 
     fn nth_field(comptime T: type, comptime F: type, t: *const T, index: usize) ?*const F {
         inline for (std.meta.fields(T), 0..) |field, field_index| {
@@ -288,7 +392,7 @@ pub const Instruction = union(InstructionName) {
         array_index: usize = 0,
         insn: *const Instruction,
 
-        fn advance(self:*OpIter) void {
+        fn advance(self: *OpIter) void {
             self.item_index += 1;
             self.item_fields >>= 1;
             self.array_fields >>= 1;
@@ -297,7 +401,7 @@ pub const Instruction = union(InstructionName) {
 
         pub fn next(self: *OpIter) ?*const Operand {
             if (self.item_fields > 0) {
-                while((self.item_fields & 0x1) != 0x1) {
+                while ((self.item_fields & 0x1) != 0x1) {
                     self.advance();
                 }
                 if (self.item_fields & 0x1 == 0x1 and self.array_fields & 0x1 == 0x1) {
@@ -325,15 +429,11 @@ pub const Instruction = union(InstructionName) {
         const if_mask = self.item_fields();
         const af_mask = self.array_fields();
 
-        return .{
-            .insn = self,
-            .item_fields = if_mask,
-            .array_fields = af_mask
-        };
+        return .{ .insn = self, .item_fields = if_mask, .array_fields = af_mask };
     }
 
     pub fn isAssignment(self: Instruction) bool {
-        return switch(self) {
+        return switch (self) {
             .putlabel => false,
             .jump => false,
             .jumpunless => false,
@@ -344,38 +444,38 @@ pub const Instruction = union(InstructionName) {
     }
 
     pub fn isJump(self: Instruction) bool {
-        return switch(self) {
+        return switch (self) {
             .jump, .jumpunless => true,
-            else => false
+            else => false,
         };
     }
 
     pub fn isLabel(self: Instruction) bool {
-        return switch(self) {
+        return switch (self) {
             .putlabel => true,
-            else => false
+            else => false,
         };
     }
 
     pub fn isReturn(self: Instruction) bool {
-        return switch(self) {
+        return switch (self) {
             .leave => true,
-            else => false
+            else => false,
         };
     }
 
     pub fn isCall(self: Instruction) bool {
-        return switch(self) {
+        return switch (self) {
             .call => true,
-            else => false
+            else => false,
         };
     }
 
     pub fn jumpTarget(self: Instruction) *Operand {
-        return switch(self) {
+        return switch (self) {
             .jump => |payload| payload.label,
             .jumpunless => |payload| payload.label,
-            else => unreachable
+            else => unreachable,
         };
     }
 
@@ -386,7 +486,7 @@ pub const Instruction = union(InstructionName) {
             .jumpunless => null,
             .setlocal => null,
             .leave => null,
-            inline else => |payload| payload.out
+            inline else => |payload| payload.out,
         };
     }
 
@@ -397,30 +497,35 @@ pub const Instruction = union(InstructionName) {
     pub fn setOut(self: *Instruction, opnd: *Operand) void {
         switch (self.*) {
             .putlabel, .jump, .jumpunless, .setlocal, .leave => unreachable,
-            inline else => |*payload| payload.out = opnd
+            inline else => |*payload| payload.out = opnd,
         }
     }
 
     pub fn deinit(self: Instruction) void {
-        switch(self) {
+        switch (self) {
             .call => |x| x.params.deinit(),
+            .phi => |x| x.params.deinit(),
             .define_method => |x| x.func.scope.value.deinit(),
-            else  => {}
+            else => {},
         }
     }
 };
 
 test "can iterate on ops" {
-    var out = Operand { .temp = .{ .id = 0, .name = 0 }, };
-    var in = Operand { .temp = .{ .id = 1, .name = 1 }, };
-    var insn = Instruction {
+    var out = Operand{
+        .temp = .{ .id = 0, .name = 0 },
+    };
+    var in = Operand{
+        .temp = .{ .id = 1, .name = 1 },
+    };
+    var insn = Instruction{
         .mov = .{
             .out = &out,
             .in = &in,
         },
     };
     var itr = insn.opIter();
-    var list = [_]usize { 0 };
+    var list = [_]usize{0};
     var i: u32 = 0;
     while (itr.next()) |op| {
         list[i] = op.temp.id;
@@ -431,11 +536,21 @@ test "can iterate on ops" {
 }
 
 test "can iterate on ops with list" {
-    var out = Operand { .temp = .{ .id = 0, .name = 0 }, };
-    var recv = Operand { .temp = .{ .id = 1, .name = 1 }, };
-    var name = Operand { .temp = .{ .id = 2, .name = 2 }, };
-    const param1 = Operand { .temp = .{ .id = 3, .name = 3 }, };
-    const param2 = Operand { .temp = .{ .id = 4, .name = 4 }, };
+    var out = Operand{
+        .temp = .{ .id = 0, .name = 0 },
+    };
+    var recv = Operand{
+        .temp = .{ .id = 1, .name = 1 },
+    };
+    var name = Operand{
+        .temp = .{ .id = 2, .name = 2 },
+    };
+    const param1 = Operand{
+        .temp = .{ .id = 3, .name = 3 },
+    };
+    const param2 = Operand{
+        .temp = .{ .id = 4, .name = 4 },
+    };
 
     var params = std.ArrayList(*Operand).init(std.testing.allocator);
     defer params.deinit();
@@ -443,7 +558,7 @@ test "can iterate on ops with list" {
     try params.append(@constCast(&param1));
     try params.append(@constCast(&param2));
 
-    var insn = Instruction {
+    var insn = Instruction{
         .call = .{
             .out = &out,
             .recv = &recv,
@@ -452,7 +567,7 @@ test "can iterate on ops with list" {
         },
     };
     var itr = insn.opIter();
-    var list = [_]usize { 0, 0, 0, 0 };
+    var list = [_]usize{ 0, 0, 0, 0 };
     var i: u32 = 0;
     while (itr.next()) |op| {
         list[i] = op.temp.id;

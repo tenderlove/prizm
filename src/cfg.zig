@@ -308,7 +308,7 @@ pub const CFG = struct {
     const Renamer = struct {
         counters: []u64,
         stacks: []std.ArrayList(*Operand),
-        seen: std.AutoHashMap(*Operand, usize),
+        seen: std.AutoHashMap(usize, usize),
 
         pub fn init(mem: std.mem.Allocator, global_count: usize) !Renamer {
             const counters: []u64 = try mem.alloc(u64, global_count);
@@ -322,7 +322,7 @@ pub const CFG = struct {
             return .{
                 .counters = counters,
                 .stacks = stacks,
-                .seen = std.AutoHashMap(*Operand, usize).init(mem),
+                .seen = std.AutoHashMap(usize, usize).init(mem),
             };
         }
 
@@ -335,13 +335,16 @@ pub const CFG = struct {
             mem.free(self.stacks);
         }
 
-        pub fn fillPhiParams(_: *Renamer, bb: *BasicBlock) void {
+        pub fn fillPhiParams(self: *Renamer, _: *BasicBlock, bb: *BasicBlock) !void {
             var iter = bb.instructionIter();
             while (iter.next()) |insn| {
                 switch(insn.data) {
                     .putlabel => { }, // Skip putlabel
-                    .phi => |p| {
-                        std.debug.print("need to fix {}\n", .{ p.out });
+                    .phi => |*p| {
+                        const v = insn.data.getOut().?.getVar();
+                        if (self.stackTop(v)) |op| {
+                            try p.params.append(op);
+                        }
                     },
                     // Quit after we've passed phi's
                     else => { return; }
@@ -351,23 +354,29 @@ pub const CFG = struct {
 
         pub fn rename(self: *Renamer, cfg: *CFG, bb: *BasicBlock) !void {
             var iter = bb.instructionIter();
+            var pushed = std.ArrayList(*Operand).init(cfg.mem);
+            defer pushed.deinit();
+
             while (iter.next()) |insn| {
                 switch(insn.data) {
                     .putlabel => { }, // Skip putlabel
                     .phi => |p| {
-                        std.debug.print("out {}\n", .{ p.out });
+                        try pushed.append(p.out);
+                        insn.data.setOut(try self.newName(p.out, cfg.scope));
                     },
                     else => {
+                        // Rename operands
                         var itr = insn.data.opIter();
                         while (itr.next()) |op| {
                             if (cfg.globals.?.isSet(op.getID())) {
-                                std.debug.print("rename operand\n", .{ });
+                                insn.data.replaceOpnd(op, self.stackTop(op).?);
                             }
                         }
 
+                        // Rename output variable
                         if (insn.data.getOut()) |out| {
                             if (cfg.globals.?.isSet(out.getID())) {
-                                std.debug.print("rename out {}\n", .{ out });
+                                try pushed.append(out);
                                 const newname = try self.newName(out, cfg.scope);
                                 insn.data.setOut(newname);
                             }
@@ -376,32 +385,61 @@ pub const CFG = struct {
                 }
             }
 
+            // For each successor, fill in the phi parameters
             if (bb.fall_through_dest) |succ| {
-                self.fillPhiParams(succ);
+                try self.fillPhiParams(bb, succ);
             }
 
             if (bb.jump_dest) |succ| {
-                self.fillPhiParams(succ);
+                try self.fillPhiParams(bb, succ);
             }
 
-            // For each successor, fill in the phi parameters
+            // For each successor in the dominator tree
+            //   rename the successor
+            const dt = cfg.dom_tree.?;
+            var bititer = dt.getRow(bb.name).setBitsIterator();
+            while (bititer.next()) |child_id| {
+                try self.rename(cfg, cfg.blocks[child_id]);
+            }
+
+            // Pop any pushed variables
+            while(pushed.popOrNull()) |op| {
+                self.stackPop(op);
+            }
+        }
+
+        fn stackPop(self: *Renamer, variable: *Operand) void {
+            if (self.seen.get(variable.getID())) |idx| {
+                _ = self.stacks[idx].pop();
+            } else {
+                unreachable;
+            }
+        }
+
+        fn stackTop(self: *Renamer, variable: *const Operand) ?*Operand {
+            if (self.seen.get(variable.getID())) |idx| {
+                const stack = self.stacks[idx];
+                return stack.items[stack.items.len - 1];
+            } else {
+                return null;
+            }
         }
 
         fn newName(self: *Renamer, variable: *Operand, scope: *Scope) !*Operand {
             const idx = try self.getStackIndex(variable);
             const i = self.counters[idx];
             self.counters[idx] = i + 1;
-            const new_opnd = try scope.newDefinition(variable, idx);
+            const new_opnd = try scope.newDefinition(variable, i);
             try self.stacks[idx].append(new_opnd);
             return new_opnd;
         }
 
-        fn getStackIndex(self: *Renamer, variable: *Operand) !usize {
-            if (self.seen.get(variable)) |idx| {
+        fn getStackIndex(self: *Renamer, variable: *const Operand) !usize {
+            if (self.seen.get(variable.getID())) |idx| {
                 return idx;
             } else {
                 const idx = self.seen.count();
-                try self.seen.put(variable, idx);
+                try self.seen.put(variable.getID(), idx);
                 return idx;
             }
         }
