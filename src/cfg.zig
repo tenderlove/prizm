@@ -236,7 +236,7 @@ pub const CFG = struct {
         return self.blocks.len;
     }
 
-    fn placePhis(self: *CFG) !void {
+    pub fn placePhis(self: *CFG) !void {
         const opnd_count = self.scope.operands.items.len;
         const globals = try BitMap.init(self.arena.allocator(), opnd_count);
 
@@ -889,16 +889,23 @@ const CFGBuilder = struct {
         // calculating the VarKilled and UEVars.  Haven't implemented the
         // peephole optimization step yet. Maybe we don't need it and can avoid
         // the extra loops here?
+
         try cfg.analyze();
-        try cfg.placePhis();
 
         return cfg;
     }
 };
 
-pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
+pub fn makeCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     var builder = CFGBuilder { .scope = scope };
     return try builder.build(allocator, scope);
+}
+
+pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
+    var builder = CFGBuilder { .scope = scope };
+    const cfg = try builder.build(allocator, scope);
+    try cfg.placePhis();
+    return cfg;
 }
 
 test "empty basic block" {

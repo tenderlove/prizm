@@ -31,6 +31,8 @@ pub fn main() !void {
 
     var cfgcmd = app.createCommand("cfg", "display CFG");
     try cfgcmd.addArg(Arg.positional("FILE", null, null));
+    try cfgcmd.addArg(Arg.booleanOption("phi", 'p', "Add Phi functions"));
+    try cfgcmd.addArg(Arg.booleanOption("rename", 'r', "Add Phi and rename"));
     try prizm.addSubcommand(cfgcmd);
 
     const matches = try app.parseProcess();
@@ -99,8 +101,15 @@ pub fn main() !void {
             defer machine.deinit(allocator);
 
             const scope = try compileFile(allocator, path, machine);
+            var opts = printer.CFGOptions {};
+            if (runcmd_matches.containsArg("phi")) {
+                opts.place_phi = true;
+            }
+            if (runcmd_matches.containsArg("rename")) {
+                opts.rename = true;
+            }
 
-            try printer.printCFG(allocator, scope, std.io.getStdOut().writer().any());
+            try printer.printCFG(allocator, scope, opts, std.io.getStdOut().writer().any());
 
             return;
         }

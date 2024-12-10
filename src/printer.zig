@@ -246,7 +246,7 @@ const CFGPrinter = struct {
 
     }
 
-    pub fn printCFG(alloc: std.mem.Allocator, scope: *cmp.Scope, out: *const std.io.AnyWriter) !void {
+    pub fn printCFG(alloc: std.mem.Allocator, scope: *cmp.Scope, opts: CFGOptions, out: *const std.io.AnyWriter) !void {
         var work = std.ArrayList(*cmp.Scope).init(alloc);
         defer work.deinit();
 
@@ -269,8 +269,13 @@ const CFGPrinter = struct {
             ctx.var_width = widestOutOp(work_scope);
             try out.print("subgraph cluster_{d} {{\n", .{ work_scope.name });
             try out.print("color=lightgrey;\n", .{});
-            const cfg = try CFG.buildCFG(alloc, work_scope);
-            try cfg.rename();
+            const cfg = try CFG.makeCFG(alloc, work_scope);
+            if (opts.place_phi or opts.rename) {
+                try cfg.placePhis();
+            }
+            if (opts.rename) {
+                try cfg.rename();
+            }
             var iter = try cfg.depthFirstIterator();
             defer iter.deinit();
             while (try iter.next()) |bb| {
@@ -320,6 +325,11 @@ pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: std.io.AnyWrite
     try IRPrinter.printIR(alloc, scope, &out);
 }
 
-pub fn printCFG(alloc: std.mem.Allocator, scope: *cmp.Scope, out: std.io.AnyWriter) !void {
-    try CFGPrinter.printCFG(alloc, scope, &out);
+pub const CFGOptions = struct {
+    place_phi: bool = false,
+    rename: bool = false,
+};
+
+pub fn printCFG(alloc: std.mem.Allocator, scope: *cmp.Scope, opts: CFGOptions, out: std.io.AnyWriter) !void {
+    try CFGPrinter.printCFG(alloc, scope, opts, &out);
 }
