@@ -195,6 +195,9 @@ const CFGPrinter = struct {
         // Print live out variables
         try printSet("LiveOut: ", scope, blk.liveout_set, ctx.out);
 
+        // Print live in variables
+        try printSet("LiveIn: ", scope, blk.livein_set, ctx.out);
+
         try printBlockSet("DOM: ", blk.dom.?, ctx.out);
         try printBlockSet("DF: ", blk.df.?, ctx.out);
         if (blk.idom) |idom| {

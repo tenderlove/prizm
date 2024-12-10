@@ -208,11 +208,24 @@ pub const CFG = struct {
         }
     }
 
+    fn fillLiveIn(self: *CFG) !void {
+        for (self.blocks) |blk| {
+            try blk.livein_set.replace(blk.upward_exposed_set);
+
+            const not_def = try blk.killed_set.not(self.mem);
+            defer not_def.deinit(self.mem);
+
+            try not_def.setIntersection(blk.liveout_set);
+            try blk.livein_set.setUnion(not_def);
+        }
+    }
+
     // Analyze the CFG.
     pub fn analyze(self: *CFG) !void {
         try self.fillVarSets();
         try self.fillDominators();
         try self.fillLiveOut();
+        try self.fillLiveIn();
     }
 
     pub fn blockList(self: *CFG) []const *BasicBlock {
@@ -282,16 +295,10 @@ pub const CFG = struct {
                 while (dfiter.next()) |dfi| {
                     const dfblock = all_blocks[dfi];
                     if (!phi_map.isSet(operand_num, dfblock.name)) {
-                        // If it's upward exposed, we definitely need a Phi
-                        if (dfblock.upward_exposed_set.isSet(operand_num)) {
+                        // If it's in the liveIn set, we need a phi
+                        if (dfblock.livein_set.isSet(operand_num)) {
                             try dfblock.addPhi(self.scope, opnd);
                             phi_map.set(operand_num, dfblock.name);
-                        } else {
-                            // If it's live out, then we need a phi
-                            if (dfblock.liveout_set.isSet(operand_num)) {
-                                try dfblock.addPhi(self.scope, opnd);
-                                phi_map.set(operand_num, dfblock.name);
-                            }
                         }
 
                         if (!block_seen.isSet(dfblock.name)) {
@@ -506,6 +513,7 @@ pub const BasicBlock = struct {
     killed_set: *BitMap,
     upward_exposed_set: *BitMap,
     liveout_set: *BitMap,
+    livein_set: *BitMap,
     dom: ?*BitMap = null,
     df: ?*BitMap = null,
     fall_through_dest: ?*BasicBlock = null,
@@ -523,6 +531,7 @@ pub const BasicBlock = struct {
             .killed_set = try BitMap.init(alloc, vars),
             .upward_exposed_set = try BitMap.init(alloc, vars),
             .liveout_set = try BitMap.init(alloc, vars),
+            .livein_set = try BitMap.init(alloc, vars),
             .predecessors = std.ArrayList(*BasicBlock).init(alloc),
         };
 
@@ -628,7 +637,7 @@ pub const BasicBlock = struct {
         var iter = self.instructionIter();
 
         while (iter.next()) |insn| {
-            // Full the UE set.
+            // Fill the UE set.
             var opiter = insn.data.opIter();
             while (opiter.next()) |op| {
                 // If the operand is a variable, and it _isn't_ part of the kill set,
@@ -1414,20 +1423,20 @@ test "rename" {
     try cfg.rename();
 
     // After renaming, all assignments should be unique
-    // const seen_opnd = try BitMap.init(allocator, cfg.opndCount());
-    // defer allocator.destroy(seen_opnd);
+    const seen_opnd = try BitMap.init(allocator, cfg.opndCount());
+    defer seen_opnd.deinit(allocator);
 
-    // for (cfg.blocks) |block| {
-    //     if (!block.reachable) continue;
+    for (cfg.blocks) |block| {
+        if (!block.reachable) continue;
 
-    //     var iter = block.instructionIter();
-    //     while (iter.next()) |insn| {
-    //         if (insn.data.outVar()) |v| {
-    //             try std.testing.expect(!seen_opnd.isSet(v.getID()));
-    //             try seen_opnd.setBit(v.getID());
-    //         }
-    //     }
-    // }
+        var iter = block.instructionIter();
+        while (iter.next()) |insn| {
+            if (insn.data.outVar()) |v| {
+                try std.testing.expect(!seen_opnd.isSet(v.getID()));
+                try seen_opnd.setBit(v.getID());
+            }
+        }
+    }
 }
 
 fn complexExampleCFG() []const u8 {

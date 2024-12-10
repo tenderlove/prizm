@@ -143,7 +143,7 @@ pub fn BitMapSized(comptime T: type) type {
             bm: Self,
 
             pub fn next(self: *SetBitsIterator) ?usize {
-                while (self.bit_index <= self.bm.getBits()) {
+                while (self.bit_index < self.bm.getBits()) {
                     var idx: ?usize = null;
 
                     if (self.current_plane & 0x1 == 0x1) {
