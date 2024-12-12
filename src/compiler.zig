@@ -128,6 +128,7 @@ pub const Scope = struct {
         return switch (insn) {
             .putlabel => unreachable,
             .jump => unreachable,
+            .jumpif => unreachable,
             .jumpunless => unreachable,
             .setlocal => unreachable,
             .leave => unreachable,
@@ -166,6 +167,10 @@ pub const Scope = struct {
 
     pub fn pushJump(self: *Scope, label: *ir.Operand) !void {
         try self.pushVoidInsn(.{ .jump = .{ .label = label } });
+    }
+
+    pub fn pushJumpIf(self: *Scope, in: *ir.Operand, label: *ir.Operand) !void {
+        try self.pushVoidInsn(.{ .jumpif = .{ .in = in, .label = label } });
     }
 
     pub fn pushJumpUnless(self: *Scope, in: *ir.Operand, label: *ir.Operand) !void {
@@ -256,12 +261,14 @@ pub const Compiler = struct {
     pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t, popped: bool) error{NotImplementedError, OutOfMemory}!?*ir.Operand {
         // std.debug.print("--> compiling type {s} {}\n", .{c.pm_node_type_to_str(node.*.type), popped});
         const opnd = switch (node.*.type) {
+            c.PM_BEGIN_NODE => try cc.compileBeginNode(@ptrCast(node), popped),
             c.PM_DEF_NODE => try cc.compileDefNode(@ptrCast(node), popped),
             c.PM_CALL_NODE => try cc.compileCallNode(@ptrCast(node), popped),
             c.PM_ELSE_NODE => try cc.compileElseNode(@ptrCast(node), popped),
             c.PM_IF_NODE => try cc.compileIfNode(@ptrCast(node), popped),
             c.PM_INTEGER_NODE => try cc.compileIntegerNode(@ptrCast(node), popped),
             c.PM_LOCAL_VARIABLE_READ_NODE => try cc.compileLocalVariableReadNode(@ptrCast(node), popped),
+            c.PM_LOCAL_VARIABLE_OPERATOR_WRITE_NODE => try cc.compileLocalVariableOperatorWriteNode(@ptrCast(node), popped),
             c.PM_LOCAL_VARIABLE_WRITE_NODE => try cc.compileLocalVariableWriteNode(@ptrCast(node), popped),
             c.PM_RETURN_NODE => try cc.compileReturnNode(@ptrCast(node), popped),
             c.PM_SCOPE_NODE => return error.NotImplementedError,
@@ -282,6 +289,18 @@ pub const Compiler = struct {
         } else {
             return try cc.pushGetself();
         }
+    }
+
+    fn compileBeginNode(cc: *Compiler, node: *const c.pm_begin_node_t, popped: bool) !?*ir.Operand {
+        if (node.*.ensure_clause) |_| {
+            return error.NotImplementedError;
+        }
+
+        if (node.*.rescue_clause) |_| {
+            return error.NotImplementedError;
+        }
+
+        return if (node.*.statements) |stmt| try cc.compileNode(@ptrCast(stmt), popped) else try cc.pushLoadNil();
     }
 
     fn compileDefNode(cc: *Compiler, node: *const c.pm_def_node_t, popped: bool) !*ir.Operand {
@@ -388,7 +407,7 @@ pub const Compiler = struct {
         const end_label = try cc.newLabel();
 
         // If predicate is false, jump to then label
-        const predicate = try cc.compilePredicate(node.*.predicate, then_label, false);
+        const predicate = try cc.compilePredicate(node.*.predicate, then_label, JumpType.jump_unless, false);
 
         switch (predicate) {
             .always_true => {
@@ -453,12 +472,20 @@ pub const Compiler = struct {
         unknown,
     };
 
-    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, then_label: *ir.Operand, popped: bool) !PredicateType {
+    const JumpType = enum {
+        jump_if,
+        jump_unless
+    };
+
+    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, label: *ir.Operand, jump_type: JumpType, popped: bool) !PredicateType {
         while (true) {
             switch (node.*.type) {
                 c.PM_CALL_NODE, c.PM_LOCAL_VARIABLE_READ_NODE => {
                     const val = try cc.compileNode(node, popped);
-                    try cc.pushJumpUnless(val.?, then_label);
+                    switch(jump_type) {
+                        .jump_if => try cc.pushJumpIf(val.?, label),
+                        .jump_unless => try cc.pushJumpUnless(val.?, label),
+                    }
                     return PredicateType.unknown;
                 },
                 c.PM_INTEGER_NODE, c.PM_TRUE_NODE => {
@@ -468,6 +495,7 @@ pub const Compiler = struct {
                     return PredicateType.always_false;
                 },
                 else => {
+                    std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
                     return error.NotImplementedError;
                 }
             }
@@ -493,6 +521,26 @@ pub const Compiler = struct {
             return paramreg;
         } else {
             return try cc.scope.?.getLocalName(lvar_name);
+        }
+    }
+
+    fn compileLocalVariableOperatorWriteNode(cc: *Compiler, node: *const c.pm_local_variable_operator_write_node_t, _: bool) !*ir.Operand {
+        const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        const recv = try cc.scope.?.getLocalName(lvar_name);
+
+        const op = cc.stringFromId(node.*.binary_operator);
+        var params = std.ArrayList(*ir.Operand).init(cc.allocator);
+        try params.append((try cc.compileNode(node.*.value, false)).?);
+
+        if (op.len == 1) {
+            switch (op[0]) {
+                '+' => _ = try cc.pushCall(recv, op, params),
+                else => return error.NotImplementedError
+            }
+            cc.scope.?.insns.last.?.data.setOut(recv);
+            return recv;
+        } else {
+            return error.NotImplementedError;
         }
     }
 
@@ -560,10 +608,20 @@ pub const Compiler = struct {
         const loop_entry = try cc.newLabel();
         try cc.pushLabel(loop_entry);
 
+        if ((node.*.base.flags & c.PM_LOOP_FLAGS_BEGIN_MODIFIER) == c.PM_LOOP_FLAGS_BEGIN_MODIFIER) {
+            const ret = if (node.*.statements) |stmt|
+                try cc.compileNode(@ptrCast(stmt), popped)
+                else
+                    try cc.pushLoadNil();
+
+            _ = try cc.compilePredicate(node.*.predicate, loop_entry, JumpType.jump_if, false);
+            return ret;
+        }
+
         const loop_end = try cc.newLabel();
 
         // If predicate is false, jump to then label
-        const predicate = try cc.compilePredicate(node.*.predicate, loop_end, false);
+        const predicate = try cc.compilePredicate(node.*.predicate, loop_end, JumpType.jump_unless, false);
 
         switch (predicate) {
             .always_false => { },
@@ -614,6 +672,10 @@ pub const Compiler = struct {
 
     fn pushJump(self: *Compiler, label: *ir.Operand) !void {
         try self.scope.?.pushJump(label);
+    }
+
+    fn pushJumpIf(self: *Compiler, in: *ir.Operand, label: *ir.Operand) !void {
+        return try self.scope.?.pushJumpIf(in, label);
     }
 
     fn pushJumpUnless(self: *Compiler, in: *ir.Operand, label: *ir.Operand) !void {
@@ -1035,4 +1097,21 @@ test "empty while loop" {
         ir.Instruction.loadnil,
         ir.Instruction.leave,
     }, method_scope.insns);
+}
+
+test "+=" {
+    const allocator = std.testing.allocator;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "x = 1; x += 1");
+    defer scope.deinit();
+
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.loadi,
+        ir.Instruction.call,
+        ir.Instruction.leave,
+    }, scope.insns);
 }

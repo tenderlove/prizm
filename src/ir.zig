@@ -171,6 +171,7 @@ pub const InstructionName = enum {
     getlocal,
     getself,
     jump,
+    jumpif,
     jumpunless,
     leave,
     loadi,
@@ -238,6 +239,15 @@ pub const Instruction = union(InstructionName) {
         }
     },
 
+    jumpif: struct {
+        const Self = @This();
+        in: *Operand,
+        label: *Operand,
+        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
+            if (self.in == old) self.in = new;
+        }
+    },
+
     jumpunless: struct {
         const Self = @This();
         in: *Operand,
@@ -250,8 +260,8 @@ pub const Instruction = union(InstructionName) {
     leave: struct {
         const Self = @This();
         in: *Operand,
-        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
-            unreachable;
+        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
+            if (self.in == old) self.in = new;
         }
     },
 
@@ -437,6 +447,7 @@ pub const Instruction = union(InstructionName) {
             .putlabel => false,
             .jump => false,
             .jumpunless => false,
+            .jumpif => false,
             .setlocal => false,
             .leave => false,
             else => true,
@@ -445,7 +456,7 @@ pub const Instruction = union(InstructionName) {
 
     pub fn isJump(self: Instruction) bool {
         return switch (self) {
-            .jump, .jumpunless => true,
+            .jump, .jumpunless, .jumpif => true,
             else => false,
         };
     }
@@ -474,6 +485,7 @@ pub const Instruction = union(InstructionName) {
     pub fn jumpTarget(self: Instruction) *Operand {
         return switch (self) {
             .jump => |payload| payload.label,
+            .jumpif => |payload| payload.label,
             .jumpunless => |payload| payload.label,
             else => unreachable,
         };
@@ -483,6 +495,7 @@ pub const Instruction = union(InstructionName) {
         return switch (self) {
             .putlabel => null,
             .jump => null,
+            .jumpif => null,
             .jumpunless => null,
             .setlocal => null,
             .leave => null,
@@ -496,7 +509,7 @@ pub const Instruction = union(InstructionName) {
 
     pub fn setOut(self: *Instruction, opnd: *Operand) void {
         switch (self.*) {
-            .putlabel, .jump, .jumpunless, .setlocal, .leave => unreachable,
+            .putlabel, .jump, .jumpif, .jumpunless, .setlocal, .leave => unreachable,
             inline else => |*payload| payload.out = opnd,
         }
     }
