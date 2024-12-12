@@ -522,8 +522,12 @@ pub const Compiler = struct {
     fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t, _: ?*Op, _: bool) !*ir.Operand {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const name = try cc.scope.?.getLocalName(lvar_name);
-        _ = try cc.compileNode(node.*.value, name, false);
-        return name;
+        const out = try cc.compileNode(node.*.value, name, false);
+        if (out != name) {
+            return try cc.pushMov(name, out.?);
+        } else {
+            return name;
+        }
     }
 
     fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t, _: ?*Op, _: bool) !*ir.Operand {
@@ -1089,6 +1093,22 @@ test "+=" {
         ir.Instruction.loadi,
         ir.Instruction.loadi,
         ir.Instruction.call,
+        ir.Instruction.leave,
+    }, scope.insns);
+}
+
+test "local variable write" {
+    const allocator = std.testing.allocator;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try compileScope(allocator, machine, "x = 1; a = x");
+    defer scope.deinit();
+
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.loadi,
+        ir.Instruction.mov,
         ir.Instruction.leave,
     }, scope.insns);
 }
