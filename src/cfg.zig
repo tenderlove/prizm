@@ -936,7 +936,7 @@ test "basic block two instruction" {
     const scope = try compiler.Scope.init(std.testing.allocator, 0, null);
     defer scope.deinit();
 
-    _ = try scope.pushLoadi(123);
+    _ = try scope.pushLoadi(null, 123);
     _ = try scope.pushGetself();
 
     const cfg = try buildCFG(std.testing.allocator, scope);
