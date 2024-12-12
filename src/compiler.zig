@@ -260,7 +260,7 @@ pub const Compiler = struct {
     }
 
     pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t, op: ?*Op, popped: bool) error{NotImplementedError, OutOfMemory}!?*ir.Operand {
-        // std.debug.print("--> compiling type {s} {}\n", .{c.pm_node_type_to_str(node.*.type), popped});
+        // std.debug.print("--> compiling type {s} {} op: {any}\n", .{c.pm_node_type_to_str(node.*.type), popped, op});
         const opnd = switch (node.*.type) {
             c.PM_BEGIN_NODE => try cc.compileBeginNode(@ptrCast(node), op, popped),
             c.PM_DEF_NODE => try cc.compileDefNode(@ptrCast(node), op, popped),
@@ -329,7 +329,6 @@ pub const Compiler = struct {
 
         // Get a pooled string that's owned by the VM
         const name = try cc.vm.getString(method_name);
-
         return try cc.pushCall(out, recv_op.?, name, params);
     }
 
@@ -420,15 +419,13 @@ pub const Compiler = struct {
                 return try cc.compileNode(@ptrCast(node.*.subsequent), out, popped);
             },
             .unknown => {
-                const retvar = if (out) |o| o else try cc.newTemp();
+                // If someone cares about the return value (in other words,
+                // we're _not_ popped), but the output variable is null,
+                // then create a new temp and assign it.
+                const ret = if (!popped and out == null) try cc.newTemp() else out;
 
                 // Compile the true branch and get a return value
-                _ = try cc.compileNode(@ptrCast(node.*.statements), retvar, popped);
-
-                // If we're "not popped" it means that someone is using the
-                // return value of the if statement.  We need to make sure
-                // both sides of the if statement assign the return value to
-                // the same variable so that phi placement works correctly.
+                _ = try cc.compileNode(@ptrCast(node.*.statements), ret, popped);
 
                 // Jump to the end of the if statement
                 try cc.pushJump(end_label);
@@ -436,11 +433,11 @@ pub const Compiler = struct {
                 // Push the then label so the false case has a place to jump
                 try cc.pushLabel(then_label);
 
-                _ = try cc.compileNode(@ptrCast(node.*.subsequent), retvar, popped);
+                _ = try cc.compileNode(@ptrCast(node.*.subsequent), ret, popped);
 
                 try cc.pushLabel(end_label);
 
-                return retvar;
+                return ret;
             }
         }
     }
@@ -523,18 +520,10 @@ pub const Compiler = struct {
     }
 
     fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t, _: ?*Op, _: bool) !*ir.Operand {
-        const inreg = try cc.compileNode(node.*.value, null, false);
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const name = try cc.scope.?.getLocalName(lvar_name);
-
-        if (inreg) |variable| {
-            if (variable.isTemp()) {
-                variable.* = name.*;
-                return variable;
-            } else {
-                return try cc.pushMov(name, variable);
-            }
-        } else { unreachable; }
+        _ = try cc.compileNode(node.*.value, name, false);
+        return name;
     }
 
     fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t, _: ?*Op, _: bool) !*ir.Operand {
@@ -576,6 +565,16 @@ pub const Compiler = struct {
                     _ = try cc.compileNode(item, null, true);
                 }
             }
+            // A popped, if statement is basically a void statement and will return
+            // a null operand.
+            //
+            // For example:
+            //   ```ruby
+            //   def foo(x); x ? 7 : 8; x; end
+            //   ```
+            // The if statement is popped and void, and each leg of the if
+            // statement has "statement" nodes for children.  That's why
+            // it's possible for compiling a statement to return a null value
             return reg;
         } else {
             return try cc.pushLoadNil(out);
