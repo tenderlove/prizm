@@ -54,21 +54,14 @@ const IRPrinter = struct {
         }
     }
 
-    fn printInsnName(insn: ir.Instruction, out: *const std.io.AnyWriter) !void {
-        comptime var maxlen: usize = 0;
-        comptime for (@typeInfo(ir.InstructionName).@"enum".fields) |field| {
-            const name_len = field.name.len;
-            if (name_len > maxlen) {
-                maxlen = name_len;
-            }
-        };
+    fn printInsnName(insn: ir.Instruction, maxlen: usize, out: *const std.io.AnyWriter) !void {
         try out.print("{[value]s: <[width]}", .{
             .value = @tagName(insn),
             .width = maxlen + 1,
         });
     }
 
-    fn printInsn(insn: ir.Instruction, digits: usize, out: *const std.io.AnyWriter) ! void {
+    fn printInsn(insn: ir.Instruction, digits: usize, insn_name_width: usize, out: *const std.io.AnyWriter) ! void {
         if (insn.outVar()) |n| {
             const width = outVarWidth(n);
             const padding = digits - width;
@@ -84,7 +77,7 @@ const IRPrinter = struct {
             });
         }
 
-        try printInsnName(insn, out);
+        try printInsnName(insn, insn_name_width, out);
         try printInsnParams(insn, out);
     }
 
@@ -104,6 +97,14 @@ const IRPrinter = struct {
             try out.print("= Scope: {d} ======================\n", .{work_scope.name});
 
             const digits = widestOutOp(work_scope) + 1;
+            var widest_insn: usize = 0;
+            var n = work_scope.insns.first;
+            while (n) |insn| {
+                if (@tagName(insn.data).len > widest_insn) {
+                    widest_insn = @tagName(insn.data).len;
+                }
+                n = insn.next;
+            }
 
             while (node) |unwrapped| {
                 switch (unwrapped.data) {
@@ -112,11 +113,11 @@ const IRPrinter = struct {
                     },
                     .define_method => |insn| {
                         try work.append(insn.func.scope.value);
-                        try printInsn(unwrapped.data, digits, out);
+                        try printInsn(unwrapped.data, digits, widest_insn + 1, out);
                         try out.print("\n", .{});
                     },
                     else => {
-                        try printInsn(unwrapped.data, digits, out);
+                        try printInsn(unwrapped.data, digits, widest_insn + 1, out);
                         try out.print("\n", .{});
                     },
                 }
@@ -135,6 +136,7 @@ const CFGPrinter = struct {
         work: *std.ArrayList(*cmp.Scope),
         scope: *cmp.Scope,
         var_width: usize,
+        insn_width: usize,
     };
 
     fn printSet(comptime name: []const u8, scope: *cmp.Scope, set: *bm.BitMap, out: *const std.io.AnyWriter) !void {
@@ -220,7 +222,7 @@ const CFGPrinter = struct {
             if (ir.InstructionName.define_method == @as(ir.InstructionName, insn.data)) {
                 try ctx.work.append(insn.data.define_method.func.scope.value);
             }
-            try IRPrinter.printInsn(insn.data, ctx.var_width, ctx.out);
+            try IRPrinter.printInsn(insn.data, ctx.var_width, ctx.insn_width, ctx.out);
             try ctx.out.print("\\l", .{});
         }
 
@@ -250,13 +252,6 @@ const CFGPrinter = struct {
         var work = std.ArrayList(*cmp.Scope).init(alloc);
         defer work.deinit();
 
-        var ctx = Context {
-            .out = out,
-            .work = &work,
-            .scope = scope,
-            .var_width = countDigits(scope.maxId()),
-        };
-
         try work.append(scope);
 
         try out.print("digraph {{\n", .{});
@@ -265,17 +260,44 @@ const CFGPrinter = struct {
         try out.print("  edge[fontname=\"Comic Code\"];\n", .{});
         try out.print("\n\n", .{});
         while (work.popOrNull()) |work_scope| {
-            ctx.scope = work_scope;
-            ctx.var_width = widestOutOp(work_scope);
+            const cfg = try CFG.makeCFG(alloc, work_scope);
+
+            var widest_insn: usize = 0;
+
+            for (cfg.blocks) |bb| {
+                if (!bb.reachable) continue;
+                var iter = bb.instructionIter();
+                while (iter.next()) |insn| {
+                    if (@tagName(insn.data).len > widest_insn) {
+                        widest_insn = @tagName(insn.data).len;
+                    }
+                }
+            }
+
+            const ctx = Context {
+                .out = out,
+                .work = &work,
+                .scope = work_scope,
+                .var_width = widestOutOp(work_scope),
+                .insn_width = widest_insn + 1,
+            };
+
             try out.print("subgraph cluster_{d} {{\n", .{ work_scope.name });
             try out.print("color=lightgrey;\n", .{});
-            const cfg = try CFG.makeCFG(alloc, work_scope);
-            if (opts.place_phi or opts.rename) {
+            if (opts.destruct_ssa) |_| {
                 try cfg.placePhis();
-            }
-            if (opts.rename) {
                 try cfg.rename();
+                try cfg.isolatePhi();
+            } else {
+                if (opts.place_phi or opts.rename) {
+                    try cfg.placePhis();
+                }
+                if (opts.rename) {
+                    try cfg.rename();
+                }
             }
+
+
             var iter = try cfg.depthFirstIterator();
             defer iter.deinit();
             while (try iter.next()) |bb| {
@@ -328,6 +350,7 @@ pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: std.io.AnyWrite
 pub const CFGOptions = struct {
     place_phi: bool = false,
     rename: bool = false,
+    destruct_ssa: ?u32 = null,
 };
 
 pub fn printCFG(alloc: std.mem.Allocator, scope: *cmp.Scope, opts: CFGOptions, out: std.io.AnyWriter) !void {
