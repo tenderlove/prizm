@@ -1,5 +1,7 @@
 const std = @import("std");
 const cmp = @import("compiler.zig");
+const cfg = @import("cfg.zig");
+const BasicBlock = cfg.BasicBlock;
 
 pub const InstructionList = std.DoublyLinkedList(Instruction);
 
@@ -11,6 +13,7 @@ pub const OperandType = enum {
     label,
     local,
     param,
+    prime,
     scope,
     string,
     temp,
@@ -40,6 +43,7 @@ pub const Operand = union(OperandType) {
     },
     local: struct { id: usize, name: usize, source_name: []const u8 },
     param: struct { id: usize, name: usize, source_name: []const u8 },
+    prime: struct { id: usize, orig: *Operand },
     scope: struct {
         id: usize,
         value: *cmp.Scope,
@@ -52,7 +56,7 @@ pub const Operand = union(OperandType) {
         id: usize,
         name: usize,
     },
-    redef: struct { id: usize, variant: usize, orig: *Operand },
+    redef: struct { id: usize, variant: usize, orig: *Operand, defblock: *BasicBlock },
 
     pub fn initImmediate(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
@@ -84,9 +88,15 @@ pub const Operand = union(OperandType) {
         return opnd;
     }
 
-    pub fn initRedef(alloc: std.mem.Allocator, id: usize, variant: usize, orig: *Operand) !*Operand {
+    pub fn initRedef(alloc: std.mem.Allocator, id: usize, variant: usize, orig: *Operand, defblock: *BasicBlock) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .redef = .{ .id = id, .variant = variant, .orig = orig } };
+        opnd.* = .{ .redef = .{ .id = id, .variant = variant, .orig = orig, .defblock = defblock } };
+        return opnd;
+    }
+
+    pub fn initPrime(alloc: std.mem.Allocator, id: usize, orig: *Operand) !*Operand {
+        const opnd = try alloc.create(Operand);
+        opnd.* = .{ .prime = .{ .id = id, .orig = orig } };
         return opnd;
     }
 
@@ -108,6 +118,7 @@ pub const Operand = union(OperandType) {
             .string => unreachable,
             .scope => unreachable,
             .redef => unreachable,
+            .prime => unreachable,
             inline else => |payload| payload.name,
         };
     }
@@ -116,6 +127,7 @@ pub const Operand = union(OperandType) {
         return switch (self.*) {
             .param, .temp, .local => self,
             .redef => |v| getVar(v.orig),
+            .prime => |v| getVar(v.orig),
             inline else => unreachable,
         };
     }
@@ -157,6 +169,7 @@ pub const Operand = union(OperandType) {
             .label => "L",
             .local => "l",
             .param => "p",
+            .prime => "P",
             .string => "s",
             .scope => "S",
             .temp => "t",
@@ -178,6 +191,7 @@ pub const InstructionName = enum {
     loadnil,
     mov,
     phi,
+    pmov,     // parallel move group
     putlabel,
     setlocal,
 };
@@ -301,6 +315,16 @@ pub const Instruction = union(InstructionName) {
                     self.params.items[i] = new;
                 }
             }
+        }
+    },
+
+    pmov: struct {
+        const Self = @This();
+        out: *Operand,
+        in: *Operand,
+        group: usize,
+        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
+            unreachable;
         }
     },
 
@@ -478,6 +502,20 @@ pub const Instruction = union(InstructionName) {
     pub fn isCall(self: Instruction) bool {
         return switch (self) {
             .call => true,
+            else => false,
+        };
+    }
+
+    pub fn isPhi(self: Instruction) bool {
+        return switch (self) {
+            .phi => true,
+            else => false,
+        };
+    }
+
+    pub fn isPMov(self: Instruction) bool {
+        return switch (self) {
+            .pmov => true,
             else => false,
         };
     }

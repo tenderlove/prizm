@@ -33,6 +33,7 @@ pub fn main() !void {
     try cfgcmd.addArg(Arg.positional("FILE", null, null));
     try cfgcmd.addArg(Arg.booleanOption("phi", 'p', "Add Phi functions"));
     try cfgcmd.addArg(Arg.booleanOption("rename", 'r', "Add Phi and rename"));
+    try cfgcmd.addArg(Arg.singleValueOption("destruct-ssa", null, "Destruct SSA"));
     try prizm.addSubcommand(cfgcmd);
 
     const matches = try app.parseProcess();
@@ -102,11 +103,18 @@ pub fn main() !void {
 
             const scope = try compileFile(allocator, path, machine);
             var opts = printer.CFGOptions {};
+
             if (runcmd_matches.containsArg("phi")) {
                 opts.place_phi = true;
             }
+
             if (runcmd_matches.containsArg("rename")) {
                 opts.rename = true;
+            }
+
+            if (runcmd_matches.getSingleValue("destruct-ssa")) |step| {
+                const integer = try std.fmt.parseInt(u32, step, 10);
+                opts.destruct_ssa = integer;
             }
 
             try printer.printCFG(allocator, scope, opts, std.io.getStdOut().writer().any());

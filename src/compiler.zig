@@ -2,6 +2,8 @@ const std = @import("std");
 const prism = @import("prism.zig");
 const vm = @import("vm.zig");
 const ir = @import("ir.zig");
+const cfg = @import("cfg.zig");
+const BasicBlock = cfg.BasicBlock;
 const Op = ir.Operand;
 
 const c = @cImport({
@@ -91,11 +93,17 @@ pub const Scope = struct {
         return try self.addOpnd(try ir.Operand.initString(self.arena.allocator(), self.nextOpndId(), name));
     }
 
-    pub fn newDefinition(self: *Scope, opnd: *ir.Operand, variant: usize) !*ir.Operand {
+    pub fn newDefinition(self: *Scope, opnd: *ir.Operand, bb: *BasicBlock, variant: usize) !*ir.Operand {
         const new = try ir.Operand.initRedef(self.arena.allocator(),
             self.nextOpndId(),
             variant,
-            opnd);
+            opnd,
+            bb);
+        return try self.addOpnd(new);
+    }
+
+    pub fn newPrime(self: *Scope, op: *Op) !*Op {
+        const new = try Op.initPrime(self.arena.allocator(), self.nextOpndId(), op);
         return try self.addOpnd(new);
     }
 
@@ -208,6 +216,13 @@ pub const Scope = struct {
         const new_node = try self.arena.allocator().create(ir.InstructionList.Node);
         const params = std.ArrayList(*ir.Operand).init(self.allocator);
         new_node.*.data = .{ .phi = .{ .out = op, .params = params } };
+        self.insns.insertAfter(node, new_node);
+        return new_node;
+    }
+
+    pub fn insertParallelCopy(self: *Scope, node: *ir.InstructionList.Node, dest: *Op, src: *Op, group: usize) !*ir.InstructionList.Node {
+        const new_node = try self.arena.allocator().create(ir.InstructionList.Node);
+        new_node.*.data = .{ .pmov = .{ .out = dest, .in = src, .group = group } };
         self.insns.insertAfter(node, new_node);
         return new_node;
     }

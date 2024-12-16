@@ -1,6 +1,7 @@
 const std = @import("std");
 const ir = @import("ir.zig");
 const Operand = ir.Operand;
+const Op = ir.Operand;
 const prism = @import("prism.zig");
 const vm = @import("vm.zig");
 const compiler = @import("compiler.zig");
@@ -369,7 +370,7 @@ pub const CFG = struct {
                     .putlabel => { }, // Skip putlabel
                     .phi => |p| {
                         try pushed.append(p.out);
-                        insn.data.setOut(try self.newName(p.out, cfg.scope));
+                        insn.data.setOut(try self.newName(p.out, bb, cfg.scope));
                     },
                     else => {
                         // Rename operands
@@ -384,7 +385,7 @@ pub const CFG = struct {
                         if (insn.data.getOut()) |out| {
                             if (cfg.globals.?.isSet(out.getID())) {
                                 try pushed.append(out);
-                                const newname = try self.newName(out, cfg.scope);
+                                const newname = try self.newName(out, bb, cfg.scope);
                                 insn.data.setOut(newname);
                             }
                         }
@@ -432,11 +433,11 @@ pub const CFG = struct {
             }
         }
 
-        fn newName(self: *Renamer, variable: *Operand, scope: *Scope) !*Operand {
+        fn newName(self: *Renamer, variable: *Operand, bb: *BasicBlock, scope: *Scope) !*Operand {
             const idx = try self.getStackIndex(variable);
             const i = self.counters[idx];
             self.counters[idx] = i + 1;
-            const new_opnd = try scope.newDefinition(variable, i);
+            const new_opnd = try scope.newDefinition(variable, bb, i);
             try self.stacks[idx].append(new_opnd);
             return new_opnd;
         }
@@ -457,6 +458,104 @@ pub const CFG = struct {
         var renamer = try Renamer.init(self.mem, global_count);
         defer renamer.deinit(self.mem);
         try renamer.rename(self, self.head);
+    }
+
+    const ParallelCopy = struct {
+        source_block: *BasicBlock,
+        dest_block: *BasicBlock,
+        prime: *Operand,
+        original: *Operand,
+
+        fn cmpDest(_: void, a: ParallelCopy, b: ParallelCopy) bool {
+            return a.dest_block.name < b.dest_block.name;
+        }
+    };
+
+    pub fn isolatePhi(self: *CFG) !void {
+        var copy_groups = std.ArrayList(ParallelCopy).init(self.mem);
+        defer copy_groups.deinit();
+
+        var group: usize = 0;
+
+        for (self.blocks) |bb| {
+            if (!bb.reachable) continue;
+
+            var predecessor_copies = std.ArrayList(ParallelCopy).init(self.mem);
+            defer predecessor_copies.deinit();
+
+            var isolation_copies = std.ArrayList(ParallelCopy).init(self.mem);
+            defer isolation_copies.deinit();
+
+            var iter: ?*ir.InstructionList.Node = bb.start;
+
+            while (iter) |insn| {
+                switch(insn.data) {
+                    .putlabel => { }, // Skip putlabel
+                    .phi => |p| {
+                        for (0..p.params.items.len) |param_i| {
+                            const param = p.params.items[param_i];
+                            const prime_in = try self.scope.newPrime(param);
+                            p.params.items[param_i] = prime_in;
+
+                            try predecessor_copies.append(.{
+                                .source_block = bb,
+                                .dest_block = self.blocks[param.redef.defblock.name],
+                                .prime = prime_in,
+                                .original = param
+                            });
+                        }
+
+                        const current_out = insn.data.getOut().?;
+                        const prime_out = try self.scope.newPrime(current_out);
+
+                        try isolation_copies.append(.{
+                            .source_block = bb,
+                            .dest_block = bb,
+                            .prime = prime_out,
+                            .original = current_out,
+                        });
+
+                        insn.data.setOut(prime_out);
+                    },
+                    // Quit after we've passed phi's
+                    else => { break; }
+                }
+
+                if (insn == bb.finish) break;
+
+                iter = insn.next;
+            }
+
+            if (isolation_copies.items.len > 0) {
+                // The insn we're on should be the one right after the last Phi.
+                std.debug.assert(iter != null);
+                std.debug.assert(!iter.?.data.isPhi());
+                std.debug.assert(iter.?.prev.?.data.isPhi());
+
+                var insn = iter.?.prev.?; // Should be the last Phi in the block
+
+                for (isolation_copies.items) |copy| {
+                    insn = try self.scope.insertParallelCopy(insn, copy.original, copy.prime, group);
+                }
+                group += 1;
+            }
+
+            if (predecessor_copies.items.len > 0) {
+                std.debug.print("copy len {d}\n", .{ predecessor_copies.items.len });
+                std.mem.sort(ParallelCopy, predecessor_copies.items, {}, ParallelCopy.cmpDest);
+                var current_block = predecessor_copies.items[0].dest_block.name;
+
+                for (predecessor_copies.items) |copy| {
+                    if (copy.dest_block.name != current_block) {
+                        current_block = copy.dest_block.name;
+                        group += 1;
+                    }
+                    try copy.dest_block.appendParallelCopy(self.scope, copy.prime, copy.original, group);
+                    std.debug.print("dest {d} group {d}\n", .{ copy.dest_block.name, group });
+                }
+                group += 1;
+            }
+        }
     }
 
     fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *usize) !void {
@@ -560,6 +659,21 @@ pub const BasicBlock = struct {
         const newlo = try ue.Union(lonk, alloc);
         return newlo;
     }
+
+    pub fn appendParallelCopy(self: *BasicBlock, scope: *Scope, dest: *Op, src: *Op, group: usize) !void {
+        var node = self.finish;
+
+        if (self.finish.data.isJump()) {
+            node = self.finish.prev.?;
+        }
+
+        const ret = try scope.insertParallelCopy(node, dest, src, group);
+
+        if (node == self.finish) {
+            self.finish = ret;
+        }
+    }
+
 
     // Update the LiveOut set.  If the set changes, returns true
     pub fn updateLiveOut(self: *BasicBlock, alloc: std.mem.Allocator) !bool {

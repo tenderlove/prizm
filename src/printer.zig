@@ -30,6 +30,11 @@ const IRPrinter = struct {
                 try printOpnd(r.orig, out);
                 try printIntAsSubscript(r.variant, out);
             },
+            .prime => |r| {
+                try printOpnd(r.orig.redef.orig, out);
+                try out.print("′", .{});
+                try printIntAsSubscript(r.orig.redef.variant, out);
+            },
             else => {
                 try out.print("{s}{d}", .{op.shortName(), op.number()});
             },
@@ -68,7 +73,13 @@ const IRPrinter = struct {
             try out.print("  ", .{});
             try printOpnd(n, out);
             try out.print("{[x]s: <[width]}", .{ .x = "", .width = padding });
-            try out.print("<- ", .{ });
+            if (insn.isPMov()) {
+                try out.print("<-", .{ });
+                try printIntAsSubscript(insn.pmov.group, out);
+                try out.print(" ", .{ });
+            } else {
+                try out.print("<- ", .{ });
+            }
         } else {
             try out.print("  ", .{});
             try out.print("{[value]s: <[width]}   ", .{
@@ -274,14 +285,6 @@ const CFGPrinter = struct {
                 }
             }
 
-            const ctx = Context {
-                .out = out,
-                .work = &work,
-                .scope = work_scope,
-                .var_width = widestOutOp(work_scope),
-                .insn_width = widest_insn + 1,
-            };
-
             try out.print("subgraph cluster_{d} {{\n", .{ work_scope.name });
             try out.print("color=lightgrey;\n", .{});
             if (opts.destruct_ssa) |_| {
@@ -297,6 +300,13 @@ const CFGPrinter = struct {
                 }
             }
 
+            const ctx = Context {
+                .out = out,
+                .work = &work,
+                .scope = work_scope,
+                .var_width = widestOutOp(work_scope),
+                .insn_width = widest_insn + 1,
+            };
 
             var iter = try cfg.depthFirstIterator();
             defer iter.deinit();
@@ -322,6 +332,7 @@ fn outVarWidth(opnd: *ir.Operand) usize {
     return switch (opnd.*) {
         inline .local, .param => |v| v.source_name.len,
         .redef => |v| outVarWidth(v.orig) + countDigits(v.variant),
+        .prime => |v| outVarWidth(v.orig) + 1,
         .string => |v| v.value.len,
         .scope => |v| countDigits(v.id) + 1,
         .immediate => |v| countDigits(v.value),
