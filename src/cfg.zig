@@ -20,6 +20,7 @@ pub const CFG = struct {
     blocks: []const *BasicBlock,
     dom_tree: ?*BitMatrix = null,
     globals: ?*BitMap = null,
+    insns_with_alias: ?[] *ir.Instruction = null,
     scope: *compiler.Scope,
 
     pub fn init(mem: std.mem.Allocator, arena: std.heap.ArenaAllocator, scope: *compiler.Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
@@ -316,6 +317,7 @@ pub const CFG = struct {
     const Renamer = struct {
         counters: []u64,
         stacks: []std.ArrayList(*Operand),
+        insns_with_alias: std.ArrayList(*ir.Instruction),
         seen: std.AutoHashMap(usize, usize),
 
         pub fn init(mem: std.mem.Allocator, global_count: usize) !Renamer {
@@ -330,6 +332,7 @@ pub const CFG = struct {
             return .{
                 .counters = counters,
                 .stacks = stacks,
+                .insns_with_alias = std.ArrayList(*ir.Instruction).init(mem),
                 .seen = std.AutoHashMap(usize, usize).init(mem),
             };
         }
@@ -340,11 +343,12 @@ pub const CFG = struct {
                 stack.deinit();
             }
             self.seen.deinit();
+            self.insns_with_alias.deinit();
             mem.free(self.stacks);
         }
 
-        pub fn fillPhiParams(self: *Renamer, _: *BasicBlock, bb: *BasicBlock) !void {
-            var iter = bb.instructionIter();
+        pub fn fillPhiParams(self: *Renamer, _: *BasicBlock, variable_source_bb: *BasicBlock) !void {
+            var iter = variable_source_bb.instructionIter();
             while (iter.next()) |insn| {
                 switch(insn.data) {
                     .putlabel => { }, // Skip putlabel
@@ -369,6 +373,7 @@ pub const CFG = struct {
                 switch(insn.data) {
                     .putlabel => { }, // Skip putlabel
                     .phi => |p| {
+                        try self.insns_with_alias.append(&insn.data);
                         try pushed.append(p.out);
                         insn.data.setOut(try self.newName(p.out, bb, cfg.scope));
                     },
@@ -387,6 +392,7 @@ pub const CFG = struct {
                                 try pushed.append(out);
                                 const newname = try self.newName(out, bb, cfg.scope);
                                 insn.data.setOut(newname);
+                                try self.insns_with_alias.append(&insn.data);
                             }
                         }
                     }
@@ -458,6 +464,7 @@ pub const CFG = struct {
         var renamer = try Renamer.init(self.mem, global_count);
         defer renamer.deinit(self.mem);
         try renamer.rename(self, self.head);
+        self.insns_with_alias = try renamer.insns_with_alias.toOwnedSlice();
     }
 
     const ParallelCopy = struct {
@@ -475,8 +482,15 @@ pub const CFG = struct {
         var copy_groups = std.ArrayList(ParallelCopy).init(self.mem);
         defer copy_groups.deinit();
 
+        // A list of instructions we need to replace prime variables
+        var primed_insns = std.ArrayList(*ir.Instruction).init(self.mem);
+        defer primed_insns.deinit();
+
         var group: usize = 0;
 
+        // Isolate Phi functions by placing parallel copies immediately
+        // after the Phi functions, and also in predecessor blocks.
+        // Figure 9.20, part C (part A and B are already done)
         for (self.blocks) |bb| {
             if (!bb.reachable) continue;
 
@@ -492,6 +506,7 @@ pub const CFG = struct {
                 switch(insn.data) {
                     .putlabel => { }, // Skip putlabel
                     .phi => |p| {
+                        try primed_insns.append(&insn.data);
                         for (0..p.params.items.len) |param_i| {
                             const param = p.params.items[param_i];
                             const prime_in = try self.scope.newPrime(param);
@@ -536,6 +551,7 @@ pub const CFG = struct {
 
                 for (isolation_copies.items) |copy| {
                     insn = try self.scope.insertParallelCopy(insn, copy.original, copy.prime, group);
+                    try primed_insns.append(&insn.data);
                 }
                 group += 1;
             }
@@ -550,10 +566,100 @@ pub const CFG = struct {
                         current_block = copy.dest_block.name;
                         group += 1;
                     }
-                    try copy.dest_block.appendParallelCopy(self.scope, copy.prime, copy.original, group);
+                    const insn = try copy.dest_block.appendParallelCopy(self.scope, copy.prime, copy.original, group);
+                    try primed_insns.append(&insn.data);
                     std.debug.print("dest {d} group {d}\n", .{ copy.dest_block.name, group });
                 }
                 group += 1;
+            }
+        }
+
+        // Now that Phi are isolated, we need to rename prime's to compiler
+        // generated temps and remove subscript variables.  Figure 9.20, part d
+
+        // We need to map primes to new temp variables, so lets allocate
+        // an array here then allocate new temps as we need them.
+        const prime_map: []*Op = try self.mem.alloc(*Op, self.scope.primes);
+        defer self.mem.free(prime_map);
+
+        for (0..self.scope.primes) |i| {
+            prime_map[i] = try self.scope.newTemp();
+        }
+
+        removePrimesAndAliases(primed_insns.items, prime_map);
+        removePrimesAndAliases(self.insns_with_alias.?, prime_map);
+
+        // Eliminate phi functions. Figure 9.20 part e
+        for (self.blocks) |bb| {
+            if (!bb.reachable) continue;
+
+            var phi_copies = std.ArrayList(ParallelCopy).init(self.mem);
+            defer phi_copies.deinit();
+
+            var iter: ?*ir.InstructionList.Node = bb.start;
+
+            while (iter) |insn| {
+                switch(insn.data) {
+                    .putlabel => { }, // Skip putlabel
+                    .phi => |p| {
+                        const dest = p.out;
+                        for (p.params.items) |src| {
+                            const def_block = src.getDefinitionBlock();
+                            try phi_copies.append(.{
+                                .source_block = bb,
+                                .dest_block = def_block,
+                                .prime = dest,
+                                .original = src
+                            });
+                        }
+                    },
+                    // Quit after we've passed phi's
+                    else => { break; }
+                }
+
+                if (insn == bb.finish) break;
+                iter = insn.next;
+            }
+
+            if (phi_copies.items.len > 0) {
+                std.mem.sort(ParallelCopy, phi_copies.items, {}, ParallelCopy.cmpDest);
+                var current_block = phi_copies.items[0].dest_block.name;
+
+                for (phi_copies.items) |copy| {
+                    if (copy.dest_block.name != current_block) {
+                        current_block = copy.dest_block.name;
+                        group += 1;
+                    }
+                    _ = try copy.dest_block.appendParallelCopy(self.scope, copy.prime, copy.original, group);
+                }
+                group += 1;
+            }
+        }
+    }
+
+    fn removePrimesAndAliases(insns: []*ir.Instruction, prime_map: []*Op) void {
+        for (insns) |insn| {
+            if (insn.getOut()) |out| {
+                if (out.isPrime()) {
+                    const tmp = prime_map[out.prime.prime_id];
+                    tmp.setDefinitionBlock(out.getDefinitionBlock());
+                    insn.setOut(tmp);
+                }
+
+                if (out.isRedef()) {
+                    insn.setOut(out.redef.orig);
+                }
+            }
+
+            var itr = insn.opIter();
+            while (itr.next()) |op| {
+                if (op.isPrime()) {
+                    insn.replaceOpnd(op, prime_map[op.prime.prime_id]);
+                }
+
+                if (op.isRedef()) {
+                    insn.replaceOpnd(op, op.redef.orig);
+                }
             }
         }
     }
@@ -596,6 +702,9 @@ pub const CFG = struct {
     }
 
     pub fn deinit(self: *CFG) void {
+        if (self.insns_with_alias) |list| {
+            self.mem.free(list);
+        }
         self.mem.free(self.blocks);
         self.arena.deinit();
         self.mem.destroy(self);
@@ -660,7 +769,7 @@ pub const BasicBlock = struct {
         return newlo;
     }
 
-    pub fn appendParallelCopy(self: *BasicBlock, scope: *Scope, dest: *Op, src: *Op, group: usize) !void {
+    pub fn appendParallelCopy(self: *BasicBlock, scope: *Scope, dest: *Op, src: *Op, group: usize) !*ir.InstructionList.Node {
         var node = self.finish;
 
         if (self.finish.data.isJump()) {
@@ -672,6 +781,8 @@ pub const BasicBlock = struct {
         if (node == self.finish) {
             self.finish = ret;
         }
+
+        return ret;
     }
 
 
@@ -772,6 +883,11 @@ pub const BasicBlock = struct {
     }
 
     fn addInstruction(self: *BasicBlock, insn: *ir.InstructionList.Node) void {
+        // Set the definition block for the outvar on the instruction.
+        // We need this for phi placement / renaming etc
+        if (insn.data.getOut()) |outvar| {
+            outvar.setDefinitionBlock(self);
+        }
         self.finish = insn;
     }
 

@@ -17,6 +17,7 @@ pub const Scope = struct {
     label_id: u32 = 0,
     param_size: usize = 0,
     local_storage: usize = 0,
+    primes: usize = 0,
     name: u32,
     insns: ir.InstructionList,
     parent: ?*Scope,
@@ -103,11 +104,12 @@ pub const Scope = struct {
     }
 
     pub fn newPrime(self: *Scope, op: *Op) !*Op {
-        const new = try Op.initPrime(self.arena.allocator(), self.nextOpndId(), op);
+        const new = try Op.initPrime(self.arena.allocator(), self.nextOpndId(), self.primes, op);
+        self.primes += 1;
         return try self.addOpnd(new);
     }
 
-    fn newTemp(self: *Scope) !*ir.Operand {
+    pub fn newTemp(self: *Scope) !*ir.Operand {
         const name = self.tmp_id;
         self.tmp_id += 1;
         return try self.addOpnd(try ir.Operand.initTemp(self.arena.allocator(), self.nextOpndId(), name));

@@ -6,10 +6,7 @@ const BasicBlock = cfg.BasicBlock;
 pub const InstructionList = std.DoublyLinkedList(Instruction);
 
 pub const OperandType = enum {
-    constant,
-    cvar,
     immediate,
-    ivar,
     label,
     local,
     param,
@@ -21,21 +18,9 @@ pub const OperandType = enum {
 };
 
 pub const Operand = union(OperandType) {
-    constant: struct {
-        id: usize,
-        name: usize,
-    },
-    cvar: struct {
-        id: usize,
-        name: usize,
-    },
     immediate: struct {
         id: usize,
         value: u64,
-    },
-    ivar: struct {
-        id: usize,
-        name: usize,
     },
     label: struct {
         id: usize,
@@ -43,7 +28,7 @@ pub const Operand = union(OperandType) {
     },
     local: struct { id: usize, name: usize, source_name: []const u8 },
     param: struct { id: usize, name: usize, source_name: []const u8 },
-    prime: struct { id: usize, orig: *Operand },
+    prime: struct { id: usize, prime_id: usize, orig: *Operand },
     scope: struct {
         id: usize,
         value: *cmp.Scope,
@@ -55,6 +40,7 @@ pub const Operand = union(OperandType) {
     temp: struct {
         id: usize,
         name: usize,
+        defblock: ?*BasicBlock = null,
     },
     redef: struct { id: usize, variant: usize, orig: *Operand, defblock: *BasicBlock },
 
@@ -94,9 +80,9 @@ pub const Operand = union(OperandType) {
         return opnd;
     }
 
-    pub fn initPrime(alloc: std.mem.Allocator, id: usize, orig: *Operand) !*Operand {
+    pub fn initPrime(alloc: std.mem.Allocator, id: usize, primeid: usize, orig: *Operand) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .prime = .{ .id = id, .orig = orig } };
+        opnd.* = .{ .prime = .{ .id = id, .prime_id = primeid, .orig = orig } };
         return opnd;
     }
 
@@ -160,12 +146,39 @@ pub const Operand = union(OperandType) {
         };
     }
 
+    pub fn isPrime(self: Operand) bool {
+        return switch (self) {
+            .prime => true,
+            inline else => false,
+        };
+    }
+
+    pub fn isRedef(self: Operand) bool {
+        return switch (self) {
+            .redef => true,
+            else => false,
+        };
+    }
+
+    pub fn getDefinitionBlock(self: Operand) *BasicBlock {
+        return switch(self) {
+            .redef => |v| v.defblock,
+            .temp => |v| v.defblock.?,
+            .prime => |v| v.orig.getDefinitionBlock(),
+            else => { unreachable; }
+        };
+    }
+
+    pub fn setDefinitionBlock(self: *Operand, block: *BasicBlock) void {
+        switch(self.*) {
+            inline .redef, .temp => |*v| v.defblock = block,
+            else => {}
+        }
+    }
+
     pub fn shortName(self: Operand) []const u8 {
         return switch (self) {
-            .constant => "k",
-            .cvar => "c",
             .immediate => "I",
-            .ivar => "i",
             .label => "L",
             .local => "l",
             .param => "p",
@@ -323,8 +336,8 @@ pub const Instruction = union(InstructionName) {
         out: *Operand,
         in: *Operand,
         group: usize,
-        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
-            unreachable;
+        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
+            if (self.in == old) self.in = new;
         }
     },
 
