@@ -290,7 +290,7 @@ const CFGPrinter = struct {
             if (opts.destruct_ssa) |_| {
                 try cfg.placePhis();
                 try cfg.rename();
-                try cfg.isolatePhi();
+                try cfg.destructSSA();
             } else {
                 if (opts.place_phi or opts.rename) {
                     try cfg.placePhis();
