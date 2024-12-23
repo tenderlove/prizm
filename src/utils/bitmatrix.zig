@@ -53,6 +53,18 @@ pub fn BitMatrixSize(comptime T: type) type {
             return bitmap.BitMapSized(T).initShared(self.columns, slice);
         }
 
+        pub fn popCount(self: Self) usize {
+            var count: usize = 0;
+            for (self.buffer) |slice| {
+                count += @popCount(slice);
+            }
+            return count;
+        }
+
+        pub fn clear(self: Self) void {
+            @memset(self.buffer, 0);
+        }
+
         pub fn deinit(self: *const Self, mem: std.mem.Allocator) void {
             mem.free(self.buffer);
             mem.destroy(self);
@@ -119,6 +131,22 @@ pub fn BitMatrix3DSize(comptime T: type) type {
 
 pub const BitMatrix = BitMatrixSize(u8);
 pub const BitMatrix3D = BitMatrix3DSize(u8);
+
+test "popcount" {
+    const alloc = std.testing.allocator;
+
+    const matrix = try BitMatrix.init(alloc, 8, 8);
+    defer matrix.deinit(alloc);
+
+    matrix.set(0, 0);
+    try std.testing.expectEqual(1, matrix.popCount());
+    matrix.set(0, 1);
+    try std.testing.expectEqual(2, matrix.popCount());
+    matrix.set(0, 1);
+    try std.testing.expectEqual(2, matrix.popCount());
+    matrix.clear();
+    try std.testing.expectEqual(0, matrix.popCount());
+}
 
 test "3d matrix init" {
     const alloc = std.testing.allocator;
