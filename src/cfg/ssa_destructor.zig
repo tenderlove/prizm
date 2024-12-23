@@ -4,6 +4,8 @@ const ir = @import("../ir.zig");
 const CFG = cfg_zig.CFG;
 const BasicBlock = cfg_zig.BasicBlock;
 const Op = ir.Operand;
+const vm = @import("../vm.zig");
+const cmp = @import("../compiler.zig");
 
 pub const SSADestructor = struct {
     mem: std.mem.Allocator,
@@ -182,11 +184,11 @@ pub const SSADestructor = struct {
         var primed_insns = std.ArrayList(*ir.Instruction).init(self.mem);
         defer primed_insns.deinit();
 
-        // Figure 9.20, part C
+        // // Figure 9.20, part C
         try self.isolatePhi(cfg, &primed_insns);
-        // Figure 9.20, part D
+        // // Figure 9.20, part D
         try self.renameAllVariables(cfg, &primed_insns);
-        // Figure 9.20, part E
+        // // Figure 9.20, part E
         try self.eliminatePhi(cfg);
     }
 
@@ -218,3 +220,54 @@ pub const SSADestructor = struct {
     }
 
 };
+
+test "destructor fixes all variables" {
+    const allocator = std.testing.allocator;
+
+    const code =
+\\ x = 10
+\\ y = 11
+\\ begin
+\\   t = x
+\\   x = y
+\\   y = t
+\\ end while i < 100
+\\ 
+\\ p x
+\\ p y
+;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try cmp.compileString(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try cfg_zig.buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    try cfg.placePhis();
+    try cfg.rename();
+    try cfg.destructSSA();
+
+    // After SSA destruction, we shouldn't have any prime operands, or renamed operands
+    for (cfg.blocks) |block| {
+        if (!block.reachable) continue;
+
+        var iter = block.startInsn();
+        while (iter) |insn| {
+            if (insn.data.outVar()) |ov| {
+                try std.testing.expect(ir.OperandType.redef != @as(ir.OperandType, ov.*));
+                try std.testing.expect(ir.OperandType.prime != @as(ir.OperandType, ov.*));
+            }
+
+            var opitr = insn.data.opIter();
+            while (opitr.next()) |op| {
+                try std.testing.expect(ir.OperandType.redef != @as(ir.OperandType, op.*));
+                try std.testing.expect(ir.OperandType.prime != @as(ir.OperandType, op.*));
+            }
+
+            iter = insn.next;
+        }
+    }
+}

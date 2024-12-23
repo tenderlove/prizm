@@ -216,7 +216,7 @@ pub const Scope = struct {
 
     pub fn insertPhi(self: *Scope, node: *ir.InstructionList.Node, op: *ir.Operand) !*ir.InstructionList.Node {
         const new_node = try self.arena.allocator().create(ir.InstructionList.Node);
-        const params = std.ArrayList(*ir.Operand).init(self.allocator);
+        const params = std.ArrayList(*ir.Operand).init(self.arena.allocator());
         new_node.*.data = .{ .phi = .{ .out = op, .params = params } };
         self.insns.insertAfter(node, new_node);
         return new_node;
@@ -333,7 +333,7 @@ pub const Compiler = struct {
         const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const recv_op = try cc.compileRecv(node.*.receiver, null, false);
 
-        var params = std.ArrayList(*Op).init(cc.allocator);
+        var params = std.ArrayList(*Op).init(cc.scope.?.arena.allocator());
 
         if (node.*.arguments) |argnode| {
             const arg_size = argnode.*.arguments.size;
@@ -721,7 +721,7 @@ pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: *prism.Prism) !*Com
     return cc;
 }
 
-fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*Scope {
+pub fn compileString(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*Scope {
     const parser = try prism.Prism.newParserCtx(allocator);
     defer parser.deinit();
     parser.init(code, code.len, null);
@@ -741,7 +741,7 @@ test "compile math" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "5 + 7");
+    const scope = try compileString(allocator, machine, "5 + 7");
     defer scope.deinit();
 
     try std.testing.expectEqual(null, scope.parent);
@@ -761,7 +761,7 @@ test "compile local set" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "foo = 5; foo");
+    const scope = try compileString(allocator, machine, "foo = 5; foo");
     defer scope.deinit();
 
     try expectInstructionList(&[_] ir.InstructionName {
@@ -777,7 +777,7 @@ test "compile local get w/ return" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "foo = 5; return foo");
+    const scope = try compileString(allocator, machine, "foo = 5; return foo");
     defer scope.deinit();
 
     try expectInstructionList(&[_] ir.InstructionName {
@@ -806,7 +806,7 @@ test "compile local get w/ nil return" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "foo = 5; return");
+    const scope = try compileString(allocator, machine, "foo = 5; return");
     defer scope.deinit();
 
     try expectInstructionList(&[_] ir.InstructionName {
@@ -831,7 +831,7 @@ test "compile ternary statement" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "5 < 7 ? 123 : 456");
+    const scope = try compileString(allocator, machine, "5 < 7 ? 123 : 456");
     defer scope.deinit();
 
     try expectInstructionList(&[_] ir.InstructionName {
@@ -854,7 +854,7 @@ test "compile def method" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "def foo; end");
+    const scope = try compileString(allocator, machine, "def foo; end");
     defer scope.deinit();
 
     const insn = scope.insns.first;
@@ -874,7 +874,7 @@ test "compile call no params" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "foo");
+    const scope = try compileString(allocator, machine, "foo");
     defer scope.deinit();
 
     try expectInstructionList(&[_] ir.InstructionName {
@@ -891,7 +891,7 @@ test "compile def method 2 params" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "def foo(a, b); end");
+    const scope = try compileString(allocator, machine, "def foo(a, b); end");
     defer scope.deinit();
 
     const insn = scope.insns.first;
@@ -911,7 +911,7 @@ test "compile def method 2 params 3 locals" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "def foo(a, b); c = 123; d = a; e = d + b; end");
+    const scope = try compileString(allocator, machine, "def foo(a, b); c = 123; d = a; e = d + b; end");
     defer scope.deinit();
 
     const insn = scope.insns.first;
@@ -929,7 +929,7 @@ test "method returns param" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "def foo(a); a; end");
+    const scope = try compileString(allocator, machine, "def foo(a); a; end");
     defer scope.deinit();
 
     const insn = scope.insns.first;
@@ -954,7 +954,7 @@ test "always true ternary" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "6 ? 7 : 8");
+    const scope = try compileString(allocator, machine, "6 ? 7 : 8");
     defer scope.deinit();
 
     try std.testing.expectEqual(2, scope.insns.len);
@@ -973,7 +973,7 @@ test "always false ternary" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "false ? 7 : 8");
+    const scope = try compileString(allocator, machine, "false ? 7 : 8");
     defer scope.deinit();
 
     try std.testing.expectEqual(2, scope.insns.len);
@@ -992,7 +992,7 @@ test "always nil ternary" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "nil ? 7 : 8");
+    const scope = try compileString(allocator, machine, "nil ? 7 : 8");
     defer scope.deinit();
 
     try std.testing.expectEqual(2, scope.insns.len);
@@ -1011,7 +1011,7 @@ test "local ternary" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "def foo(x); x ? 7 : 8; end");
+    const scope = try compileString(allocator, machine, "def foo(x); x ? 7 : 8; end");
     defer scope.deinit();
 
     const method_scope: *Scope = scope.insns.first.?.data.define_method.func.scope.value;
@@ -1038,7 +1038,7 @@ test "popped if body" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "def foo(x); x ? 7 : 8; x; end");
+    const scope = try compileString(allocator, machine, "def foo(x); x ? 7 : 8; x; end");
     defer scope.deinit();
 
     const method_scope: *Scope = scope.insns.first.?.data.define_method.func.scope.value;
@@ -1059,7 +1059,7 @@ test "while loop" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "def foo(x); while x; puts x; end; end");
+    const scope = try compileString(allocator, machine, "def foo(x); while x; puts x; end; end");
     defer scope.deinit();
 
     const method_scope: *Scope = scope.insns.first.?.data.define_method.func.scope.value;
@@ -1083,7 +1083,7 @@ test "empty while loop" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "def foo; while true; end; end");
+    const scope = try compileString(allocator, machine, "def foo; while true; end; end");
     defer scope.deinit();
 
     const method_scope: *Scope = scope.insns.first.?.data.define_method.func.scope.value;
@@ -1103,7 +1103,7 @@ test "+=" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "x = 1; x += 1");
+    const scope = try compileString(allocator, machine, "x = 1; x += 1");
     defer scope.deinit();
 
     try expectInstructionList(&[_] ir.InstructionName {
@@ -1120,7 +1120,7 @@ test "local variable write" {
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "x = 1; a = x");
+    const scope = try compileString(allocator, machine, "x = 1; a = x");
     defer scope.deinit();
 
     try expectInstructionList(&[_] ir.InstructionName {

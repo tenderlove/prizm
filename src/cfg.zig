@@ -379,11 +379,13 @@ pub const CFG = struct {
                         insn.data.setOut(try self.newName(p.out, bb, cfg.scope));
                     },
                     else => {
+                        var should_append = false;
                         // Rename operands
                         var itr = insn.data.opIter();
                         while (itr.next()) |op| {
                             if (cfg.globals.?.isSet(op.getID())) {
                                 insn.data.replaceOpnd(op, self.stackTop(op).?);
+                                should_append = true;
                             }
                         }
 
@@ -393,8 +395,11 @@ pub const CFG = struct {
                                 try pushed.append(out);
                                 const newname = try self.newName(out, bb, cfg.scope);
                                 insn.data.setOut(newname);
-                                try self.insns_with_alias.append(&insn.data);
+                                should_append = true;
                             }
+                        }
+                        if (should_append) {
+                            try self.insns_with_alias.append(&insn.data);
                         }
                     }
                 }
@@ -561,6 +566,10 @@ pub const BasicBlock = struct {
 
     pub fn upwardExposedCount(self: *BasicBlock) usize {
         return self.upward_exposed_set.popCount();
+    }
+
+    pub fn startInsn(self: *BasicBlock) ?*ir.InstructionList.Node {
+        return self.start;
     }
 
     fn childLo(_: *BasicBlock, child: *BasicBlock, alloc: std.mem.Allocator) !*BitMap {
