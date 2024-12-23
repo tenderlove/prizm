@@ -26,9 +26,6 @@ pub const SSADestructor = struct {
     // Phi functions, and also in predecessor blocks.  Figure 9.20, part C
     // (part A and B are already done)
     fn isolatePhi(self: *SSADestructor, cfg: *CFG, primed_insns: *std.ArrayList(*ir.Instruction)) !void {
-        var copy_groups = std.ArrayList(ParallelCopy).init(self.mem);
-        defer copy_groups.deinit();
-
         for (cfg.blocks) |bb| {
             if (!bb.reachable) continue;
 
