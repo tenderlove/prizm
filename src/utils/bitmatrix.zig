@@ -47,10 +47,76 @@ pub fn BitMatrixSize(comptime T: type) type {
             return (self.buffer[row + column] & bit) == bit;
         }
 
-        pub fn getRow(self: Self, x: usize) bitmap.BitMapSized(T) {
+        // Get all of the Y values for a given X
+        pub fn getColumn(self: Self, x: usize) bitmap.BitMapSized(T) {
             const row = x * self.row_len;
             const slice = self.buffer[row..(row + self.row_len)];
             return bitmap.BitMapSized(T).initShared(self.columns, slice);
+        }
+
+        const Iterator = struct {
+            y_value_plane: T,
+            matrix: Self,
+            plane_index: usize = 0,
+            x: usize = 0,
+            y: usize = 0,
+
+            const Pair = struct { x: usize, y: usize };
+
+            pub fn next(self: *Iterator) ?Pair{
+                const atom_bits = @typeInfo(T).int.bits;
+
+                if (self.plane_index >= self.matrix.buffer.len) {
+                    return null;
+                }
+
+                while (self.y_value_plane == 0) {
+                    // Either increment y by the number of atom bits, or
+                    // round up to the bit size.
+                    if (@mod(self.y, atom_bits) == 0) {
+                        self.y += atom_bits;
+                    } else {
+                        self.y = (self.y + (atom_bits - 1)) & ~@as(usize, (atom_bits - 1));
+                    }
+
+                    if (self.y == self.matrix.columns) {
+                        self.y = 0;
+                        self.x += 1;
+                    }
+
+                    if (self.x == self.matrix.rows) return null;
+
+                    self.plane_index += 1;
+                    self.y_value_plane = self.matrix.buffer[self.plane_index];
+                }
+
+                while (self.y_value_plane & 0x1 == 0) {
+                    self.y_value_plane >>= 1;
+                    self.y += 1;
+                }
+
+                const v = Pair { .x = self.x, .y = self.y };
+
+                self.y += 1;
+
+                if (@mod(self.y, atom_bits) == 0) {
+                    self.plane_index += 1;
+                    if (self.plane_index < self.matrix.buffer.len) {
+                        self.y_value_plane = self.matrix.buffer[self.plane_index];
+                    }
+                } else {
+                    self.y_value_plane >>= 1;
+                }
+
+                return v;
+            }
+        };
+
+        pub fn iter(self: Self) Iterator {
+            return .{
+                .y_value_plane = self.buffer[0],
+                .matrix = self
+            };
         }
 
         pub fn popCount(self: Self) usize {
@@ -249,12 +315,12 @@ test "get row as bitmap" {
     matrix.set(1, 4);
     matrix.set(1, 5);
 
-    const bm = matrix.getRow(0);
+    const bm = matrix.getColumn(0);
     try std.testing.expectEqual(2048, bm.getBits());
     try std.testing.expect(bm.isSet(0));
     try std.testing.expect(bm.isSet(1));
 
-    const bm2 = matrix.getRow(1);
+    const bm2 = matrix.getColumn(1);
     try std.testing.expectEqual(2048, bm2.getBits());
     try std.testing.expect(bm2.isSet(4));
     try std.testing.expect(bm2.isSet(5));
@@ -272,4 +338,67 @@ test "wtf" {
 
     matrix.set(0, 0);
     matrix.set(2, 0);
+}
+
+test "bit iterator empty" {
+    const alloc = std.testing.allocator;
+
+    const matrix = try BitMatrix.init(alloc, 8, 8);
+    defer matrix.deinit(alloc);
+
+    //matrix.set(0, 0);
+    //matrix.set(2, 0);
+
+    var itr = matrix.iter();
+    while (itr.next()) |_| {
+        try std.testing.expect(false);
+    }
+}
+
+test "bit iterator one" {
+    const alloc = std.testing.allocator;
+
+    const matrix = try BitMatrix.init(alloc, 16, 16);
+    defer matrix.deinit(alloc);
+
+    matrix.set(0, 0);
+
+    var itr = matrix.iter();
+    var points: usize = 0;
+    while (itr.next()) |point| {
+        try std.testing.expectEqual(0, point.x);
+        try std.testing.expectEqual(0, point.y);
+        points += 1;
+    }
+    try std.testing.expectEqual(1, points);
+}
+
+test "bit iterator many planes" {
+    const alloc = std.testing.allocator;
+
+    const matrix = try BitMatrix.init(alloc, 16, 16);
+    defer matrix.deinit(alloc);
+
+    matrix.set(0, 0);
+    matrix.set(1, 8);
+    matrix.set(2, 2);
+    matrix.set(3, 10);
+    matrix.set(15, 15);
+
+    const list = [_][2]u16{
+        [_]u16{0, 0},
+        [_]u16{1, 8},
+        [_]u16{2, 2},
+        [_]u16{3, 10},
+        [_]u16{15, 15},
+    };
+
+    var itr = matrix.iter();
+    var points: usize = 0;
+    while (itr.next()) |point| {
+        try std.testing.expectEqual(list[points][0], point.x);
+        try std.testing.expectEqual(list[points][1], point.y);
+        points += 1;
+    }
+    try std.testing.expectEqual(list.len, points);
 }
