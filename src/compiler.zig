@@ -74,6 +74,14 @@ pub const Scope = struct {
         return self.operands.items.len;
     }
 
+    pub fn opndCount(self: Scope) usize {
+        return self.operands.items.len;
+    }
+
+    pub fn getOperandById(self: Scope, id: usize) *ir.Operand {
+        return self.operands.items[id];
+    }
+
     fn newLocal(self: *Scope, source_name: []const u8) !*ir.Operand {
         const name = self.local_id;
         self.local_id += 1;

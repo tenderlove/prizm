@@ -68,7 +68,7 @@ pub fn main() !void {
             defer cc.deinit(allocator);
 
             const scope = try cc.compile(&scope_node);
-            const cfg = try CFG.buildCFG(allocator, scope);
+            const cfg = try CFG.makeCFG(allocator, scope);
 
             _ = cfg;
 

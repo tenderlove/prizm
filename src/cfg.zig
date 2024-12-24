@@ -39,7 +39,7 @@ pub const CFG = struct {
     }
 
     pub fn opndCount(self: @This()) usize {
-        return self.scope.operands.items.len;
+        return self.scope.opndCount();
     }
 
     const DepthFirstIterator = struct {
@@ -240,7 +240,7 @@ pub const CFG = struct {
     }
 
     pub fn placePhis(self: *CFG) !void {
-        const opnd_count = self.scope.operands.items.len;
+        const opnd_count = self.opndCount();
         const globals = try BitMap.init(self.arena.allocator(), opnd_count);
 
         const all_blocks = self.blockList();
@@ -283,7 +283,7 @@ pub const CFG = struct {
             // Get all blocks that define this variable
             const blocks = block_set.getRow(operand_num);
 
-            const opnd = self.scope.operands.items[operand_num];
+            const opnd = self.scope.getOperandById(operand_num);
 
             // Add each block to our worklist
             var biter = blocks.setBitsIterator();
@@ -804,7 +804,7 @@ pub const BasicBlock = struct {
 
         var biti = uninit.setBitsIterator();
         while (biti.next()) |opnd_id| {
-            const op = scope.operands.items[opnd_id];
+            const op = scope.getOperandById(opnd_id);
             // Remove parameters from the uninitialized set. They should
             // be initialized by the caller
             if (op.isParam()) {
@@ -949,7 +949,7 @@ pub fn makeCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     return try builder.build(allocator, scope);
 }
 
-pub fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
+fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
     var builder = CFGBuilder { .scope = scope };
     const cfg = try builder.build(allocator, scope);
     try cfg.placePhis();

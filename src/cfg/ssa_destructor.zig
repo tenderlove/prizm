@@ -6,6 +6,8 @@ const BasicBlock = cfg_zig.BasicBlock;
 const Op = ir.Operand;
 const vm = @import("../vm.zig");
 const cmp = @import("../compiler.zig");
+const bitmatrix = @import("../utils/bitmatrix.zig");
+const BitMatrix = bitmatrix.BitMatrix;
 
 pub const SSADestructor = struct {
     mem: std.mem.Allocator,
@@ -25,7 +27,7 @@ pub const SSADestructor = struct {
     // Isolate Phi functions by placing parallel copies immediately after the
     // Phi functions, and also in predecessor blocks.  Figure 9.20, part C
     // (part A and B are already done)
-    fn isolatePhi(self: *SSADestructor, cfg: *CFG, primed_insns: *std.ArrayList(*ir.Instruction)) !void {
+    fn isolatePhi(self: *SSADestructor, cfg: *CFG, primed_insns: *std.ArrayList(*ir.Instruction), copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
         for (cfg.blocks) |bb| {
             if (!bb.reachable) continue;
 
@@ -86,13 +88,13 @@ pub const SSADestructor = struct {
 
                 for (isolation_copies.items) |copy| {
                     insn = try cfg.scope.insertParallelCopy(insn, copy.original, copy.prime, self.group);
+                    try copy_groups.append(insn);
                     try primed_insns.append(&insn.data);
                 }
                 self.group += 1;
             }
 
             if (predecessor_copies.items.len > 0) {
-                std.debug.print("copy len {d}\n", .{ predecessor_copies.items.len });
                 std.mem.sort(ParallelCopy, predecessor_copies.items, {}, ParallelCopy.cmpDest);
                 var current_block = predecessor_copies.items[0].dest_block.name;
 
@@ -103,7 +105,7 @@ pub const SSADestructor = struct {
                     }
                     const insn = try copy.dest_block.appendParallelCopy(cfg.scope, copy.prime, copy.original, self.group);
                     try primed_insns.append(&insn.data);
-                    std.debug.print("dest {d} group {d}\n", .{ copy.dest_block.name, self.group });
+                    try copy_groups.append(insn);
                 }
                 self.group += 1;
             }
@@ -127,7 +129,7 @@ pub const SSADestructor = struct {
     }
 
     // Eliminate phi functions. Figure 9.20 part e
-    fn eliminatePhi(self: *SSADestructor, cfg: *CFG) !void {
+    fn eliminatePhi(self: *SSADestructor, cfg: *CFG, copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
         for (cfg.blocks) |bb| {
             if (!bb.reachable) continue;
 
@@ -169,10 +171,30 @@ pub const SSADestructor = struct {
                         current_block = copy.dest_block.name;
                         self.group += 1;
                     }
-                    _ = try copy.dest_block.appendParallelCopy(cfg.scope, copy.prime, copy.original, self.group);
+                    const pcopy = try copy.dest_block.appendParallelCopy(cfg.scope, copy.prime, copy.original, self.group);
+                    try copy_groups.append(pcopy);
                 }
                 self.group += 1;
             }
+        }
+    }
+
+    fn serializeCopyGroups(self: *SSADestructor, cfg: *CFG, copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
+        const bits = cfg.opndCount();
+        const map = try BitMatrix.init(self.mem, bits, bits);
+        defer map.deinit(self.mem);
+
+        var current_group: usize = 0;
+        for (copy_groups.items) |pcopy| {
+            const src = pcopy.data.pmov.in;
+            const dst = pcopy.data.pmov.out;
+            map.set(src.getID(), dst.getID());
+            if (pcopy.data.pmov.group != current_group) {
+                map.clear();
+                current_group = pcopy.data.pmov.group;
+                std.debug.print("reset\n", .{});
+            }
+            std.debug.print("group: {d}\n", .{ pcopy.data.pmov.group });
         }
     }
 
@@ -181,12 +203,17 @@ pub const SSADestructor = struct {
         var primed_insns = std.ArrayList(*ir.Instruction).init(self.mem);
         defer primed_insns.deinit();
 
-        // // Figure 9.20, part C
-        try self.isolatePhi(cfg, &primed_insns);
-        // // Figure 9.20, part D
+        var copy_groups = std.ArrayList(*ir.InstructionList.Node).init(self.mem);
+        defer copy_groups.deinit();
+
+        // Figure 9.20, part C
+        try self.isolatePhi(cfg, &primed_insns, &copy_groups);
+        // Figure 9.20, part D
         try self.renameAllVariables(cfg, &primed_insns);
-        // // Figure 9.20, part E
-        try self.eliminatePhi(cfg);
+        // Figure 9.20, part E
+        try self.eliminatePhi(cfg, &copy_groups);
+        // Figure 9.20, part F & G
+        try self.serializeCopyGroups(cfg, &copy_groups);
     }
 
     fn removePrimesAndAliases(insns: []*ir.Instruction, prime_map: []*Op) void {
@@ -240,7 +267,7 @@ test "destructor fixes all variables" {
     const scope = try cmp.compileString(allocator, machine, code);
     defer scope.deinit();
 
-    const cfg = try cfg_zig.buildCFG(allocator, scope);
+    const cfg = try cfg_zig.makeCFG(allocator, scope);
     defer cfg.deinit();
 
     try cfg.placePhis();
