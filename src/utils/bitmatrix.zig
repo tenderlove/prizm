@@ -79,7 +79,7 @@ pub fn BitMatrixSize(comptime T: type) type {
                         self.y = (self.y + (atom_bits - 1)) & ~@as(usize, (atom_bits - 1));
                     }
 
-                    if (self.y == self.matrix.columns) {
+                    if (self.y / atom_bits == self.matrix.row_len) {
                         self.y = 0;
                         self.x += 1;
                     }
@@ -383,6 +383,7 @@ test "bit iterator many planes" {
     matrix.set(1, 8);
     matrix.set(2, 2);
     matrix.set(3, 10);
+    matrix.set(4, 7);
     matrix.set(15, 15);
 
     const list = [_][2]u16{
@@ -390,6 +391,7 @@ test "bit iterator many planes" {
         [_]u16{1, 8},
         [_]u16{2, 2},
         [_]u16{3, 10},
+        [_]u16{4, 7},
         [_]u16{15, 15},
     };
 
@@ -401,4 +403,19 @@ test "bit iterator many planes" {
         points += 1;
     }
     try std.testing.expectEqual(list.len, points);
+}
+
+test "non power of 2 matrix" {
+    const alloc = std.testing.allocator;
+
+    const matrix = try BitMatrix.init(alloc, 25, 25);
+    defer matrix.deinit(alloc);
+
+    var itr = matrix.iter();
+    while (itr.next()) |point| {
+        try std.testing.expectEqual(0, point.x);
+        try std.testing.expectEqual(0, point.y);
+        try std.testing.expect(false);
+    }
+    try std.testing.expect(true);
 }
