@@ -8,6 +8,8 @@ const vm = @import("../vm.zig");
 const cmp = @import("../compiler.zig");
 const bitmatrix = @import("../utils/bitmatrix.zig");
 const BitMatrix = bitmatrix.BitMatrix;
+const bitmap = @import("../utils/bitmap.zig");
+const BitMap = bitmap.BitMap;
 
 pub const SSADestructor = struct {
     mem: std.mem.Allocator,
@@ -179,18 +181,62 @@ pub const SSADestructor = struct {
         }
     }
 
+    fn checkForCycles(self: *SSADestructor, graph: *BitMatrix, visited: *BitMap, seen: *BitMap, node: usize) !void {
+        if (seen.isSet(node)) {
+            return error.NotImplementedError;
+        }
+
+        try seen.set(node);
+        try visited.set(node);
+
+        const children = graph.getColumn(node);
+        var iter = children.iter();
+        while (iter.next()) |child| {
+            // If we've already seen this subgraph, just return. We know there
+            // aren't any cycles in the subgraph.
+            try self.checkForCycles(graph, visited, seen, child);
+        }
+    }
+
+    fn serializeCopyGroup(self: *SSADestructor, cfg: *CFG, matrix: *BitMatrix) !void {
+        // We need to keep track of the nodes we've visited
+        const visited = try BitMap.init(self.mem, cfg.opndCount());
+        defer visited.deinit(self.mem);
+
+        var itr = matrix.iter();
+        // For each variable in our matrix
+        while (itr.next()) |point| {
+            // The y value depends on the x value.  For example
+            // `a <- b`, "b" will be the x value and we can get all
+            // variables that depend on b by asking for the column (y values)
+            // If we've visited this variable already, we can skip it
+            if (visited.isSet(point.x)) continue;
+
+            try visited.set(point.x);
+
+            // TODO: we should allocate this once and reuse it but we need
+            // a "clear" method on bit maps.
+            const seen = try BitMap.init(self.mem, cfg.opndCount());
+            defer seen.deinit(self.mem);
+
+            // Otherwise, we need to recursively walk its edges
+            try self.checkForCycles(matrix, visited, seen, point.x);
+        }
+    }
+
     fn serializeCopyGroups(self: *SSADestructor, cfg: *CFG, copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
         const bits = cfg.opndCount();
-        const map = try BitMatrix.init(self.mem, bits, bits);
-        defer map.deinit(self.mem);
+        const matrix = try BitMatrix.init(self.mem, bits, bits);
+        defer matrix.deinit(self.mem);
 
         var current_group: usize = 0;
         for (copy_groups.items) |pcopy| {
             const src = pcopy.data.pmov.in;
             const dst = pcopy.data.pmov.out;
-            map.set(src.getID(), dst.getID());
+            matrix.set(src.getID(), dst.getID());
             if (pcopy.data.pmov.group != current_group) {
-                map.clear();
+                try self.serializeCopyGroup(cfg, matrix);
+                matrix.clear();
                 current_group = pcopy.data.pmov.group;
                 std.debug.print("reset\n", .{});
             }
@@ -294,4 +340,66 @@ test "destructor fixes all variables" {
             iter = insn.next;
         }
     }
+}
+
+test "cycle in parallel copy" {
+    const allocator = std.testing.allocator;
+
+    const code =
+\\ x = 10
+\\ y = 11
+\\ begin
+\\   t = x
+\\   x = y
+\\   y = t
+\\ end while i < 100
+\\ 
+\\ p x
+\\ p y
+;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try cmp.compileString(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try cfg_zig.makeCFG(allocator, scope);
+    defer cfg.deinit();
+
+    try cfg.placePhis();
+    try cfg.rename();
+
+    const bits = cfg.opndCount();
+    const matrix = try BitMatrix.init(allocator, bits, bits);
+    defer matrix.deinit(allocator);
+
+    // We just want to test that the SSA destructor will blow up when
+    // it finds a cyclic parallel copy.  First we'll set up a non-cyclic
+    // relationship, then set up a cyclic one and make sure it blows up.
+    // The numbers below don't map to actual variables, I'm just using them
+    // like this because it's easier to think about names than numbers.
+    // a: 0, b: 1, c: 2, d: 3
+    // b -> a
+    // b -> d
+    // c -> b
+    matrix.set(1, 0);
+    matrix.set(1, 3);
+    matrix.set(2, 1);
+
+    var destructor = SSADestructor { .mem = allocator };
+    try destructor.serializeCopyGroup(cfg, matrix);
+
+    // now lets introduce a cycle and make sure we get an error
+    // e: 4, f: 5, g: 6, h: 7
+    // e -> f
+    // f -> g
+    // g -> h
+    // h -> e
+    matrix.set(4, 5);
+    matrix.set(5, 6);
+    matrix.set(6, 7);
+    matrix.set(7, 4);
+
+    try std.testing.expectError(error.NotImplementedError, destructor.serializeCopyGroup(cfg, matrix));
 }

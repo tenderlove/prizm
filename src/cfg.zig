@@ -281,7 +281,7 @@ pub const CFG = struct {
             defer block_seen.deinit(self.mem);
 
             // Get all blocks that define this variable
-            const blocks = block_set.getRow(operand_num);
+            const blocks = block_set.getColumn(operand_num);
 
             const opnd = self.scope.getOperandById(operand_num);
 
@@ -417,7 +417,7 @@ pub const CFG = struct {
             // For each successor in the dominator tree
             //   rename the successor
             const dt = cfg.dom_tree.?;
-            var bititer = dt.getRow(bb.name).setBitsIterator();
+            var bititer = dt.getColumn(bb.name).setBitsIterator();
             while (bititer.next()) |child_id| {
                 try self.rename(cfg, cfg.blocks[child_id]);
             }
@@ -1442,24 +1442,24 @@ test "dominator tree" {
 
     // Block 0 should point to 1
     try std.testing.expect(dt.isSet(0, 1));
-    try std.testing.expectEqual(1, dt.getRow(0).popCount());
+    try std.testing.expectEqual(1, dt.getColumn(0).popCount());
 
     try std.testing.expect(dt.isSet(1, 2));
     try std.testing.expect(dt.isSet(1, 3));
     try std.testing.expect(dt.isSet(1, 7));
-    try std.testing.expectEqual(3, dt.getRow(1).popCount());
+    try std.testing.expectEqual(3, dt.getColumn(1).popCount());
 
-    try std.testing.expectEqual(0, dt.getRow(2).popCount());
+    try std.testing.expectEqual(0, dt.getColumn(2).popCount());
 
     try std.testing.expect(dt.isSet(3, 4));
     try std.testing.expect(dt.isSet(3, 5));
     try std.testing.expect(dt.isSet(3, 6));
-    try std.testing.expectEqual(3, dt.getRow(3).popCount());
+    try std.testing.expectEqual(3, dt.getColumn(3).popCount());
 
-    try std.testing.expectEqual(0, dt.getRow(4).popCount());
-    try std.testing.expectEqual(0, dt.getRow(5).popCount());
-    try std.testing.expectEqual(0, dt.getRow(6).popCount());
-    try std.testing.expectEqual(0, dt.getRow(7).popCount());
+    try std.testing.expectEqual(0, dt.getColumn(4).popCount());
+    try std.testing.expectEqual(0, dt.getColumn(5).popCount());
+    try std.testing.expectEqual(0, dt.getColumn(6).popCount());
+    try std.testing.expectEqual(0, dt.getColumn(7).popCount());
 }
 
 test "rename" {

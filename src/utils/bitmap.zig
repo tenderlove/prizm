@@ -136,6 +136,10 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
+        pub fn set(self: *Self, bit: T) !void {
+            try self.setBit(bit);
+        }
+
         const SetBitsIterator = struct {
             bit_index: usize,
             plane_index: usize,
@@ -187,6 +191,10 @@ pub fn BitMapSized(comptime T: type) type {
                 .current_plane = plane,
                 .bm = self
             };
+        }
+
+        pub fn iter(self: Self) SetBitsIterator {
+            return self.setBitsIterator();
         }
 
         pub fn unsetBit(self: *Self, bit: T) !void {
