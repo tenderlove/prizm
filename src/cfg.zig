@@ -239,6 +239,15 @@ pub const CFG = struct {
         return self.blocks.len;
     }
 
+    pub fn makeMov(self: *CFG, out: *Op, in: *Op) !*ir.InstructionList.Node {
+        return try self.scope.makeMov(out, in);
+    }
+
+    pub fn replace(self: *CFG, old: *ir.InstructionList.Node, new: *ir.InstructionList.Node) void {
+        self.scope.insns.insertAfter(old, new);
+        self.scope.insns.remove(old);
+    }
+
     pub fn placePhis(self: *CFG) !void {
         const opnd_count = self.opndCount();
         const globals = try BitMap.init(self.arena.allocator(), opnd_count);
@@ -572,6 +581,10 @@ pub const BasicBlock = struct {
         return self.start;
     }
 
+    pub fn finishInsn(self: *BasicBlock) ?*ir.InstructionList.Node {
+        return self.finish;
+    }
+
     fn childLo(_: *BasicBlock, child: *BasicBlock, alloc: std.mem.Allocator) !*BitMap {
         const ue = child.upward_exposed_set;
         const lo = child.liveout_set;
@@ -602,7 +615,6 @@ pub const BasicBlock = struct {
 
         return ret;
     }
-
 
     // Update the LiveOut set.  If the set changes, returns true
     pub fn updateLiveOut(self: *BasicBlock, alloc: std.mem.Allocator) !bool {

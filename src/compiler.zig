@@ -133,10 +133,14 @@ pub const Scope = struct {
         return try self.addOpnd(try ir.Operand.initLabel(self.arena.allocator(), self.nextOpndId(), name));
     }
 
-    fn pushVoidInsn(self: *Scope, insn: ir.Instruction) !void {
+    fn makeInsn(self: *Scope, insn: ir.Instruction) !*ir.InstructionList.Node {
         const node = try self.arena.allocator().create(ir.InstructionList.Node);
         node.*.data = insn;
-        self.insns.append(node);
+        return node;
+    }
+
+    fn pushVoidInsn(self: *Scope, insn: ir.Instruction) !void {
+        self.insns.append(try self.makeInsn(insn));
     }
 
     fn pushInsn(self: *Scope, insn: ir.Instruction) !*ir.Operand {
@@ -220,6 +224,10 @@ pub const Scope = struct {
     pub fn pushMov(self: *Scope, out: *ir.Operand, in: *ir.Operand) !*ir.Operand {
         try self.pushVoidInsn(.{ .mov = .{ .out = out, .in = in } });
         return out;
+    }
+
+    pub fn makeMov(self: *Scope, out: *ir.Operand, in: *ir.Operand) !*ir.InstructionList.Node {
+        return try self.makeInsn(.{ .mov = .{ .out = out, .in = in } });
     }
 
     pub fn insertPhi(self: *Scope, node: *ir.InstructionList.Node, op: *ir.Operand) !*ir.InstructionList.Node {
