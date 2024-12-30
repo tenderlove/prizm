@@ -243,9 +243,8 @@ pub const CFG = struct {
         return try self.scope.makeMov(out, in);
     }
 
-    pub fn replace(self: *CFG, old: *ir.InstructionList.Node, new: *ir.InstructionList.Node) void {
-        self.scope.insns.insertAfter(old, new);
-        self.scope.insns.remove(old);
+    pub fn replace(self: *CFG, block: *BasicBlock, old: *ir.InstructionList.Node, new: *ir.InstructionList.Node) void {
+        block.replace(self.scope, old, new);
     }
 
     pub fn placePhis(self: *CFG) !void {
@@ -585,6 +584,17 @@ pub const BasicBlock = struct {
         return self.finish;
     }
 
+    pub fn replace(self: *BasicBlock, scope: *Scope, old: *ir.InstructionList.Node, new: *ir.InstructionList.Node) void {
+        scope.insns.insertAfter(old, new);
+        scope.insns.remove(old);
+        if (self.start == old) {
+            self.start = new;
+        }
+        if (self.finish == old) {
+            self.finish = new;
+        }
+    }
+
     fn childLo(_: *BasicBlock, child: *BasicBlock, alloc: std.mem.Allocator) !*BitMap {
         const ue = child.upward_exposed_set;
         const lo = child.liveout_set;
@@ -600,6 +610,20 @@ pub const BasicBlock = struct {
         return newlo;
     }
 
+    pub fn insertParallelCopy(self: *BasicBlock, scope: *Scope, node: *ir.InstructionList.Node, dest: *Op, src: *Op, group: usize) !*ir.InstructionList.Node {
+        const ret = try scope.insertParallelCopy(node, dest, src, self, group);
+
+        if (node == self.finish) {
+            self.finish = ret;
+        }
+
+        if (node == self.start) {
+            self.start = ret;
+        }
+
+        return ret;
+    }
+
     pub fn appendParallelCopy(self: *BasicBlock, scope: *Scope, dest: *Op, src: *Op, group: usize) !*ir.InstructionList.Node {
         var node = self.finish;
 
@@ -607,13 +631,7 @@ pub const BasicBlock = struct {
             node = self.finish.prev.?;
         }
 
-        const ret = try scope.insertParallelCopy(node, dest, src, group);
-
-        if (node == self.finish) {
-            self.finish = ret;
-        }
-
-        return ret;
+        return self.insertParallelCopy(scope, node, dest, src, group);
     }
 
     // Update the LiveOut set.  If the set changes, returns true

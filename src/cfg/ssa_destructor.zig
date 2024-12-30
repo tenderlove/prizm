@@ -91,7 +91,7 @@ pub const SSADestructor = struct {
                 var insn = iter.?.prev.?; // Should be the last Phi in the block
 
                 for (isolation_copies.items) |copy| {
-                    insn = try cfg.scope.insertParallelCopy(insn, copy.original, copy.prime, self.group);
+                    insn = try bb.insertParallelCopy(cfg.scope, insn, copy.original, copy.prime, self.group);
                     try copy_groups.append(insn);
                     try primed_insns.append(&insn.data);
                 }
@@ -238,7 +238,7 @@ pub const SSADestructor = struct {
             cursor = cursor.next.?;
 
             const copy = try cfg.makeMov(dst, src);
-            cfg.replace(old, copy);
+            cfg.replace(old.data.pmov.block, old, copy);
             if (@as(ir.InstructionName, cursor.data) != ir.InstructionName.pmov) break;
         }
     }
@@ -478,53 +478,52 @@ test "destruction removes all parallel copies" {
 }
 
 test "destruction maintains block endings" {
-    return error.SkipZigTest;
-//    const allocator = std.testing.allocator;
-//
-//    const code =
-//\\ x = 10
-//\\ y = 11
-//\\ begin
-//\\   t = x
-//\\   x = y
-//\\   y = t
-//\\ end while i < 100
-//\\ 
-//\\ p x
-//\\ p y
-//;
-//
-//    const machine = try vm.init(allocator);
-//    defer machine.deinit(allocator);
-//
-//    const scope = try cmp.compileString(allocator, machine, code);
-//    defer scope.deinit();
-//
-//    const cfg = try cfg_zig.makeCFG(allocator, scope);
-//    defer cfg.deinit();
-//
-//    try cfg.placePhis();
-//    try cfg.rename();
-//    try cfg.destructSSA();
-//
-//    // After SSA destruction, we shouldn't have any prime operands, or renamed operands
-//    for (cfg.blocks) |block| {
-//        if (!block.reachable) continue;
-//
-//        var iter = block.startInsn();
-//        while (iter) |insn| {
-//            if (iter == block.finishInsn()) break;
-//            // putlabel should always be first
-//            if (insn.data.isLabel()) {
-//                try std.testing.expectEqual(block.startInsn(), insn);
-//            }
-//
-//            // Jumps and return should always be last
-//            if (insn.data.isJump() or insn.data.isReturn()) {
-//                try std.testing.expectEqual(block.finishInsn(), insn);
-//            }
-//
-//            iter = insn.next;
-//        }
-//    }
+    const allocator = std.testing.allocator;
+
+    const code =
+\\ x = 10
+\\ y = 11
+\\ begin
+\\   t = x
+\\   x = y
+\\   y = t
+\\ end while i < 100
+\\ 
+\\ p x
+\\ p y
+;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try cmp.compileString(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try cfg_zig.makeCFG(allocator, scope);
+    defer cfg.deinit();
+
+    try cfg.placePhis();
+    try cfg.rename();
+    try cfg.destructSSA();
+
+    // After SSA destruction, we shouldn't have any prime operands, or renamed operands
+    for (cfg.blocks) |block| {
+        if (!block.reachable) continue;
+
+        var iter = block.startInsn();
+        while (iter) |insn| {
+            if (iter == block.finishInsn()) break;
+            // putlabel should always be first
+            if (insn.data.isLabel()) {
+                try std.testing.expectEqual(block.startInsn(), insn);
+            }
+
+            // Jumps and return should always be last
+            if (insn.data.isJump() or insn.data.isReturn()) {
+                try std.testing.expectEqual(block.finishInsn(), insn);
+            }
+
+            iter = insn.next;
+        }
+    }
 }

@@ -335,6 +335,7 @@ pub const Instruction = union(InstructionName) {
         const Self = @This();
         out: *Operand,
         in: *Operand,
+        block: *BasicBlock,
         group: usize,
         pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
             if (self.in == old) self.in = new;

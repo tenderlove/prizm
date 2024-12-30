@@ -238,9 +238,9 @@ pub const Scope = struct {
         return new_node;
     }
 
-    pub fn insertParallelCopy(self: *Scope, node: *ir.InstructionList.Node, dest: *Op, src: *Op, group: usize) !*ir.InstructionList.Node {
+    pub fn insertParallelCopy(self: *Scope, node: *ir.InstructionList.Node, dest: *Op, src: *Op, block: *BasicBlock, group: usize) !*ir.InstructionList.Node {
         const new_node = try self.arena.allocator().create(ir.InstructionList.Node);
-        new_node.*.data = .{ .pmov = .{ .out = dest, .in = src, .group = group } };
+        new_node.*.data = .{ .pmov = .{ .out = dest, .in = src, .block = block, .group = group } };
         self.insns.insertAfter(node, new_node);
         return new_node;
     }
