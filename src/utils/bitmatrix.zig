@@ -101,6 +101,11 @@ pub fn BitMatrixSize(comptime T: type) type {
 
                 if (@mod(self.y, atom_bits) == 0) {
                     self.plane_index += 1;
+                    // Move to the next column
+                    if (self.y / atom_bits == self.matrix.row_len) {
+                        self.y = 0;
+                        self.x += 1;
+                    }
                     if (self.plane_index < self.matrix.buffer.len) {
                         self.y_value_plane = self.matrix.buffer[self.plane_index];
                     }
@@ -418,4 +423,26 @@ test "non power of 2 matrix" {
         try std.testing.expect(false);
     }
     try std.testing.expect(true);
+}
+
+test "last bit on first of many planes" {
+    const alloc = std.testing.allocator;
+
+    const matrix = try BitMatrix.init(alloc, 2, 8);
+    defer matrix.deinit(alloc);
+
+    matrix.set(0, matrix.columns - 1);
+
+    const list = [_][2]usize{
+        [_]usize{0, matrix.columns - 1},
+    };
+
+    var itr = matrix.iter();
+    var points: usize = 0;
+    while (itr.next()) |point| {
+        try std.testing.expectEqual(list[points][0], point.x);
+        try std.testing.expectEqual(list[points][1], point.y);
+        points += 1;
+    }
+    try std.testing.expectEqual(list.len, points);
 }
