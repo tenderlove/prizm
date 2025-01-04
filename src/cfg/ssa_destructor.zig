@@ -316,8 +316,125 @@ pub const SSADestructor = struct {
             }
         }
     }
-
 };
+
+test "phi isolation adds I/O variable copies" {
+    const allocator = std.testing.allocator;
+
+    const code =
+\\ x = 10
+\\ y = 11
+\\ begin
+\\   t = x
+\\   x = y
+\\   y = t
+\\ end while i < 100
+\\ 
+\\ p x
+\\ p y
+;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try cmp.compileString(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try cfg_zig.makeCFG(allocator, scope);
+    defer cfg.deinit();
+
+    var destructor = SSADestructor { .mem = allocator };
+
+    try cfg.placePhis();
+    try cfg.rename();
+
+    // A list of instructions we need to replace prime variables
+    var primed_insns = std.ArrayList(*ir.Instruction).init(allocator);
+    defer primed_insns.deinit();
+
+    var copy_groups = std.ArrayList(*ir.InstructionList.Node).init(allocator);
+    defer copy_groups.deinit();
+
+    try destructor.isolatePhi(cfg, &primed_insns, &copy_groups);
+
+    // After we isolate phi, there should be copy instructions at the end of
+    // BB0 and BB1 to isolate the phi parameters, then there should be
+    // instructions after the phi instructions to isolate the phi return value
+
+    // Get the 2 phi instructions from BB1
+    const phi1 = cfg.blocks[1].start.next.?;
+    try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi1.data));
+
+    const phi2 = phi1.next.?;
+    try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi2.data));
+
+    // Lets test that the Phi return values are isolated first
+    const isolation1 = phi2.next.?;
+    try expectIsolatedPhiOutput(phi1.data, isolation1.data);
+
+    const isolation2 = isolation1.next.?;
+    try expectIsolatedPhiOutput(phi2.data, isolation2.data);
+
+    // Now lets test that the input values are isolated.
+    const bb0 = cfg.blocks[0];
+    try expectIsolatedPhiInput(bb0, &[_] ir.Instruction { phi1.data, phi2.data });
+    try expectIsolatedPhiInput(cfg.blocks[1], &[_] ir.Instruction { phi1.data, phi2.data });
+}
+
+fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
+    var insn = bb.finishInsn();
+    if (insn.?.data.isJump()) insn = insn.?.prev;
+
+    while (true) {
+        if (insn == bb.start) { // If we hit this start, then there were no pmov
+            try std.testing.expect(false);
+        }
+
+        if (!insn.?.prev.?.data.isPMov()) {
+            break;
+        } else {
+            insn = insn.?.prev;
+        }
+    }
+
+    var count: usize = 0;
+    while(true) {
+        if (insn == bb.finish or !insn.?.data.isPMov()) {
+            break;
+        }
+
+        try std.testing.expect(insn != null);
+        if (insn) |i| {
+            // Make sure it's actually a parallel mov
+            const isolation_insn = i.data;
+            try std.testing.expectEqual(ir.InstructionName.pmov, @as(ir.InstructionName, isolation_insn));
+            // The input of the isolation copy should be the pre-primed phi input (the SSA name)
+            try std.testing.expectEqual(isolation_insn.pmov.out.prime.orig, isolation_insn.pmov.in);
+            // The output of this isolation copy should be one of the inputs of the phi
+            const phiinsn = phis[count];
+            var found = false;
+            for (phiinsn.phi.params.items) |input| {
+                if (input == isolation_insn.pmov.out) {
+                    found = true;
+                    break;
+                }
+            }
+            try std.testing.expect(found);
+        }
+        insn = insn.?.next;
+        count += 1;
+    }
+}
+
+fn expectIsolatedPhiOutput(phi: ir.Instruction, isolation_insn: ir.Instruction) !void {
+    // Make sure it's actually a parallel mov
+    try std.testing.expectEqual(ir.InstructionName.pmov, @as(ir.InstructionName, isolation_insn));
+    // The output of the phi should be the input of the isolation copy
+    try std.testing.expectEqual(phi.getOut(), isolation_insn.pmov.in);
+    // The output of the isolation copy should be the pre-primed phi output (the SSA name)
+    try std.testing.expectEqual(isolation_insn.pmov.in.prime.orig, isolation_insn.pmov.out);
+    try std.testing.expectEqual(ir.OperandType.redef, @as(ir.OperandType, isolation_insn.pmov.out.*));
+}
 
 test "destructor fixes all variables" {
     const allocator = std.testing.allocator;
