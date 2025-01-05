@@ -132,13 +132,12 @@ pub const SSADestructor = struct {
         removePrimesAndAliases(cfg.insns_with_alias.?, prime_map);
     }
 
-    // Eliminate phi functions. Figure 9.20 part e
-    fn eliminatePhi(self: *SSADestructor, cfg: *CFG, copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
+    fn insertPhiCopies(self: *SSADestructor, cfg: *CFG, primed_insns: *std.ArrayList(*ir.Instruction), copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
+        var phi_copies = std.ArrayList(ParallelCopy).init(self.mem);
+        defer phi_copies.deinit();
+
         for (cfg.blocks) |bb| {
             if (!bb.reachable) continue;
-
-            var phi_copies = std.ArrayList(ParallelCopy).init(self.mem);
-            defer phi_copies.deinit();
 
             var iter: ?*ir.InstructionList.Node = bb.start;
 
@@ -156,7 +155,6 @@ pub const SSADestructor = struct {
                                 .original = src
                             });
                         }
-                        cfg.scope.insns.remove(insn);
                     },
                     // Quit after we've passed phi's
                     else => { break; }
@@ -165,20 +163,42 @@ pub const SSADestructor = struct {
                 if (insn == bb.finish) break;
                 iter = insn.next;
             }
+        }
 
-            if (phi_copies.items.len > 0) {
-                std.mem.sort(ParallelCopy, phi_copies.items, {}, ParallelCopy.cmpDest);
-                var current_block = phi_copies.items[0].dest_block.name;
+        if (phi_copies.items.len > 0) {
+            std.mem.sort(ParallelCopy, phi_copies.items, {}, ParallelCopy.cmpDest);
+            var current_block = phi_copies.items[0].dest_block.name;
 
-                for (phi_copies.items) |copy| {
-                    if (copy.dest_block.name != current_block) {
-                        current_block = copy.dest_block.name;
-                        self.group += 1;
-                    }
-                    const pcopy = try copy.dest_block.appendParallelCopy(cfg.scope, copy.prime, copy.original, self.group);
-                    try copy_groups.append(pcopy);
+            for (phi_copies.items) |copy| {
+                if (copy.dest_block.name != current_block) {
+                    current_block = copy.dest_block.name;
+                    self.group += 1;
                 }
-                self.group += 1;
+                const pcopy = try copy.dest_block.appendParallelCopy(cfg.scope, copy.prime, copy.original, self.group);
+                try primed_insns.append(&pcopy.data);
+                try copy_groups.append(pcopy);
+            }
+            self.group += 1;
+        }
+    }
+
+    // Eliminate phi functions. Figure 9.20 part e
+    fn eliminatePhi(_: *SSADestructor, cfg: *CFG) !void {
+        for (cfg.blocks) |bb| {
+            if (!bb.reachable) continue;
+
+            var iter: ?*ir.InstructionList.Node = bb.start;
+
+            while (iter) |insn| {
+                switch(insn.data) {
+                    .putlabel => { }, // Skip putlabel
+                    .phi => cfg.scope.insns.remove(insn),
+                    // Quit after we've passed phi's
+                    else => { break; }
+                }
+
+                if (insn == bb.finish) break;
+                iter = insn.next;
             }
         }
     }
@@ -283,11 +303,14 @@ pub const SSADestructor = struct {
         // Figure 9.20, part C
         try self.isolatePhi(cfg, &primed_insns, &copy_groups);
         // Figure 9.20, part D
-        try self.renameAllVariables(cfg, &primed_insns);
         // Figure 9.20, part E
-        try self.eliminatePhi(cfg, &copy_groups);
+        try self.insertPhiCopies(cfg, &primed_insns, &copy_groups);
+
+        try self.renameAllVariables(cfg, &primed_insns);
         // Figure 9.20, part F & G
         try self.serializeCopyGroups(cfg, &copy_groups);
+
+        try self.eliminatePhi(cfg);
     }
 
     fn removePrimesAndAliases(insns: []*ir.Instruction, prime_map: []*Op) void {
