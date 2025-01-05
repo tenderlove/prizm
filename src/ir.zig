@@ -1,6 +1,7 @@
 const std = @import("std");
 const cmp = @import("compiler.zig");
 const cfg = @import("cfg.zig");
+const Scope = @import("scope.zig").Scope;
 const BasicBlock = cfg.BasicBlock;
 
 pub const InstructionList = std.DoublyLinkedList(Instruction);
@@ -31,7 +32,7 @@ pub const Operand = union(OperandType) {
     prime: struct { id: usize, prime_id: usize, orig: *Operand },
     scope: struct {
         id: usize,
-        value: *cmp.Scope,
+        value: *Scope,
     },
     string: struct {
         id: usize,

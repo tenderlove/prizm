@@ -5,7 +5,7 @@ const Op = ir.Operand;
 const prism = @import("prism.zig");
 const vm = @import("vm.zig");
 const compiler = @import("compiler.zig");
-const Scope = compiler.Scope;
+const Scope = @import("scope.zig").Scope;
 const printer = @import("printer.zig");
 const assert = @import("std").debug.assert;
 const bitmap = @import("utils/bitmap.zig");
@@ -21,9 +21,9 @@ pub const CFG = struct {
     blocks: []const *BasicBlock,
     dom_tree: ?*BitMatrix = null,
     globals: ?*BitMap = null,
-    scope: *compiler.Scope,
+    scope: *Scope,
 
-    pub fn init(mem: std.mem.Allocator, arena: std.heap.ArenaAllocator, scope: *compiler.Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
+    pub fn init(mem: std.mem.Allocator, arena: std.heap.ArenaAllocator, scope: *Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
         const cfg = try mem.create(CFG);
 
         cfg.* = CFG {
@@ -876,7 +876,7 @@ const CFGBuilder = struct {
         return block;
     }
 
-    fn build(self: *CFGBuilder, allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
+    fn build(self: *CFGBuilder, allocator: std.mem.Allocator, scope: *Scope) !*CFG {
         const insns = scope.insns;
         var node = insns.first;
 
@@ -984,12 +984,12 @@ const CFGBuilder = struct {
     }
 };
 
-pub fn makeCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
+pub fn makeCFG(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
     var builder = CFGBuilder { .scope = scope };
     return try builder.build(allocator, scope);
 }
 
-fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
+fn buildCFG(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
     var builder = CFGBuilder { .scope = scope };
     const cfg = try builder.build(allocator, scope);
     try cfg.placePhis();
@@ -997,14 +997,14 @@ fn buildCFG(allocator: std.mem.Allocator, scope: *compiler.Scope) !*CFG {
 }
 
 test "empty basic block" {
-    const scope = try compiler.Scope.init(std.testing.allocator, 0, null);
+    const scope = try Scope.init(std.testing.allocator, 0, null);
     defer scope.deinit();
 
     try std.testing.expectError(CompileError.EmptyInstructionSequence, buildCFG(std.testing.allocator, scope));
 }
 
 test "basic block one instruction" {
-    const scope = try compiler.Scope.init(std.testing.allocator, 0, null);
+    const scope = try Scope.init(std.testing.allocator, 0, null);
     defer scope.deinit();
 
     _ = try scope.pushGetself();
@@ -1021,7 +1021,7 @@ test "basic block one instruction" {
 }
 
 test "basic block two instruction" {
-    const scope = try compiler.Scope.init(std.testing.allocator, 0, null);
+    const scope = try Scope.init(std.testing.allocator, 0, null);
     defer scope.deinit();
 
     _ = try scope.pushLoadi(null, 123);
@@ -1087,7 +1087,7 @@ test "if statement should have 2 children blocks" {
     defer scope.deinit();
 
     // Get the scope for the method
-    const method_scope: *compiler.Scope = scope.insns.first.?.data.define_method.func.scope.value;
+    const method_scope: *Scope = scope.insns.first.?.data.define_method.func.scope.value;
 
     const cfg = try buildCFG(allocator, method_scope);
     defer cfg.deinit();
@@ -1586,7 +1586,7 @@ fn findInsn(cfg: *CFG, name: ir.InstructionName) !?*ir.InstructionList.Node {
     return null;
 }
 
-fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*compiler.Scope {
+fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*Scope {
     const parser = try prism.Prism.newParserCtx(allocator);
     defer parser.deinit();
     parser.init(code, code.len, null);

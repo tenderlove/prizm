@@ -2,6 +2,7 @@ const std = @import("std");
 const ir = @import("ir.zig");
 const cmp = @import("compiler.zig");
 const CFG = @import("cfg.zig");
+const Scope = @import("scope.zig").Scope;
 const bm = @import("utils/bitmap.zig");
 
 const IRPrinter = struct {
@@ -92,8 +93,8 @@ const IRPrinter = struct {
         try printInsnParams(insn, out);
     }
 
-    pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: *const std.io.AnyWriter) !void {
-        var work = std.ArrayList(*cmp.Scope).init(alloc);
+    pub fn printIR(alloc: std.mem.Allocator, scope: *Scope, out: *const std.io.AnyWriter) !void {
+        var work = std.ArrayList(*Scope).init(alloc);
         defer work.deinit();
         try work.append(scope);
 
@@ -144,13 +145,13 @@ const IRPrinter = struct {
 const CFGPrinter = struct {
     const Context = struct {
         out: *const std.io.AnyWriter,
-        work: *std.ArrayList(*cmp.Scope),
-        scope: *cmp.Scope,
+        work: *std.ArrayList(*Scope),
+        scope: *Scope,
         var_width: usize,
         insn_width: usize,
     };
 
-    fn printSet(comptime name: []const u8, scope: *cmp.Scope, set: *bm.BitMap, out: *const std.io.AnyWriter) !void {
+    fn printSet(comptime name: []const u8, scope: *Scope, set: *bm.BitMap, out: *const std.io.AnyWriter) !void {
         const nitems = set.popCount(); // number of variables
         if (nitems > 0) {
             var biti = set.setBitsIterator();
@@ -192,7 +193,7 @@ const CFGPrinter = struct {
         }
     }
 
-    fn printBlock(scope: *cmp.Scope, blk: *CFG.BasicBlock, ctx: *const Context) !void {
+    fn printBlock(scope: *Scope, blk: *CFG.BasicBlock, ctx: *const Context) !void {
         try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.name });
         if (blk.entry) {
             try ctx.out.print("color=green\n", .{});
@@ -259,8 +260,8 @@ const CFGPrinter = struct {
 
     }
 
-    pub fn printCFG(alloc: std.mem.Allocator, scope: *cmp.Scope, opts: CFGOptions, out: *const std.io.AnyWriter) !void {
-        var work = std.ArrayList(*cmp.Scope).init(alloc);
+    pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, opts: CFGOptions, out: *const std.io.AnyWriter) !void {
+        var work = std.ArrayList(*Scope).init(alloc);
         defer work.deinit();
 
         try work.append(scope);
@@ -340,7 +341,7 @@ fn outVarWidth(opnd: *ir.Operand) usize {
     };
 }
 
-fn widestOutOp(scope: *cmp.Scope) usize {
+fn widestOutOp(scope: *Scope) usize {
     const insns = scope.insns;
     var node = insns.first;
     var widest: usize = 0;
@@ -354,7 +355,7 @@ fn widestOutOp(scope: *cmp.Scope) usize {
     return widest;
 }
 
-pub fn printIR(alloc: std.mem.Allocator, scope: *cmp.Scope, out: std.io.AnyWriter) !void {
+pub fn printIR(alloc: std.mem.Allocator, scope: *Scope, out: std.io.AnyWriter) !void {
     try IRPrinter.printIR(alloc, scope, &out);
 }
 
@@ -364,6 +365,6 @@ pub const CFGOptions = struct {
     destruct_ssa: ?u32 = null,
 };
 
-pub fn printCFG(alloc: std.mem.Allocator, scope: *cmp.Scope, opts: CFGOptions, out: std.io.AnyWriter) !void {
+pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, opts: CFGOptions, out: std.io.AnyWriter) !void {
     try CFGPrinter.printCFG(alloc, scope, opts, &out);
 }

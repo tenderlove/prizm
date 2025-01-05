@@ -4,6 +4,7 @@ const compiler = @import("compiler.zig");
 const vm = @import("vm.zig");
 const ssa = @import("ssa.zig");
 const CFG = @import("cfg.zig");
+const Scope = @import("scope.zig").Scope;
 const Allocator = std.mem.Allocator;
 const yazap = @import("yazap");
 const printer = @import("printer.zig");
@@ -126,7 +127,7 @@ pub fn main() !void {
     return;
 }
 
-fn compileFile(alloc: std.mem.Allocator, path: []const u8, machine: *vm.VM) !*compiler.Scope {
+fn compileFile(alloc: std.mem.Allocator, path: []const u8, machine: *vm.VM) !*Scope {
     // Read the file in
     const file = try std.fs.cwd().openFile(path, .{});
     const file_size = (try file.stat()).size;
