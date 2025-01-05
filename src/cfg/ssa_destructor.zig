@@ -29,7 +29,7 @@ pub const SSADestructor = struct {
     // Isolate Phi functions by placing parallel copies immediately after the
     // Phi functions, and also in predecessor blocks.  Figure 9.20, part C
     // (part A and B are already done)
-    fn isolatePhi(self: *SSADestructor, cfg: *CFG, primed_insns: *std.ArrayList(*ir.Instruction), copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
+    fn isolatePhi(self: *SSADestructor, cfg: *CFG, copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
         for (cfg.blocks) |bb| {
             if (!bb.reachable) continue;
 
@@ -45,7 +45,6 @@ pub const SSADestructor = struct {
                 switch(insn.data) {
                     .putlabel => { }, // Skip putlabel
                     .phi => |p| {
-                        try primed_insns.append(&insn.data);
                         for (0..p.params.items.len) |param_i| {
                             const param = p.params.items[param_i];
                             const prime_in = try cfg.scope.newPrime(param);
@@ -93,7 +92,6 @@ pub const SSADestructor = struct {
                 for (isolation_copies.items) |copy| {
                     insn = try bb.insertParallelCopy(cfg.scope, insn, copy.original, copy.prime, self.group);
                     try copy_groups.append(insn);
-                    try primed_insns.append(&insn.data);
                 }
                 self.group += 1;
             }
@@ -108,7 +106,6 @@ pub const SSADestructor = struct {
                         self.group += 1;
                     }
                     const insn = try copy.dest_block.appendParallelCopy(cfg.scope, copy.prime, copy.original, self.group);
-                    try primed_insns.append(&insn.data);
                     try copy_groups.append(insn);
                 }
                 self.group += 1;
@@ -118,7 +115,7 @@ pub const SSADestructor = struct {
 
     // Now that Phi are isolated, we need to rename prime's to compiler
     // generated temps and remove subscript variables.  Figure 9.20, part d
-    fn renameAllVariables(self: *SSADestructor, cfg: *CFG, primed_insns: *std.ArrayList(*ir.Instruction)) !void {
+    fn renameAllVariables(self: *SSADestructor, cfg: *CFG) !void {
         // We need to map primes to new temp variables, so lets allocate
         // an array here then allocate new temps as we need them.
         const prime_map: []*Op = try self.mem.alloc(*Op, cfg.scope.primes);
@@ -128,11 +125,13 @@ pub const SSADestructor = struct {
             prime_map[i] = try cfg.scope.newTemp();
         }
 
-        removePrimesAndAliases(primed_insns.items, prime_map);
-        removePrimesAndAliases(cfg.insns_with_alias.?, prime_map);
+        for (cfg.blocks) |bb| {
+            if (!bb.reachable) continue;
+            removePrimesAndAliases(bb, prime_map);
+        }
     }
 
-    fn insertPhiCopies(self: *SSADestructor, cfg: *CFG, primed_insns: *std.ArrayList(*ir.Instruction), copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
+    fn insertPhiCopies(self: *SSADestructor, cfg: *CFG, copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
         var phi_copies = std.ArrayList(ParallelCopy).init(self.mem);
         defer phi_copies.deinit();
 
@@ -175,7 +174,6 @@ pub const SSADestructor = struct {
                     self.group += 1;
                 }
                 const pcopy = try copy.dest_block.appendParallelCopy(cfg.scope, copy.prime, copy.original, self.group);
-                try primed_insns.append(&pcopy.data);
                 try copy_groups.append(pcopy);
             }
             self.group += 1;
@@ -293,28 +291,27 @@ pub const SSADestructor = struct {
     }
 
     pub fn destruct(self: *SSADestructor, cfg: *CFG) !void {
-        // A list of instructions we need to replace prime variables
-        var primed_insns = std.ArrayList(*ir.Instruction).init(self.mem);
-        defer primed_insns.deinit();
-
         var copy_groups = std.ArrayList(*ir.InstructionList.Node).init(self.mem);
         defer copy_groups.deinit();
 
         // Figure 9.20, part C
-        try self.isolatePhi(cfg, &primed_insns, &copy_groups);
+        try self.isolatePhi(cfg, &copy_groups);
         // Figure 9.20, part D
         // Figure 9.20, part E
-        try self.insertPhiCopies(cfg, &primed_insns, &copy_groups);
+        try self.insertPhiCopies(cfg, &copy_groups);
 
-        try self.renameAllVariables(cfg, &primed_insns);
+        try self.renameAllVariables(cfg);
         // Figure 9.20, part F & G
         try self.serializeCopyGroups(cfg, &copy_groups);
 
         try self.eliminatePhi(cfg);
     }
 
-    fn removePrimesAndAliases(insns: []*ir.Instruction, prime_map: []*Op) void {
-        for (insns) |insn| {
+    fn removePrimesAndAliases(block: *BasicBlock, prime_map: []*Op) void {
+        var iter = block.instructionIter();
+        while (iter.next()) |insn_node| {
+            var insn = &insn_node.data;
+
             if (insn.getOut()) |out| {
                 if (out.isPrime()) {
                     const tmp = prime_map[out.prime.prime_id];
@@ -371,14 +368,10 @@ test "phi isolation adds I/O variable copies" {
     try cfg.placePhis();
     try cfg.rename();
 
-    // A list of instructions we need to replace prime variables
-    var primed_insns = std.ArrayList(*ir.Instruction).init(allocator);
-    defer primed_insns.deinit();
-
     var copy_groups = std.ArrayList(*ir.InstructionList.Node).init(allocator);
     defer copy_groups.deinit();
 
-    try destructor.isolatePhi(cfg, &primed_insns, &copy_groups);
+    try destructor.isolatePhi(cfg, &copy_groups);
 
     // After we isolate phi, there should be copy instructions at the end of
     // BB0 and BB1 to isolate the phi parameters, then there should be

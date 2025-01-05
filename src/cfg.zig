@@ -21,7 +21,6 @@ pub const CFG = struct {
     blocks: []const *BasicBlock,
     dom_tree: ?*BitMatrix = null,
     globals: ?*BitMap = null,
-    insns_with_alias: ?[] *ir.Instruction = null,
     scope: *compiler.Scope,
 
     pub fn init(mem: std.mem.Allocator, arena: std.heap.ArenaAllocator, scope: *compiler.Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
@@ -326,7 +325,6 @@ pub const CFG = struct {
     const Renamer = struct {
         counters: []u64,
         stacks: []std.ArrayList(*Operand),
-        insns_with_alias: std.ArrayList(*ir.Instruction),
         seen: std.AutoHashMap(usize, usize),
 
         pub fn init(mem: std.mem.Allocator, global_count: usize) !Renamer {
@@ -341,7 +339,6 @@ pub const CFG = struct {
             return .{
                 .counters = counters,
                 .stacks = stacks,
-                .insns_with_alias = std.ArrayList(*ir.Instruction).init(mem),
                 .seen = std.AutoHashMap(usize, usize).init(mem),
             };
         }
@@ -352,7 +349,6 @@ pub const CFG = struct {
                 stack.deinit();
             }
             self.seen.deinit();
-            self.insns_with_alias.deinit();
             mem.free(self.stacks);
         }
 
@@ -382,7 +378,6 @@ pub const CFG = struct {
                 switch(insn.data) {
                     .putlabel => { }, // Skip putlabel
                     .phi => |p| {
-                        try self.insns_with_alias.append(&insn.data);
                         try pushed.append(p.out);
                         insn.data.setOut(try self.newName(p.out, bb, cfg.scope));
                     },
@@ -405,9 +400,6 @@ pub const CFG = struct {
                                 insn.data.setOut(newname);
                                 should_append = true;
                             }
-                        }
-                        if (should_append) {
-                            try self.insns_with_alias.append(&insn.data);
                         }
                     }
                 }
@@ -478,7 +470,6 @@ pub const CFG = struct {
         var renamer = try Renamer.init(self.mem, global_count);
         defer renamer.deinit(self.mem);
         try renamer.rename(self, self.head);
-        self.insns_with_alias = try renamer.insns_with_alias.toOwnedSlice();
     }
 
     pub fn destructSSA(self: *CFG) !void {
@@ -524,9 +515,6 @@ pub const CFG = struct {
     }
 
     pub fn deinit(self: *CFG) void {
-        if (self.insns_with_alias) |list| {
-            self.mem.free(list);
-        }
         self.mem.free(self.blocks);
         self.arena.deinit();
         self.mem.destroy(self);
