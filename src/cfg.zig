@@ -242,6 +242,28 @@ pub const CFG = struct {
         return try self.scope.makeMov(out, in);
     }
 
+    pub fn isSSA(self: CFG) !bool {
+        const allocator = self.mem;
+        const seen_opnd = try BitMap.init(allocator, self.opndCount());
+        defer seen_opnd.deinit(allocator);
+
+        for (self.blocks) |block| {
+            if (!block.reachable) continue;
+
+            var iter = block.instructionIter();
+            while (iter.next()) |insn| {
+                if (insn.data.outVar()) |v| {
+                    if (seen_opnd.isSet(v.getID())) {
+                        return false;
+                    }
+                    try seen_opnd.setBit(v.getID());
+                }
+            }
+        }
+
+        return true;
+    }
+
     pub fn replace(self: *CFG, block: *BasicBlock, old: *ir.InstructionList.Node, new: *ir.InstructionList.Node) void {
         block.replace(self.scope, old, new);
     }
@@ -1493,23 +1515,11 @@ test "rename" {
     const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
+    try std.testing.expect(!(try cfg.isSSA()));
     try cfg.rename();
 
     // After renaming, all assignments should be unique
-    const seen_opnd = try BitMap.init(allocator, cfg.opndCount());
-    defer seen_opnd.deinit(allocator);
-
-    for (cfg.blocks) |block| {
-        if (!block.reachable) continue;
-
-        var iter = block.instructionIter();
-        while (iter.next()) |insn| {
-            if (insn.data.outVar()) |v| {
-                try std.testing.expect(!seen_opnd.isSet(v.getID()));
-                try seen_opnd.setBit(v.getID());
-            }
-        }
-    }
+    try std.testing.expect(try cfg.isSSA());
 }
 
 fn complexExampleCFG() []const u8 {
