@@ -4,6 +4,7 @@ const BitMapTypes = enum {
     single,
     heap,
     shared,
+    nullMap,
 };
 
 pub fn BitMapSized(comptime T: type) type {
@@ -26,6 +27,9 @@ pub fn BitMapSized(comptime T: type) type {
             buff: []const T,
         },
 
+        nullMap: struct {
+        },
+
         pub fn initShared(bits: usize, buff: []const T) Self {
             return .{ .shared = .{ .bits = bits, .buff = buff } };
         }
@@ -38,6 +42,7 @@ pub fn BitMapSized(comptime T: type) type {
                 .single => {},
                 .heap => @memset(bm.heap.buff, 0),
                 .shared => unreachable,
+                .nullMap => unreachable,
             }
 
             return bm;
@@ -55,8 +60,18 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
+        pub const Null: Self = .{ .nullMap = .{ } };
+
+        pub fn isNullBlock(self: Self) bool {
+            return switch(self) {
+                .nullMap => true,
+                inline else => false,
+            };
+        }
+
         pub fn getBits(self: Self) usize {
             return switch(self) {
+                .nullMap => 0,
                 inline else => |payload| payload.bits
             };
         }
@@ -72,6 +87,7 @@ pub fn BitMapSized(comptime T: type) type {
 
             switch(self) {
                 .single => return @clz(self.single.buff) - padding,
+                .nullMap => unreachable,
                 inline .shared, .heap => |payload| {
                     var i = payload.buff.len;
                     var acc: usize = 0;
@@ -96,6 +112,7 @@ pub fn BitMapSized(comptime T: type) type {
             switch(bm.*) {
                 .single => bm.single.buff = orig.single.buff,
                 .shared, .heap => @memcpy(bm.heap.buff, orig.heap.buff),
+                .nullMap => unreachable,
             }
             return bm;
         }
@@ -107,12 +124,14 @@ pub fn BitMapSized(comptime T: type) type {
                 .single => |payload| payload.buff == other.single.buff,
                 .heap => |payload| std.mem.eql(T, payload.buff, other.heap.buff),
                 .shared => |payload| std.mem.eql(T, payload.buff, other.shared.buff),
+                .nullMap => false,
             };
         }
 
         pub fn popCount(self: Self) usize {
             switch(self) {
                 .single => |p| return @popCount(p.buff),
+                .nullMap => return 0,
                 inline .shared, .heap => |p| {
                     var count: usize = 0;
                     for (p.buff) |plane| {
@@ -133,6 +152,7 @@ pub fn BitMapSized(comptime T: type) type {
                     self.heap.buff[plane] |= (@as(T, 1) << @intCast(@mod(bit, AtomBits)));
                 },
                 .shared => unreachable,
+                .nullMap => unreachable,
             }
         }
 
@@ -162,6 +182,7 @@ pub fn BitMapSized(comptime T: type) type {
                         if (self.bit_index < self.bm.getBits()) {
                             switch(self.bm) {
                                 .single => unreachable,
+                                .nullMap => unreachable,
                                 inline .heap, .shared => |p| {
                                     self.current_plane = p.buff[self.plane_index];
                                 }
@@ -183,6 +204,7 @@ pub fn BitMapSized(comptime T: type) type {
             const plane = switch(self) {
                 inline .shared, .heap => |p| p.buff[0],
                 .single => |p| p.buff,
+                .nullMap => unreachable,
             };
 
             return .{
@@ -210,6 +232,7 @@ pub fn BitMapSized(comptime T: type) type {
                     self.heap.buff[plane] &= ~(@as(T, 1) << @intCast(@mod(bit, AtomBits)));
                 },
                 .shared => unreachable,
+                .nullMap => unreachable,
             }
         }
 
@@ -221,6 +244,7 @@ pub fn BitMapSized(comptime T: type) type {
                     const v = (@as(T, 1) << @intCast(bit));
                     return v == (p.buff & v);
                 },
+                .nullMap => return false,
                 inline .shared, .heap => |p| {
                     const plane = bit / AtomBits;
                     const mask = (@as(T, 1) << @intCast(@mod(bit, AtomBits)));
@@ -240,6 +264,7 @@ pub fn BitMapSized(comptime T: type) type {
                     }
                 },
                 .shared => unreachable,
+                .nullMap => unreachable,
             }
         }
 
@@ -258,6 +283,7 @@ pub fn BitMapSized(comptime T: type) type {
                     }
                 },
                 .shared => unreachable,
+                .nullMap => unreachable,
             }
         }
 
@@ -274,6 +300,7 @@ pub fn BitMapSized(comptime T: type) type {
                 .single => self.single.buff = other.single.buff,
                 .heap => @memcpy(self.heap.buff, other.heap.buff),
                 .shared => unreachable,
+                .nullMap => unreachable,
             }
         }
 
@@ -294,6 +321,7 @@ pub fn BitMapSized(comptime T: type) type {
                     }
                 },
                 .shared => unreachable,
+                .nullMap => unreachable,
             }
         }
 
@@ -302,6 +330,7 @@ pub fn BitMapSized(comptime T: type) type {
                 .heap => mem.free(self.heap.buff),
                 .shared => {},
                 .single => {},
+                .nullMap => return,
             }
             mem.destroy(self);
         }

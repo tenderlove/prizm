@@ -277,16 +277,16 @@ pub const SSADestructor = struct {
 
         // Figure 9.20, part C
         try self.isolatePhi(cfg, &copy_groups, &phi_copies);
-        try self.insertPhiCopies(cfg, &copy_groups, &phi_copies);
+        // try self.insertPhiCopies(cfg, &copy_groups, &phi_copies);
 
         // Figure 9.20, part F & G
-        try self.serializeCopyGroups(cfg, &copy_groups);
+        // try self.serializeCopyGroups(cfg, &copy_groups);
 
         // Figure 9.20, part D
-        try self.renameAllVariables(cfg);
+        // try self.renameAllVariables(cfg);
 
         // Figure 9.20, part E
-        try self.eliminatePhi(cfg);
+        // try self.eliminatePhi(cfg);
     }
 
     fn removePrimesAndAliases(block: *BasicBlock, prime_map: []*Op) void {

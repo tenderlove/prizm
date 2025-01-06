@@ -224,6 +224,11 @@ pub const CFG = struct {
 
     // Analyze the CFG.
     pub fn analyze(self: *CFG) !void {
+        for (self.blocks) |block| {
+            block.reachable = false;
+            try block.resetSets(self.scope.nextOpndId(), self.arena.allocator());
+        }
+
         try self.fillVarSets();
         try self.fillDominators();
         try self.fillLiveOut();
@@ -560,7 +565,7 @@ pub const BasicBlock = struct {
     jump_dest: ?*BasicBlock = null,
     idom: ?u64 = null,
 
-    fn initBlock(alloc: std.mem.Allocator, name: u64, start: anytype, finish: anytype, entry: bool, vars: usize) !*BasicBlock {
+    fn initBlock(alloc: std.mem.Allocator, name: u64, start: anytype, finish: anytype, entry: bool) !*BasicBlock {
         const block = try alloc.create(BasicBlock);
 
         block.* = .{
@@ -568,14 +573,26 @@ pub const BasicBlock = struct {
             .start = start,
             .finish = finish,
             .entry = entry,
-            .killed_set = try BitMap.init(alloc, vars),
-            .upward_exposed_set = try BitMap.init(alloc, vars),
-            .liveout_set = try BitMap.init(alloc, vars),
-            .livein_set = try BitMap.init(alloc, vars),
+            .killed_set = @constCast(&BitMap.Null),
+            .upward_exposed_set = @constCast(&BitMap.Null),
+            .liveout_set = @constCast(&BitMap.Null),
+            .livein_set = @constCast(&BitMap.Null),
             .predecessors = std.ArrayList(*BasicBlock).init(alloc),
         };
 
         return block;
+    }
+
+    pub fn resetSets(self: *BasicBlock, vars: usize, alloc: std.mem.Allocator) !void {
+        self.killed_set.deinit(alloc);
+        self.upward_exposed_set.deinit(alloc);
+        self.liveout_set.deinit(alloc);
+        self.livein_set.deinit(alloc);
+
+        self.killed_set = try BitMap.init(alloc, vars);
+        self.upward_exposed_set = try BitMap.init(alloc, vars);
+        self.liveout_set = try BitMap.init(alloc, vars);
+        self.livein_set = try BitMap.init(alloc, vars);
     }
 
     pub fn killedVariableCount(self: *BasicBlock) usize {
@@ -868,8 +885,7 @@ const CFGBuilder = struct {
             self.block_name,
             start,
             finish,
-            entry,
-            self.scope.nextOpndId());
+            entry);
 
         self.block_name += 1;
 
