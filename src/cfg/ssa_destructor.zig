@@ -45,7 +45,8 @@ pub const SSADestructor = struct {
                 switch(insn.data) {
                     .putlabel => { }, // Skip putlabel
                     .phi => |p| {
-                        const dest = p.out;
+                        const current_out = insn.data.getOut().?;
+                        const prime_out = try cfg.scope.newPrime(current_out);
 
                         for (0..p.params.items.len) |param_i| {
                             const param = p.params.items[param_i];
@@ -63,13 +64,10 @@ pub const SSADestructor = struct {
                             try phi_copies.append(.{
                                 .source_block = bb,
                                 .dest_block = def_block,
-                                .prime = dest,
-                                .original = param
+                                .prime = prime_out,
+                                .original = prime_in
                             });
                         }
-
-                        const current_out = insn.data.getOut().?;
-                        const prime_out = try cfg.scope.newPrime(current_out);
 
                         try isolation_copies.append(.{
                             .source_block = bb,
@@ -277,16 +275,16 @@ pub const SSADestructor = struct {
 
         // Figure 9.20, part C
         try self.isolatePhi(cfg, &copy_groups, &phi_copies);
-        // try self.insertPhiCopies(cfg, &copy_groups, &phi_copies);
+        try self.insertPhiCopies(cfg, &copy_groups, &phi_copies);
 
         // Figure 9.20, part F & G
-        // try self.serializeCopyGroups(cfg, &copy_groups);
+        try self.serializeCopyGroups(cfg, &copy_groups);
 
         // Figure 9.20, part D
-        // try self.renameAllVariables(cfg);
+        try self.renameAllVariables(cfg);
 
         // Figure 9.20, part E
-        // try self.eliminatePhi(cfg);
+        try self.eliminatePhi(cfg);
     }
 
     fn removePrimesAndAliases(block: *BasicBlock, prime_map: []*Op) void {
@@ -413,17 +411,38 @@ fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
             try std.testing.expectEqual(isolation_insn.pmov.out.prime.orig, isolation_insn.pmov.in);
             // The output of this isolation copy should be one of the inputs of the phi
             const phiinsn = phis[count];
-            var found = false;
-            for (phiinsn.phi.params.items) |input| {
+            const found = for (phiinsn.phi.params.items) |input| {
                 if (input == isolation_insn.pmov.out) {
-                    found = true;
-                    break;
+                    break true;
                 }
-            }
+            } else false;
             try std.testing.expect(found);
         }
         insn = insn.?.next;
         count += 1;
+    }
+}
+
+fn expectPhiOutputCopies(block: *BasicBlock, phis: []const ir.Instruction) !void {
+    var insn = block.finishInsn();
+    if (insn.?.data.isJump()) insn = insn.?.prev;
+
+    for (0..(phis.len - 1)) |_| {
+        insn = insn.?.prev;
+    }
+
+    for (phis) |phi_insn| {
+        // We should have a parallel copy
+        try std.testing.expect(insn.?.data.isPMov());
+        // The output of the pmov should be the same as the output of the phi
+        try std.testing.expectEqual(phi_insn.phi.out, insn.?.data.getOut());
+        // The input should be one of the phi parameters
+        const in = insn.?.data.pmov.in;
+        const found = for (phi_insn.phi.params.items) |item| {
+            if (item == in) break true;
+        } else false;
+        try std.testing.expect(found);
+        insn = insn.?.next;
     }
 }
 
@@ -435,6 +454,69 @@ fn expectIsolatedPhiOutput(phi: ir.Instruction, isolation_insn: ir.Instruction) 
     // The output of the isolation copy should be the pre-primed phi output (the SSA name)
     try std.testing.expectEqual(isolation_insn.pmov.in.prime.orig, isolation_insn.pmov.out);
     try std.testing.expectEqual(ir.OperandType.redef, @as(ir.OperandType, isolation_insn.pmov.out.*));
+}
+
+test "inserting phi copies actually copies the right thing" {
+    const allocator = std.testing.allocator;
+
+    const code =
+\\ x = 10
+\\ y = 11
+\\ begin
+\\   t = x
+\\   x = y
+\\   y = t
+\\ end while i < 100
+\\ 
+\\ p x
+\\ p y
+;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const scope = try cmp.compileString(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try cfg_zig.makeCFG(allocator, scope);
+    defer cfg.deinit();
+
+    var destructor = SSADestructor { .mem = allocator };
+
+    try cfg.placePhis();
+    try cfg.rename();
+
+    var copy_groups = std.ArrayList(*ir.InstructionList.Node).init(allocator);
+    defer copy_groups.deinit();
+
+    var phi_copies = std.ArrayList(SSADestructor.ParallelCopy).init(allocator);
+    defer phi_copies.deinit();
+
+    try destructor.isolatePhi(cfg, &copy_groups, &phi_copies);
+    try destructor.insertPhiCopies(cfg, &copy_groups, &phi_copies);
+
+    // After we insert Phi Copies, there should be a copy in dominating
+    // blocks to the Phi's output param.
+    // In this case we have two Phi, x'1 and y'1, so there should be
+    // a copy in BB0:
+    //   * x'1 <- x'0
+    //   * y'1 <- y'0
+    //
+    // Then at the end of BB1 (before the jump):
+    //   * x'1 <- x'2
+    //   * y'1 <- y'2
+    //
+    // Adding these copies make it no longer SSA (since we're copying to the Phi output twice)
+
+    // Get the 2 phi instructions from BB1
+    const phi1 = cfg.blocks[1].start.next.?;
+    try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi1.data));
+
+    const phi2 = phi1.next.?;
+    try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi2.data));
+
+    try expectPhiOutputCopies(cfg.blocks[0], &[_] ir.Instruction { phi1.data, phi2.data });
+    try expectPhiOutputCopies(cfg.blocks[1], &[_] ir.Instruction { phi1.data, phi2.data });
 }
 
 test "destructor fixes all variables" {
