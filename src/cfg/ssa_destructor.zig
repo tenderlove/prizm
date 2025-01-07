@@ -18,8 +18,8 @@ pub const SSADestructor = struct {
     const ParallelCopy = struct {
         source_block: *BasicBlock,
         dest_block: *BasicBlock,
-        prime: *Op,
-        original: *Op,
+        output: *Op,
+        input: *Op,
 
         fn cmpDest(_: void, a: ParallelCopy, b: ParallelCopy) bool {
             return a.dest_block.name < b.dest_block.name;
@@ -56,24 +56,24 @@ pub const SSADestructor = struct {
                             try predecessor_copies.append(.{
                                 .source_block = bb,
                                 .dest_block = cfg.blocks[param.redef.defblock.name],
-                                .prime = prime_in,
-                                .original = param
+                                .output = prime_in,
+                                .input = param
                             });
 
                             const def_block = param.getDefinitionBlock();
                             try phi_copies.append(.{
                                 .source_block = bb,
                                 .dest_block = def_block,
-                                .prime = prime_out,
-                                .original = prime_in
+                                .output = prime_out,
+                                .input = prime_in
                             });
                         }
 
                         try isolation_copies.append(.{
                             .source_block = bb,
                             .dest_block = bb,
-                            .prime = prime_out,
-                            .original = current_out,
+                            .output = prime_out,
+                            .input = current_out,
                         });
 
                         insn.data.setOut(prime_out);
@@ -98,7 +98,7 @@ pub const SSADestructor = struct {
                 var insn = iter.?.prev.?; // Should be the last Phi in the block
 
                 for (isolation_copies.items) |copy| {
-                    insn = try bb.insertParallelCopy(cfg.scope, insn, copy.original, copy.prime, self.group);
+                    insn = try bb.insertParallelCopy(cfg.scope, insn, copy.input, copy.output, self.group);
                     try copy_groups.append(insn);
                 }
                 self.group += 1;
@@ -113,7 +113,7 @@ pub const SSADestructor = struct {
                         current_block = copy.dest_block.name;
                         self.group += 1;
                     }
-                    const insn = try copy.dest_block.appendParallelCopy(cfg.scope, copy.prime, copy.original, self.group);
+                    const insn = try copy.dest_block.appendParallelCopy(cfg.scope, copy.output, copy.input, self.group);
                     try copy_groups.append(insn);
                 }
                 self.group += 1;
@@ -149,7 +149,7 @@ pub const SSADestructor = struct {
                     current_block = copy.dest_block.name;
                     self.group += 1;
                 }
-                const pcopy = try copy.dest_block.appendParallelCopy(cfg.scope, copy.prime, copy.original, self.group);
+                const pcopy = try copy.dest_block.appendParallelCopy(cfg.scope, copy.output, copy.input, self.group);
                 try copy_groups.append(pcopy);
             }
             self.group += 1;
