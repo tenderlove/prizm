@@ -412,9 +412,7 @@ fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
             // The output of this isolation copy should be one of the inputs of the phi
             const phiinsn = phis[count];
             const found = for (phiinsn.phi.params.items) |input| {
-                if (input == isolation_insn.pmov.out) {
-                    break true;
-                }
+                if (input == isolation_insn.pmov.out) break true;
             } else false;
             try std.testing.expect(found);
         }
