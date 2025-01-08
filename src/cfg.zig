@@ -15,6 +15,12 @@ const BitMatrix = bitmatrix.BitMatrix;
 const SSADestructor = @import("cfg/ssa_destructor.zig").SSADestructor;
 
 pub const CFG = struct {
+    const State = enum {
+        start,
+        analyzed,
+        phi_placed,
+    };
+
     arena: std.heap.ArenaAllocator,
     mem: std.mem.Allocator,
     head: *BasicBlock,
@@ -22,6 +28,7 @@ pub const CFG = struct {
     dom_tree: ?*BitMatrix = null,
     globals: ?*BitMap = null,
     scope: *Scope,
+    state: State = .start,
 
     pub fn init(mem: std.mem.Allocator, arena: std.heap.ArenaAllocator, scope: *Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
         const cfg = try mem.create(CFG);
@@ -546,6 +553,29 @@ pub const CFG = struct {
         self.arena.deinit();
         self.mem.destroy(self);
     }
+
+    const CompileStepIterator = struct {
+        cfg: *CFG,
+
+        pub fn next(self: *CompileStepIterator) !void {
+            switch (self.cfg.state) {
+                .start => {
+                    try self.cfg.analyze();
+                    self.cfg.state = .analyzed;
+                },
+                .analyzed => {
+                    try self.cfg.placePhis();
+                    self.cfg.state = .phi_placed;
+                },
+                .phi_placed => {
+                }
+            }
+        }
+    };
+
+    pub fn compileSteps(self: *CFG) !CompileStepIterator {
+        return .{ .cfg = self, };
+    }
 };
 
 pub const BasicBlock = struct {
@@ -994,21 +1024,25 @@ const CFGBuilder = struct {
         // peephole optimization step yet. Maybe we don't need it and can avoid
         // the extra loops here?
 
-        try cfg.analyze();
-
         return cfg;
     }
 };
 
 pub fn makeCFG(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
     var builder = CFGBuilder { .scope = scope };
-    return try builder.build(allocator, scope);
+    const cfg = try builder.build(allocator, scope);
+    var iter = try cfg.compileSteps();
+    try iter.next();
+    return cfg;
+
 }
 
 fn buildCFG(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
     var builder = CFGBuilder { .scope = scope };
     const cfg = try builder.build(allocator, scope);
-    try cfg.placePhis();
+    var iter = try cfg.compileSteps();
+    try iter.next();
+    try iter.next();
     return cfg;
 }
 
