@@ -15,6 +15,7 @@ pub const SSADestructor = struct {
     mem: std.mem.Allocator,
     group: usize = 0,
     phi_copies: ParallelCopyList,
+    copy_groups: std.ArrayList(*ir.InstructionList.Node),
 
     const ParallelCopy = struct {
         source_block: *BasicBlock,
@@ -34,19 +35,21 @@ pub const SSADestructor = struct {
         self.* = SSADestructor {
             .mem = mem,
             .phi_copies = ParallelCopyList.init(mem),
+            .copy_groups = std.ArrayList(*ir.InstructionList.Node).init(mem),
         };
         return self;
     }
 
     pub fn deinit(self: *SSADestructor) void {
         self.phi_copies.deinit();
+        self.copy_groups.deinit();
         self.mem.destroy(self);
     }
 
     // Isolate Phi functions by placing parallel copies immediately after the
     // Phi functions, and also in predecessor blocks.  Figure 9.20, part C
     // (part A and B are already done)
-    pub fn isolatePhi(self: *SSADestructor, cfg: *CFG, copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
+    pub fn isolatePhi(self: *SSADestructor, cfg: *CFG) !void {
         for (cfg.blocks) |bb| {
             if (!bb.reachable) continue;
 
@@ -116,7 +119,7 @@ pub const SSADestructor = struct {
 
                 for (isolation_copies.items) |copy| {
                     insn = try bb.insertParallelCopy(cfg.scope, insn, copy.input, copy.output, self.group);
-                    try copy_groups.append(insn);
+                    try self.copy_groups.append(insn);
                 }
                 self.group += 1;
             }
@@ -131,7 +134,7 @@ pub const SSADestructor = struct {
                         self.group += 1;
                     }
                     const insn = try copy.dest_block.appendParallelCopy(cfg.scope, copy.output, copy.input, self.group);
-                    try copy_groups.append(insn);
+                    try self.copy_groups.append(insn);
                 }
                 self.group += 1;
             }
@@ -156,7 +159,7 @@ pub const SSADestructor = struct {
         }
     }
 
-    pub fn insertPhiCopies(self: *SSADestructor, cfg: *CFG, copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
+    pub fn insertPhiCopies(self: *SSADestructor, cfg: *CFG) !void {
         if (self.phi_copies.items.len > 0) {
             std.mem.sort(ParallelCopy, self.phi_copies.items, {}, ParallelCopy.cmpDest);
             var current_block = self.phi_copies.items[0].dest_block.name;
@@ -167,7 +170,7 @@ pub const SSADestructor = struct {
                     self.group += 1;
                 }
                 const pcopy = try copy.dest_block.appendParallelCopy(cfg.scope, copy.output, copy.input, self.group);
-                try copy_groups.append(pcopy);
+                try self.copy_groups.append(pcopy);
             }
             self.group += 1;
         }
@@ -254,15 +257,15 @@ pub const SSADestructor = struct {
         }
     }
 
-    pub fn serializeCopyGroups(self: *SSADestructor, cfg: *CFG, copy_groups: *std.ArrayList(*ir.InstructionList.Node)) !void {
+    pub fn serializeCopyGroups(self: *SSADestructor, cfg: *CFG) !void {
         const bits = cfg.opndCount();
         const matrix = try BitMatrix.init(self.mem, bits, bits);
         defer matrix.deinit(self.mem);
 
         var current_group: usize = 0;
-        var start_of_group = copy_groups.items[0];
+        var start_of_group = self.copy_groups.items[0];
 
-        for (copy_groups.items) |pcopy| {
+        for (self.copy_groups.items) |pcopy| {
             const src = pcopy.data.pmov.in;
             const dst = pcopy.data.pmov.out;
             matrix.set(src.getID(), dst.getID());
@@ -284,15 +287,12 @@ pub const SSADestructor = struct {
     }
 
     pub fn destruct(self: *SSADestructor, cfg: *CFG) !void {
-        var copy_groups = std.ArrayList(*ir.InstructionList.Node).init(self.mem);
-        defer copy_groups.deinit();
-
         // Figure 9.20, part C
-        try self.isolatePhi(cfg, &copy_groups);
-        try self.insertPhiCopies(cfg, &copy_groups);
+        try self.isolatePhi(cfg);
+        try self.insertPhiCopies(cfg);
 
         // Figure 9.20, part F & G
-        try self.serializeCopyGroups(cfg, &copy_groups);
+        try self.serializeCopyGroups(cfg);
 
         // Figure 9.20, part D
         try self.renameAllVariables(cfg);
@@ -363,10 +363,7 @@ test "phi isolation adds I/O variable copies" {
     try cfg.placePhis();
     try cfg.rename();
 
-    var copy_groups = std.ArrayList(*ir.InstructionList.Node).init(allocator);
-    defer copy_groups.deinit();
-
-    try destructor.isolatePhi(cfg, &copy_groups);
+    try destructor.isolatePhi(cfg);
 
     // After we isolate phi, there should be copy instructions at the end of
     // BB0 and BB1 to isolate the phi parameters, then there should be
@@ -497,11 +494,8 @@ test "inserting phi copies actually copies the right thing" {
     try cfg.placePhis();
     try cfg.rename();
 
-    var copy_groups = std.ArrayList(*ir.InstructionList.Node).init(allocator);
-    defer copy_groups.deinit();
-
-    try destructor.isolatePhi(cfg, &copy_groups);
-    try destructor.insertPhiCopies(cfg, &copy_groups);
+    try destructor.isolatePhi(cfg);
+    try destructor.insertPhiCopies(cfg);
 
     // After we insert Phi Copies, there should be a copy in dominating
     // blocks to the Phi's output param.
