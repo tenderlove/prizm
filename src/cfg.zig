@@ -507,7 +507,8 @@ pub const CFG = struct {
     }
 
     pub fn destructSSA(self: *CFG) !void {
-        var destructor = SSADestructor { .mem = self.mem };
+        var destructor = try SSADestructor.init(self.mem);
+        defer destructor.deinit();
         try destructor.destruct(self);
     }
 
