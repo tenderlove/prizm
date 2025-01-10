@@ -3,7 +3,8 @@ const prism = @import("prism.zig");
 const compiler = @import("compiler.zig");
 const vm = @import("vm.zig");
 const ssa = @import("ssa.zig");
-const CFG = @import("cfg.zig");
+const cfg_z = @import("cfg.zig");
+const CFG = cfg_z.CFG;
 const Scope = @import("scope.zig").Scope;
 const Allocator = std.mem.Allocator;
 const yazap = @import("yazap");
@@ -69,9 +70,8 @@ pub fn main() !void {
             defer cc.deinit(allocator);
 
             const scope = try cc.compile(&scope_node);
-            const cfg = try CFG.makeCFG(allocator, scope);
-
-            _ = cfg;
+            const cfg = try CFG.build(allocator, scope);
+            defer cfg.deinit();
 
             return;
         }

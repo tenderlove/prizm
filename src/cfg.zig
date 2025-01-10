@@ -19,6 +19,7 @@ pub const CFG = struct {
         start,
         analyzed,
         phi_placed,
+        renamed,
     };
 
     arena: std.heap.ArenaAllocator,
@@ -569,13 +570,23 @@ pub const CFG = struct {
                     self.cfg.state = .phi_placed;
                 },
                 .phi_placed => {
-                }
+                    try self.cfg.rename();
+                    self.cfg.state = .renamed;
+                },
+                .renamed => {},
             }
         }
     };
 
     pub fn compileSteps(self: *CFG) !CompileStepIterator {
+        if (self.state != .start) return error.CompilationError;
+
         return .{ .cfg = self, };
+    }
+
+    pub fn build(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
+        var builder = CFGBuilder { .scope = scope };
+        return try builder.build(allocator, scope);
     }
 };
 
@@ -1029,18 +1040,8 @@ const CFGBuilder = struct {
     }
 };
 
-pub fn makeCFG(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
-    var builder = CFGBuilder { .scope = scope };
-    const cfg = try builder.build(allocator, scope);
-    var iter = try cfg.compileSteps();
-    try iter.next();
-    return cfg;
-
-}
-
 fn buildCFG(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
-    var builder = CFGBuilder { .scope = scope };
-    const cfg = try builder.build(allocator, scope);
+    const cfg = try CFG.build(allocator, scope);
     var iter = try cfg.compileSteps();
     try iter.next();
     try iter.next();

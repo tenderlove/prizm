@@ -354,14 +354,16 @@ test "phi isolation adds I/O variable copies" {
     const scope = try cmp.compileString(allocator, machine, code);
     defer scope.deinit();
 
-    const cfg = try cfg_zig.makeCFG(allocator, scope);
+    const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
     var destructor = try SSADestructor.init(allocator);
     defer destructor.deinit();
 
-    try cfg.placePhis();
-    try cfg.rename();
+    var iter = try cfg.compileSteps();
+    while (cfg.state != .renamed) {
+        try iter.next();
+    }
 
     try destructor.isolatePhi(cfg);
 
@@ -485,14 +487,16 @@ test "inserting phi copies actually copies the right thing" {
     const scope = try cmp.compileString(allocator, machine, code);
     defer scope.deinit();
 
-    const cfg = try cfg_zig.makeCFG(allocator, scope);
+    const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
+
+    var iter = try cfg.compileSteps();
+    while (cfg.state != .renamed) {
+        try iter.next();
+    }
 
     var destructor = try SSADestructor.init(allocator);
     defer destructor.deinit();
-
-    try cfg.placePhis();
-    try cfg.rename();
 
     try destructor.isolatePhi(cfg);
     try destructor.insertPhiCopies(cfg);
@@ -543,11 +547,14 @@ test "destructor fixes all variables" {
     const scope = try cmp.compileString(allocator, machine, code);
     defer scope.deinit();
 
-    const cfg = try cfg_zig.makeCFG(allocator, scope);
+    const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    try cfg.placePhis();
-    try cfg.rename();
+    var steps = try cfg.compileSteps();
+    while (cfg.state != .renamed) {
+        try steps.next();
+    }
+
     try cfg.destructSSA();
 
     // After SSA destruction, we shouldn't have any prime operands, or renamed operands
@@ -596,11 +603,13 @@ test "cycle in parallel copy" {
     const scope = try cmp.compileString(allocator, machine, code);
     defer scope.deinit();
 
-    const cfg = try cfg_zig.makeCFG(allocator, scope);
+    const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    try cfg.placePhis();
-    try cfg.rename();
+    var iter = try cfg.compileSteps();
+    while (cfg.state != .renamed) {
+        try iter.next();
+    }
 
     const bits = cfg.opndCount();
     const matrix = try BitMatrix.init(allocator, bits, bits);
@@ -659,11 +668,14 @@ test "destruction removes all parallel copies" {
     const scope = try cmp.compileString(allocator, machine, code);
     defer scope.deinit();
 
-    const cfg = try cfg_zig.makeCFG(allocator, scope);
+    const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    try cfg.placePhis();
-    try cfg.rename();
+    var steps = try cfg.compileSteps();
+    while (cfg.state != .renamed) {
+        try steps.next();
+    }
+
     try cfg.destructSSA();
 
     // After SSA destruction, we shouldn't have any prime operands, or renamed operands
@@ -702,11 +714,14 @@ test "destruction maintains block endings" {
     const scope = try cmp.compileString(allocator, machine, code);
     defer scope.deinit();
 
-    const cfg = try cfg_zig.makeCFG(allocator, scope);
+    const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    try cfg.placePhis();
-    try cfg.rename();
+    var steps = try cfg.compileSteps();
+    while (cfg.state != .renamed) {
+        try steps.next();
+    }
+
     try cfg.destructSSA();
 
     // After SSA destruction, we shouldn't have any prime operands, or renamed operands

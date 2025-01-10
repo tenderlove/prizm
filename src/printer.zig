@@ -1,7 +1,9 @@
 const std = @import("std");
 const ir = @import("ir.zig");
 const cmp = @import("compiler.zig");
-const CFG = @import("cfg.zig");
+const cfg_z = @import("cfg.zig");
+const CFG = cfg_z.CFG;
+const BasicBlock = cfg_z.BasicBlock;
 const Scope = @import("scope.zig").Scope;
 const bm = @import("utils/bitmap.zig");
 
@@ -193,7 +195,7 @@ const CFGPrinter = struct {
         }
     }
 
-    fn printBlock(scope: *Scope, blk: *CFG.BasicBlock, ctx: *const Context) !void {
+    fn printBlock(scope: *Scope, blk: *BasicBlock, ctx: *const Context) !void {
         try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.name });
         if (blk.entry) {
             try ctx.out.print("color=green\n", .{});
@@ -272,7 +274,8 @@ const CFGPrinter = struct {
         try out.print("  edge[fontname=\"Comic Code\"];\n", .{});
         try out.print("\n\n", .{});
         while (work.popOrNull()) |work_scope| {
-            const cfg = try CFG.makeCFG(alloc, work_scope);
+            const cfg = try CFG.build(alloc, scope);
+            defer cfg.deinit();
 
             var widest_insn: usize = 0;
 
@@ -286,21 +289,28 @@ const CFGPrinter = struct {
                 }
             }
 
+            var steps = try cfg.compileSteps();
+
             try out.print("subgraph cluster_{d} {{\n", .{ work_scope.name });
             try out.print("color=lightgrey;\n", .{});
             if (opts.destruct_ssa) |_| {
-                try cfg.placePhis();
-                try cfg.rename();
+                while (cfg.state != .renamed) {
+                    try steps.next();
+                }
                 try cfg.destructSSA();
-                try cfg.analyze();
-                try cfg.placePhis();
-                try cfg.rename();
+                // try cfg.analyze();
+                // try cfg.placePhis();
+                // try cfg.rename();
             } else {
                 if (opts.place_phi or opts.rename) {
-                    try cfg.placePhis();
+                    while (cfg.state != .phi_placed) {
+                        try steps.next();
+                    }
                 }
                 if (opts.rename) {
-                    try cfg.rename();
+                    while (cfg.state != .renamed) {
+                        try steps.next();
+                    }
                 }
             }
 
