@@ -20,6 +20,11 @@ pub const CFG = struct {
         analyzed,
         phi_placed,
         renamed,
+        phi_isolated,
+        phi_copies_inserted,
+        copy_groups_serialized,
+        renamed_variables_removed,
+        phi_removed,
     };
 
     arena: std.heap.ArenaAllocator,
@@ -28,6 +33,7 @@ pub const CFG = struct {
     blocks: []const *BasicBlock,
     dom_tree: ?*BitMatrix = null,
     globals: ?*BitMap = null,
+    ssa_destructor: *SSADestructor,
     scope: *Scope,
     state: State = .start,
 
@@ -40,6 +46,7 @@ pub const CFG = struct {
             .head = head,
             .blocks = blocks,
             .scope = scope,
+            .ssa_destructor = try SSADestructor.init(mem),
         };
 
         return cfg;
@@ -507,10 +514,32 @@ pub const CFG = struct {
         try renamer.rename(self, self.head);
     }
 
+    fn isolatePhi(self: *CFG) !void {
+        try self.ssa_destructor.isolatePhi(self);
+    }
+
+    fn insertPhiCopies(self: *CFG) !void {
+        try self.ssa_destructor.insertPhiCopies(self);
+    }
+
+    fn serializeCopyGroups(self: *CFG) !void {
+        try self.ssa_destructor.serializeCopyGroups(self);
+    }
+
+    fn removeRenamedVariables(self: *CFG) !void {
+        try self.ssa_destructor.renameAllVariables(self);
+    }
+
+    fn removePhi(self: *CFG) !void {
+        try self.ssa_destructor.eliminatePhi(self);
+    }
+
     pub fn destructSSA(self: *CFG) !void {
-        var destructor = try SSADestructor.init(self.mem);
-        defer destructor.deinit();
-        try destructor.destruct(self);
+        if (self.state != .renamed) return error.CompilationError;
+
+        while (self.state != .phi_removed) {
+            _ = try self.nextCompileStep();
+        }
     }
 
     fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *usize) !void {
@@ -553,28 +582,15 @@ pub const CFG = struct {
     pub fn deinit(self: *CFG) void {
         self.mem.free(self.blocks);
         self.arena.deinit();
+        self.ssa_destructor.deinit();
         self.mem.destroy(self);
     }
 
     const CompileStepIterator = struct {
         cfg: *CFG,
 
-        pub fn next(self: *CompileStepIterator) !void {
-            switch (self.cfg.state) {
-                .start => {
-                    try self.cfg.analyze();
-                    self.cfg.state = .analyzed;
-                },
-                .analyzed => {
-                    try self.cfg.placePhis();
-                    self.cfg.state = .phi_placed;
-                },
-                .phi_placed => {
-                    try self.cfg.rename();
-                    self.cfg.state = .renamed;
-                },
-                .renamed => {},
-            }
+        pub fn next(self: *CompileStepIterator) !CFG.State {
+            return try self.cfg.nextCompileStep();
         }
     };
 
@@ -582,6 +598,45 @@ pub const CFG = struct {
         if (self.state != .start) return error.CompilationError;
 
         return .{ .cfg = self, };
+    }
+
+    pub fn nextCompileStep(self: *CFG) !CFG.State {
+        switch (self.state) {
+            .start => {
+                try self.analyze();
+                self.state = .analyzed;
+            },
+            .analyzed => {
+                try self.placePhis();
+                self.state = .phi_placed;
+            },
+            .phi_placed => {
+                try self.rename();
+                self.state = .renamed;
+            },
+            .renamed => {
+                try self.isolatePhi();
+                self.state = .phi_isolated;
+            },
+            .phi_isolated => {
+                try self.insertPhiCopies();
+                self.state = .phi_copies_inserted;
+            },
+            .phi_copies_inserted => {
+                try self.serializeCopyGroups();
+                self.state = .copy_groups_serialized;
+            },
+            .copy_groups_serialized => {
+                try self.removeRenamedVariables();
+                self.state = .renamed_variables_removed;
+            },
+            .renamed_variables_removed => {
+                try self.removePhi();
+                self.state = .phi_removed;
+            },
+            .phi_removed => { },
+        }
+        return self.state;
     }
 
     pub fn build(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
@@ -1043,8 +1098,8 @@ const CFGBuilder = struct {
 fn buildCFG(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
     const cfg = try CFG.build(allocator, scope);
     var iter = try cfg.compileSteps();
-    try iter.next();
-    try iter.next();
+    _ = try iter.next();
+    _ = try iter.next();
     return cfg;
 }
 

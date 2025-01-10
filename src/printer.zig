@@ -295,7 +295,7 @@ const CFGPrinter = struct {
             try out.print("color=lightgrey;\n", .{});
             if (opts.destruct_ssa) |_| {
                 while (cfg.state != .renamed) {
-                    try steps.next();
+                    _ = try steps.next();
                 }
                 try cfg.destructSSA();
                 // try cfg.analyze();
@@ -304,12 +304,12 @@ const CFGPrinter = struct {
             } else {
                 if (opts.place_phi or opts.rename) {
                     while (cfg.state != .phi_placed) {
-                        try steps.next();
+                        _ = try steps.next();
                     }
                 }
                 if (opts.rename) {
                     while (cfg.state != .renamed) {
-                        try steps.next();
+                        _ = try steps.next();
                     }
                 }
             }

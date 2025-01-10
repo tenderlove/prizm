@@ -49,6 +49,7 @@ pub const SSADestructor = struct {
     // Isolate Phi functions by placing parallel copies immediately after the
     // Phi functions, and also in predecessor blocks.  Figure 9.20, part C
     // (part A and B are already done)
+    // Figure 9.20, part C
     pub fn isolatePhi(self: *SSADestructor, cfg: *CFG) !void {
         for (cfg.blocks) |bb| {
             if (!bb.reachable) continue;
@@ -143,6 +144,7 @@ pub const SSADestructor = struct {
 
     // Now that Phi are isolated, we need to rename prime's to compiler
     // generated temps and remove subscript variables.  Figure 9.20, part d
+    // Figure 9.20, part D
     pub fn renameAllVariables(self: *SSADestructor, cfg: *CFG) !void {
         // We need to map primes to new temp variables, so lets allocate
         // an array here then allocate new temps as we need them.
@@ -159,6 +161,7 @@ pub const SSADestructor = struct {
         }
     }
 
+    // Figure 9.20, part C
     pub fn insertPhiCopies(self: *SSADestructor, cfg: *CFG) !void {
         if (self.phi_copies.items.len > 0) {
             std.mem.sort(ParallelCopy, self.phi_copies.items, {}, ParallelCopy.cmpDest);
@@ -177,6 +180,7 @@ pub const SSADestructor = struct {
     }
 
     // Eliminate phi functions. Figure 9.20 part e
+    // Figure 9.20, part E
     pub fn eliminatePhi(_: *SSADestructor, cfg: *CFG) !void {
         for (cfg.blocks) |bb| {
             if (!bb.reachable) continue;
@@ -257,6 +261,7 @@ pub const SSADestructor = struct {
         }
     }
 
+    // Figure 9.20, part F & G
     pub fn serializeCopyGroups(self: *SSADestructor, cfg: *CFG) !void {
         const bits = cfg.opndCount();
         const matrix = try BitMatrix.init(self.mem, bits, bits);
@@ -284,21 +289,6 @@ pub const SSADestructor = struct {
             try self.checkForCycles(cfg, matrix);
             try self.serializeCopyGroup(cfg, start_of_group, current_group);
         }
-    }
-
-    pub fn destruct(self: *SSADestructor, cfg: *CFG) !void {
-        // Figure 9.20, part C
-        try self.isolatePhi(cfg);
-        try self.insertPhiCopies(cfg);
-
-        // Figure 9.20, part F & G
-        try self.serializeCopyGroups(cfg);
-
-        // Figure 9.20, part D
-        try self.renameAllVariables(cfg);
-
-        // Figure 9.20, part E
-        try self.eliminatePhi(cfg);
     }
 
     fn removePrimesAndAliases(block: *BasicBlock, prime_map: []*Op) void {
@@ -362,7 +352,7 @@ test "phi isolation adds I/O variable copies" {
 
     var iter = try cfg.compileSteps();
     while (cfg.state != .renamed) {
-        try iter.next();
+        _ = try iter.next();
     }
 
     try destructor.isolatePhi(cfg);
@@ -492,7 +482,7 @@ test "inserting phi copies actually copies the right thing" {
 
     var iter = try cfg.compileSteps();
     while (cfg.state != .renamed) {
-        try iter.next();
+        _ = try iter.next();
     }
 
     var destructor = try SSADestructor.init(allocator);
@@ -552,7 +542,7 @@ test "destructor fixes all variables" {
 
     var steps = try cfg.compileSteps();
     while (cfg.state != .renamed) {
-        try steps.next();
+        _ = try steps.next();
     }
 
     try cfg.destructSSA();
@@ -608,7 +598,7 @@ test "cycle in parallel copy" {
 
     var iter = try cfg.compileSteps();
     while (cfg.state != .renamed) {
-        try iter.next();
+        _ = try iter.next();
     }
 
     const bits = cfg.opndCount();
@@ -673,7 +663,7 @@ test "destruction removes all parallel copies" {
 
     var steps = try cfg.compileSteps();
     while (cfg.state != .renamed) {
-        try steps.next();
+        _ = try steps.next();
     }
 
     try cfg.destructSSA();
@@ -719,7 +709,7 @@ test "destruction maintains block endings" {
 
     var steps = try cfg.compileSteps();
     while (cfg.state != .renamed) {
-        try steps.next();
+        _ = try steps.next();
     }
 
     try cfg.destructSSA();
