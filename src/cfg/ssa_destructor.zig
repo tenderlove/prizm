@@ -350,9 +350,7 @@ test "phi isolation adds I/O variable copies" {
     var destructor = try SSADestructor.init(allocator);
     defer destructor.deinit();
 
-    while (cfg.state != .renamed) {
-        _ = try cfg.nextCompileStep();
-    }
+    try cfg.compileUntil(.renamed);
 
     try destructor.isolatePhi(cfg);
 
@@ -479,9 +477,7 @@ test "inserting phi copies actually copies the right thing" {
     const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    while (cfg.state != .renamed) {
-        _ = try cfg.nextCompileStep();
-    }
+    try cfg.compileUntil(.renamed);
 
     var destructor = try SSADestructor.init(allocator);
     defer destructor.deinit();
@@ -538,9 +534,7 @@ test "destructor fixes all variables" {
     const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    while (cfg.state != .renamed) {
-        _ = try cfg.nextCompileStep();
-    }
+    try cfg.compileUntil(.renamed);
 
     try cfg.destructSSA();
 
@@ -593,9 +587,7 @@ test "cycle in parallel copy" {
     const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    while (cfg.state != .renamed) {
-        _ = try cfg.nextCompileStep();
-    }
+    try cfg.compileUntil(.renamed);
 
     const bits = cfg.opndCount();
     const matrix = try BitMatrix.init(allocator, bits, bits);
@@ -657,9 +649,7 @@ test "destruction removes all parallel copies" {
     const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    while (cfg.state != .renamed) {
-        _ = try cfg.nextCompileStep();
-    }
+    try cfg.compileUntil(.renamed);
 
     try cfg.destructSSA();
 
@@ -702,9 +692,7 @@ test "destruction maintains block endings" {
     const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    while (cfg.state != .renamed) {
-        _ = try cfg.nextCompileStep();
-    }
+    try cfg.compileUntil(.renamed);
 
     try cfg.destructSSA();
 

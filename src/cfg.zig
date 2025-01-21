@@ -625,6 +625,12 @@ pub const CFG = struct {
         return self.state;
     }
 
+    pub fn compileUntil(self: *CFG, state: CFG.State) !void {
+        while (self.state != state) {
+            _ = try self.nextCompileStep();
+        }
+    }
+
     pub fn build(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
         var builder = CFGBuilder { .scope = scope };
         return try builder.build(allocator, scope);
