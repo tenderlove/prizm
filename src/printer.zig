@@ -28,7 +28,7 @@ const IRPrinter = struct {
                 try out.print("{s}", .{ p.source_name, });
             },
             .string => |p| try out.print("{s}", .{p.value}),
-            .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.name }),
+            .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.id }),
             .redef => |r| {
                 try printOpnd(r.orig, out);
                 try printIntAsSubscript(r.variant, out);
@@ -108,7 +108,7 @@ const IRPrinter = struct {
 
         while (work.popOrNull()) |work_scope| {
             var node = work_scope.insns.first;
-            try out.print("= Scope: {d} ======================\n", .{work_scope.name});
+            try out.print("= Scope: {d} ======================\n", .{work_scope.id});
 
             const digits = widestOutOp(work_scope) + 1;
             var widest_insn: usize = 0;
@@ -196,7 +196,7 @@ const CFGPrinter = struct {
     }
 
     fn printBlock(scope: *Scope, blk: *BasicBlock, ctx: *const Context) !void {
-        try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.name, blk.name });
+        try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.id, blk.name });
         if (blk.entry) {
             try ctx.out.print("color=green\n", .{});
         }
@@ -244,35 +244,30 @@ const CFGPrinter = struct {
 
         if (blk.fall_through_dest) |left| {
             try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"fall through\"];\n", .{
-                ctx.scope.name,
+                ctx.scope.id,
                 blk.name,
-                ctx.scope.name,
+                ctx.scope.id,
                 left.name
             });
         }
 
         if (blk.jump_dest) |right| {
             try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"jump\"];\n", .{
-                ctx.scope.name,
+                ctx.scope.id,
                 blk.name,
-                ctx.scope.name,
+                ctx.scope.id,
                 right.name
             });
         }
 
     }
 
-    pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, opts: CFGOptions, out: *const std.io.AnyWriter) !void {
+    fn printScope(alloc: std.mem.Allocator, scope: *Scope, steps: CFG.State, out: *const std.io.AnyWriter) !void {
         var work = std.ArrayList(*Scope).init(alloc);
         defer work.deinit();
 
         try work.append(scope);
 
-        try out.print("digraph {{\n", .{});
-        try out.print("  rankdir=TD; ordering=out\n", .{});
-        try out.print("  node[shape=box fontname=\"Comic Code\"];\n", .{});
-        try out.print("  edge[fontname=\"Comic Code\"];\n", .{});
-        try out.print("\n\n", .{});
         while (work.popOrNull()) |work_scope| {
             const cfg = try CFG.build(alloc, scope);
             defer cfg.deinit();
@@ -289,29 +284,10 @@ const CFGPrinter = struct {
                 }
             }
 
-            try out.print("subgraph cluster_{d} {{\n", .{ work_scope.name });
+            try out.print("subgraph cluster_{d} {{\n", .{ work_scope.id });
+            try out.print("label=\"{s}\"\n", .{ scope.getName() });
             try out.print("color=lightgrey;\n", .{});
-            if (opts.destruct_ssa) |_| {
-                while (cfg.state != .phi_removed) {
-                    _ = try cfg.nextCompileStep();
-                }
-                //try cfg.destructSSA();
-                // try cfg.analyze();
-                // try cfg.placePhis();
-                // try cfg.rename();
-            } else {
-                if (opts.place_phi or opts.rename) {
-                    while (cfg.state != .phi_placed) {
-                        _ = try cfg.nextCompileStep();
-                    }
-                }
-                if (opts.rename) {
-                    while (cfg.state != .renamed) {
-                        _ = try cfg.nextCompileStep();
-                    }
-                }
-            }
-
+            try cfg.compileUntil(steps);
             const ctx = Context {
                 .out = out,
                 .work = &work,
@@ -327,6 +303,23 @@ const CFGPrinter = struct {
             }
             try out.print("}}\n", .{});
         }
+    }
+
+    pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, _: CFGOptions, out: *const std.io.AnyWriter) !void {
+        try out.print("digraph {{\n", .{});
+        try out.print("  rankdir=TD; ordering=out\n", .{});
+        try out.print("  fontname=\"Comic Code\";\n", .{});
+        try out.print("  node[shape=box fontname=\"Comic Code\"];\n", .{});
+        try out.print("  edge[fontname=\"Comic Code\"];\n", .{});
+        try out.print("\n\n", .{});
+
+        try out.print("subgraph cluster_S{d} {{\n", .{ @intFromEnum(CFG.State.analyzed) });
+        try out.print("label=\"{s}\"\n", .{ @tagName(CFG.State.analyzed) });
+
+        try printScope(alloc, scope, .analyzed, out);
+
+        try out.print("}}\n", .{});
+
         try out.print("\n\n", .{});
         try out.print("}}\n", .{});
     }

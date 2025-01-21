@@ -12,7 +12,7 @@ pub const Scope = struct {
     param_size: usize = 0,
     local_storage: usize = 0,
     primes: usize = 0,
-    name: u32,
+    id: u32,
     insns: ir.InstructionList,
     parent: ?*Scope,
     children: std.ArrayList(Scope),
@@ -21,6 +21,10 @@ pub const Scope = struct {
     operands: std.ArrayList(*ir.Operand),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
+
+    pub fn getName(_: *Scope) []const u8 {
+        return "cool";
+    }
 
     pub fn maxId(self: *Scope) u32 {
         const list = [_]u32 { self.tmp_id, self.local_id, self.param_id, self.label_id }; 
@@ -248,7 +252,7 @@ pub const Scope = struct {
 
         scope.* = Scope {
             .insns = ir.InstructionList { },
-            .name = id,
+            .id = id,
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(*ir.Operand){},
             .params = std.StringHashMapUnmanaged(*ir.Operand){},

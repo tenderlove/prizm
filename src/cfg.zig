@@ -15,7 +15,7 @@ const BitMatrix = bitmatrix.BitMatrix;
 const SSADestructor = @import("cfg/ssa_destructor.zig").SSADestructor;
 
 pub const CFG = struct {
-    const State = enum {
+    pub const State = enum {
         start,
         analyzed,
         phi_placed,
