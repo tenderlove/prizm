@@ -289,27 +289,25 @@ const CFGPrinter = struct {
                 }
             }
 
-            var steps = try cfg.compileSteps();
-
             try out.print("subgraph cluster_{d} {{\n", .{ work_scope.name });
             try out.print("color=lightgrey;\n", .{});
             if (opts.destruct_ssa) |_| {
-                while (cfg.state != .renamed) {
-                    _ = try steps.next();
+                while (cfg.state != .phi_removed) {
+                    _ = try cfg.nextCompileStep();
                 }
-                try cfg.destructSSA();
+                //try cfg.destructSSA();
                 // try cfg.analyze();
                 // try cfg.placePhis();
                 // try cfg.rename();
             } else {
                 if (opts.place_phi or opts.rename) {
                     while (cfg.state != .phi_placed) {
-                        _ = try steps.next();
+                        _ = try cfg.nextCompileStep();
                     }
                 }
                 if (opts.rename) {
                     while (cfg.state != .renamed) {
-                        _ = try steps.next();
+                        _ = try cfg.nextCompileStep();
                     }
                 }
             }

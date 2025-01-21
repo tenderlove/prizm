@@ -586,20 +586,6 @@ pub const CFG = struct {
         self.mem.destroy(self);
     }
 
-    const CompileStepIterator = struct {
-        cfg: *CFG,
-
-        pub fn next(self: *CompileStepIterator) !CFG.State {
-            return try self.cfg.nextCompileStep();
-        }
-    };
-
-    pub fn compileSteps(self: *CFG) !CompileStepIterator {
-        if (self.state != .start) return error.CompilationError;
-
-        return .{ .cfg = self, };
-    }
-
     pub fn nextCompileStep(self: *CFG) !CFG.State {
         switch (self.state) {
             .start => {
@@ -1097,9 +1083,8 @@ const CFGBuilder = struct {
 
 fn buildCFG(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
     const cfg = try CFG.build(allocator, scope);
-    var iter = try cfg.compileSteps();
-    _ = try iter.next();
-    _ = try iter.next();
+    _ = try cfg.nextCompileStep();
+    _ = try cfg.nextCompileStep();
     return cfg;
 }
 
