@@ -269,7 +269,7 @@ const CFGPrinter = struct {
         try work.append(scope);
 
         while (work.popOrNull()) |work_scope| {
-            const cfg = try CFG.build(alloc, scope);
+            const cfg = try CFG.build(alloc, work_scope);
             defer cfg.deinit();
 
             var widest_insn: usize = 0;

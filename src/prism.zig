@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 pub const pm_scope_node_t = extern struct {
     base: c.pm_node_t,
     previous: ?*const pm_scope_node_t,
-    ast_node: ?*const c.pm_node_t,
+    ast_node: *const c.pm_node_t,
     parameters: ?*const c.pm_node_t,
     body: ?*const c.pm_node_t,
     locals: c.pm_constant_id_list_t,
@@ -447,9 +447,8 @@ pub fn prism_pp(buf: *std.ArrayList(u8), parser: *const c.pm_parser_t, node: *co
     return;
 }
 
-pub fn scope_node_init(node: *const c.pm_node_t, scope: *pm_scope_node_t, prev: ?*pm_scope_node_t) !void {
+fn scope_node_init(node: *const c.pm_node_t, scope: *pm_scope_node_t, prev: ?*pm_scope_node_t) !void {
     scope.*.previous = prev;
-    scope.*.ast_node = node;
 
     switch (node.*.type) {
         c.PM_DEF_NODE => {
@@ -514,7 +513,7 @@ pub fn pmNewScopeNode(node: *const c.pm_node_t) !pm_scope_node_t {
             .type = c.PM_SCOPE_NODE,
         },
         .previous = null,
-        .ast_node = null,
+        .ast_node = node,
         .parameters = null,
         .body = null,
         .locals = .{

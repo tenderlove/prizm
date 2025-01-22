@@ -13,6 +13,7 @@ pub const Scope = struct {
     local_storage: usize = 0,
     primes: usize = 0,
     id: u32,
+    name: []const u8,
     insns: ir.InstructionList,
     parent: ?*Scope,
     children: std.ArrayList(Scope),
@@ -22,8 +23,8 @@ pub const Scope = struct {
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
 
-    pub fn getName(_: *Scope) []const u8 {
-        return "cool";
+    pub fn getName(self: *Scope) []const u8 {
+        return self.name;
     }
 
     pub fn maxId(self: *Scope) u32 {
@@ -247,12 +248,13 @@ pub const Scope = struct {
         return try self.pushVoidInsn(.{ .setlocal = .{ .name = name, .val = val } });
     }
 
-    pub fn init(alloc: std.mem.Allocator, id: u32, parent: ?*Scope) !*Scope {
+    pub fn init(alloc: std.mem.Allocator, id: u32, name: []const u8, parent: ?*Scope) !*Scope {
         const scope = try alloc.create(Scope);
 
         scope.* = Scope {
             .insns = ir.InstructionList { },
             .id = id,
+            .name = name,
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(*ir.Operand){},
             .params = std.StringHashMapUnmanaged(*ir.Operand){},

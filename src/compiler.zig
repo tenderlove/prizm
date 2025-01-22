@@ -121,7 +121,20 @@ pub const Compiler = struct {
         else
             null;
 
-        const scope = try Scope.init(cc.allocator, cc.scope_ids, cc.scope);
+        const ast_node = node.*.ast_node;
+        const scope_name = switch(c.PM_NODE_TYPE(ast_node)) {
+            c.PM_PROGRAM_NODE => "main",
+            c.PM_DEF_NODE => blk: {
+                const cast: *const c.pm_def_node_t = @ptrCast(ast_node);
+                break :blk try cc.vm.getString(cc.stringFromId(cast.*.name));
+            },
+            else => {
+                std.debug.print("can't get name for {s}\n", .{c.pm_node_type_to_str(ast_node.*.type)});
+                return error.NotImplementedError;
+            }
+        };
+
+        const scope = try Scope.init(cc.allocator, cc.scope_ids, scope_name, cc.scope);
         cc.scope_ids += 1;
 
         if (parameters_node) |params| {
@@ -535,7 +548,7 @@ test "compile local get w/ return" {
 test "pushing instruction adds value" {
     const allocator = std.testing.allocator;
 
-    const scope = try Scope.init(allocator, 0, null);
+    const scope = try Scope.init(allocator, 0, "empty", null);
     defer scope.deinit();
 
     _ = try scope.pushLoadi(null, 123);

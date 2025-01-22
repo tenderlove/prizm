@@ -1095,14 +1095,14 @@ fn buildCFG(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
 }
 
 test "empty basic block" {
-    const scope = try Scope.init(std.testing.allocator, 0, null);
+    const scope = try Scope.init(std.testing.allocator, 0, "empty", null);
     defer scope.deinit();
 
     try std.testing.expectError(CompileError.EmptyInstructionSequence, buildCFG(std.testing.allocator, scope));
 }
 
 test "basic block one instruction" {
-    const scope = try Scope.init(std.testing.allocator, 0, null);
+    const scope = try Scope.init(std.testing.allocator, 0, "empty", null);
     defer scope.deinit();
 
     _ = try scope.pushGetself();
@@ -1119,7 +1119,7 @@ test "basic block one instruction" {
 }
 
 test "basic block two instruction" {
-    const scope = try Scope.init(std.testing.allocator, 0, null);
+    const scope = try Scope.init(std.testing.allocator, 0, "empty", null);
     defer scope.deinit();
 
     _ = try scope.pushLoadi(null, 123);
