@@ -106,7 +106,7 @@ const IRPrinter = struct {
         try out.print("p*: parameter\n", .{});
         try out.print("\n", .{});
 
-        while (work.popOrNull()) |work_scope| {
+        while (work.pop()) |work_scope| {
             var node = work_scope.insns.first;
             try out.print("= Scope: {d} ======================\n", .{work_scope.id});
 
@@ -262,13 +262,8 @@ const CFGPrinter = struct {
 
     }
 
-    fn printScope(alloc: std.mem.Allocator, scope: *Scope, steps: CFG.State, out: *const std.io.AnyWriter) !void {
-        var work = std.ArrayList(*Scope).init(alloc);
-        defer work.deinit();
-
-        try work.append(scope);
-
-        while (work.popOrNull()) |work_scope| {
+    fn printScope(alloc: std.mem.Allocator, work: *std.ArrayList(*Scope), steps: CFG.State, out: *const std.io.AnyWriter) !void {
+        while (work.pop()) |work_scope| {
             const cfg = try CFG.build(alloc, work_scope);
             defer cfg.deinit();
 
@@ -285,12 +280,12 @@ const CFGPrinter = struct {
             }
 
             try out.print("subgraph cluster_{d} {{\n", .{ work_scope.id });
-            try out.print("label=\"{s}\"\n", .{ scope.getName() });
+            try out.print("label=\"{s}\"\n", .{ work_scope.getName() });
             try out.print("color=lightgrey;\n", .{});
             try cfg.compileUntil(steps);
             const ctx = Context {
                 .out = out,
-                .work = &work,
+                .work = work,
                 .scope = work_scope,
                 .var_width = widestOutOp(work_scope),
                 .insn_width = widest_insn + 1,
@@ -316,7 +311,11 @@ const CFGPrinter = struct {
         try out.print("subgraph cluster_S{d} {{\n", .{ @intFromEnum(CFG.State.analyzed) });
         try out.print("label=\"{s}\"\n", .{ @tagName(CFG.State.analyzed) });
 
-        try printScope(alloc, scope, .analyzed, out);
+        var work = std.ArrayList(*Scope).init(alloc);
+        defer work.deinit();
+        try work.append(scope);
+
+        try printScope(alloc, &work, .analyzed, out);
 
         try out.print("}}\n", .{});
 

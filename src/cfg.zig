@@ -61,7 +61,7 @@ pub const CFG = struct {
         work: std.ArrayList(*BasicBlock),
 
         pub fn next(self: *DepthFirstIterator) !?*BasicBlock {
-            while (self.work.popOrNull()) |bb| {
+            while (self.work.pop()) |bb| {
                 if (!self.seen.contains(bb.name)) {
                     try self.seen.put(bb.name, bb);
                     if (bb.jump_dest) |bb2| { try self.work.append(bb2); }
@@ -342,7 +342,7 @@ pub const CFG = struct {
                 try worklist.append(block);
             }
 
-            while (worklist.popOrNull()) |block| {
+            while (worklist.pop()) |block| {
                 var dfiter = block.df.?.setBitsIterator();
                 while (dfiter.next()) |dfi| {
                     const dfblock = all_blocks[dfi];
@@ -465,7 +465,7 @@ pub const CFG = struct {
             }
 
             // Pop any pushed variables
-            while(pushed.popOrNull()) |op| {
+            while(pushed.pop()) |op| {
                 self.stackPop(op);
             }
         }

@@ -67,10 +67,11 @@ pub const Compiler = struct {
         return if (node.*.statements) |stmt| try cc.compileNode(@ptrCast(stmt), out, popped) else try cc.pushLoadNil(out);
     }
 
-    fn compileDefNode(cc: *Compiler, node: *const c.pm_def_node_t, out: ?*Op, popped: bool) !*ir.Operand {
+    fn compileDefNode(cc: *Compiler, node: *const c.pm_def_node_t, out: ?*Op, _: bool) !*ir.Operand {
         const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const scope_node = try prism.pmNewScopeNode(@ptrCast(node));
-        const method_scope = try cc.compileScopeNode(&scope_node, out, popped);
+        std.debug.print("compiling scope node\n", .{});
+        const method_scope = try cc.compileScopeNode(&scope_node, out, false);
 
         return try cc.pushDefineMethod(method_name, method_scope);
     }
@@ -126,7 +127,8 @@ pub const Compiler = struct {
             c.PM_PROGRAM_NODE => "main",
             c.PM_DEF_NODE => blk: {
                 const cast: *const c.pm_def_node_t = @ptrCast(ast_node);
-                break :blk try cc.vm.getString(cc.stringFromId(cast.*.name));
+                const name = try cc.vm.getString(cc.stringFromId(cast.*.name));
+                break :blk name;
             },
             else => {
                 std.debug.print("can't get name for {s}\n", .{c.pm_node_type_to_str(ast_node.*.type)});
