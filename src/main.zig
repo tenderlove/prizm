@@ -106,7 +106,7 @@ pub fn main() !void {
 
             var step: CFG.State = .analyzed;
 
-            if (runcmd_matches.getSingleValue("destruct-ssa")) |val| {
+            if (runcmd_matches.getSingleValue("step")) |val| {
                 step = @enumFromInt(try std.fmt.parseInt(u32, val, 10));
             }
 
