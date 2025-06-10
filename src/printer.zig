@@ -300,7 +300,7 @@ const CFGPrinter = struct {
         }
     }
 
-    pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, _: CFGOptions, out: *const std.io.AnyWriter) !void {
+    pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: *const std.io.AnyWriter) !void {
         try out.print("digraph {{\n", .{});
         try out.print("  rankdir=TD; ordering=out\n", .{});
         try out.print("  fontname=\"Comic Code\";\n", .{});
@@ -315,7 +315,7 @@ const CFGPrinter = struct {
         defer work.deinit();
         try work.append(scope);
 
-        try printScope(alloc, &work, .analyzed, out);
+        try printScope(alloc, &work, step, out);
 
         try out.print("}}\n", .{});
 
@@ -363,11 +363,9 @@ pub fn printIR(alloc: std.mem.Allocator, scope: *Scope, out: std.io.AnyWriter) !
 }
 
 pub const CFGOptions = struct {
-    place_phi: bool = false,
-    rename: bool = false,
     destruct_ssa: ?u32 = null,
 };
 
-pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, opts: CFGOptions, out: std.io.AnyWriter) !void {
-    try CFGPrinter.printCFG(alloc, scope, opts, &out);
+pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: std.io.AnyWriter) !void {
+    try CFGPrinter.printCFG(alloc, scope, step, &out);
 }

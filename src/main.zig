@@ -103,22 +103,14 @@ pub fn main() !void {
             defer machine.deinit(allocator);
 
             const scope = try compileFile(allocator, path, machine);
-            var opts = printer.CFGOptions {};
 
-            if (runcmd_matches.containsArg("phi")) {
-                opts.place_phi = true;
+            var step: CFG.State = .analyzed;
+
+            if (runcmd_matches.getSingleValue("destruct-ssa")) |val| {
+                step = @enumFromInt(try std.fmt.parseInt(u32, val, 10));
             }
 
-            if (runcmd_matches.containsArg("rename")) {
-                opts.rename = true;
-            }
-
-            if (runcmd_matches.getSingleValue("destruct-ssa")) |step| {
-                const integer = try std.fmt.parseInt(u32, step, 10);
-                opts.destruct_ssa = integer;
-            }
-
-            try printer.printCFG(allocator, scope, opts, std.io.getStdOut().writer().any());
+            try printer.printCFG(allocator, scope, step, std.io.getStdOut().writer().any());
 
             return;
         }
