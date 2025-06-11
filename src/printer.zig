@@ -308,8 +308,8 @@ const CFGPrinter = struct {
         try out.print("  edge[fontname=\"Comic Code\"];\n", .{});
         try out.print("\n\n", .{});
 
-        try out.print("subgraph cluster_S{d} {{\n", .{ @intFromEnum(CFG.State.analyzed) });
-        try out.print("label=\"{s}\"\n", .{ @tagName(CFG.State.analyzed) });
+        try out.print("subgraph cluster_S{d} {{\n", .{ @intFromEnum(step) });
+        try out.print("label=\"{s}\"\n", .{ @tagName(step) });
 
         var work = std.ArrayList(*Scope).init(alloc);
         defer work.deinit();

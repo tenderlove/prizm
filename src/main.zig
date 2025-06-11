@@ -33,9 +33,7 @@ pub fn main() !void {
 
     var cfgcmd = app.createCommand("cfg", "display CFG");
     try cfgcmd.addArg(Arg.positional("FILE", null, null));
-    try cfgcmd.addArg(Arg.booleanOption("phi", 'p', "Add Phi functions"));
-    try cfgcmd.addArg(Arg.booleanOption("rename", 'r', "Add Phi and rename"));
-    try cfgcmd.addArg(Arg.singleValueOption("destruct-ssa", null, "Destruct SSA"));
+    try cfgcmd.addArg(Arg.singleValueOption("step", 's', "Compile step (0-8)"));
     try prizm.addSubcommand(cfgcmd);
 
     const matches = try app.parseProcess();
@@ -107,7 +105,16 @@ pub fn main() !void {
             var step: CFG.State = .analyzed;
 
             if (runcmd_matches.getSingleValue("step")) |val| {
-                step = @enumFromInt(try std.fmt.parseInt(u32, val, 10));
+                const step_num = try std.fmt.parseInt(u32, val, 10);
+                const enum_values = std.enums.values(CFG.State);
+                const max_enum_value = enum_values.len - 1;
+
+                if (step_num > max_enum_value) {
+                    std.log.err("Invalid step value: {d}. Must be between 0 and {d}", .{ step_num, max_enum_value });
+                    return;
+                }
+
+                step = @enumFromInt(step_num);
             }
 
             try printer.printCFG(allocator, scope, step, std.io.getStdOut().writer().any());

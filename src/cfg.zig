@@ -248,6 +248,7 @@ pub const CFG = struct {
         try self.fillDominators();
         try self.fillLiveOut();
         try self.fillLiveIn();
+        self.state = .analyzed;
     }
 
     pub fn blockList(self: *CFG) []const *BasicBlock {
@@ -362,6 +363,7 @@ pub const CFG = struct {
             }
         }
         self.globals = globals;
+        self.state = .phi_placed;
     }
 
     const Renamer = struct {
@@ -512,26 +514,32 @@ pub const CFG = struct {
         var renamer = try Renamer.init(self.mem, global_count);
         defer renamer.deinit(self.mem);
         try renamer.rename(self, self.head);
+        self.state = .renamed;
     }
 
     fn isolatePhi(self: *CFG) !void {
         try self.ssa_destructor.isolatePhi(self);
+        self.state = .phi_isolated;
     }
 
     fn insertPhiCopies(self: *CFG) !void {
         try self.ssa_destructor.insertPhiCopies(self);
+        self.state = .phi_copies_inserted;
     }
 
     fn serializeCopyGroups(self: *CFG) !void {
         try self.ssa_destructor.serializeCopyGroups(self);
+        self.state = .copy_groups_serialized;
     }
 
     fn removeRenamedVariables(self: *CFG) !void {
         try self.ssa_destructor.renameAllVariables(self);
+        self.state = .renamed_variables_removed;
     }
 
     fn removePhi(self: *CFG) !void {
         try self.ssa_destructor.eliminatePhi(self);
+        self.state = .phi_removed;
     }
 
     pub fn destructSSA(self: *CFG) !void {
@@ -590,35 +598,27 @@ pub const CFG = struct {
         switch (self.state) {
             .start => {
                 try self.analyze();
-                self.state = .analyzed;
             },
             .analyzed => {
                 try self.placePhis();
-                self.state = .phi_placed;
             },
             .phi_placed => {
                 try self.rename();
-                self.state = .renamed;
             },
             .renamed => {
                 try self.isolatePhi();
-                self.state = .phi_isolated;
             },
             .phi_isolated => {
                 try self.insertPhiCopies();
-                self.state = .phi_copies_inserted;
             },
             .phi_copies_inserted => {
                 try self.serializeCopyGroups();
-                self.state = .copy_groups_serialized;
             },
             .copy_groups_serialized => {
                 try self.removeRenamedVariables();
-                self.state = .renamed_variables_removed;
             },
             .renamed_variables_removed => {
                 try self.removePhi();
-                self.state = .phi_removed;
             },
             .phi_removed => { },
         }
