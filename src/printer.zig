@@ -15,8 +15,8 @@ const DotOutputStrategy = struct {
     }
 
     pub fn printClusterHeader(self: *const DotOutputStrategy, work_scope: *Scope) !void {
-        try self.print("subgraph cluster_{d} {{\n", .{ work_scope.id });
-        try self.print("label=\"{s}\"\n", .{ work_scope.getName() });
+        try self.print("subgraph cluster_{d} {{\n", .{work_scope.id});
+        try self.print("label=\"{s}\"\n", .{work_scope.getName()});
         try self.print("color=lightgrey;\n", .{});
     }
 
@@ -25,7 +25,11 @@ const DotOutputStrategy = struct {
         if (blk.entry) {
             try self.print("color=green\n", .{});
         }
-        try self.print("label=\"BB{d}\\l", .{ blk.name });
+        try self.print("label=\"BB{d}\\l", .{blk.name});
+    }
+
+    pub fn printSet(self: *const DotOutputStrategy, string: []const u8) !void {
+        try self.print("{s}\\l", .{string});
     }
 
     pub fn printClusterFooter(self: *const DotOutputStrategy, _: *Scope) !void {
@@ -45,14 +49,17 @@ const AsciiOutputStrategy = struct {
     }
 
     pub fn printBlockHeader(self: *const AsciiOutputStrategy, _: *Scope, blk: *BasicBlock) !void {
-        try self.print("### BB{d}:\n", .{ blk.name });
+        try self.print("### BB{d}:\n", .{blk.name});
     }
 
     pub fn printClusterHeader(self: *const AsciiOutputStrategy, work_scope: *Scope) !void {
         try self.print("## SCOPE ({d}): {s}\n", .{ work_scope.id, work_scope.getName() });
     }
 
-    pub fn printClusterFooter(_: *const AsciiOutputStrategy, _: *Scope) !void {
+    pub fn printClusterFooter(_: *const AsciiOutputStrategy, _: *Scope) !void {}
+
+    pub fn printSet(self: *const @This(), string: []const u8) !void {
+        try self.print("* {s}\n", .{string});
     }
 
     pub fn print(self: *const AsciiOutputStrategy, comptime format: []const u8, args: anytype) !void {
@@ -61,16 +68,76 @@ const AsciiOutputStrategy = struct {
 };
 
 const IRPrinter = struct {
+    fn formatIntAsSubscript(alloc: std.mem.Allocator, num: usize) ![]u8 {
+        var result = std.ArrayList(u8).init(alloc);
+        defer result.deinit();
+
+        if (num < 10) {
+            const val: u8 = @intCast(num);
+            const bytes = [3]u8{ 0xE2, 0x82, 0x80 + val };
+            try result.appendSlice(&bytes);
+        } else {
+            const prefix = try formatIntAsSubscript(alloc, num / 10);
+            defer alloc.free(prefix);
+            try result.appendSlice(prefix);
+            const val: u8 = @intCast(@mod(num, 10));
+            const bytes = [3]u8{ 0xE2, 0x82, 0x80 + val };
+            try result.appendSlice(&bytes);
+        }
+
+        return result.toOwnedSlice();
+    }
+
+    fn formatOpnd(alloc: std.mem.Allocator, op: *const ir.Operand) ![]u8 {
+        var result = std.ArrayList(u8).init(alloc);
+        defer result.deinit();
+
+        switch (op.*) {
+            .immediate => |p| try result.writer().print("{d}", .{p.value}),
+            inline .local, .param => |p| {
+                try result.appendSlice(p.source_name);
+            },
+            .string => |p| try result.appendSlice(p.value),
+            .scope => |payload| try result.writer().print("{s}{d}", .{ op.shortName(), payload.value.id }),
+            .redef => |r| {
+                const orig_str = try formatOpnd(alloc, r.orig);
+                defer alloc.free(orig_str);
+                try result.appendSlice(orig_str);
+                const subscript = try formatIntAsSubscript(alloc, r.variant);
+                defer alloc.free(subscript);
+                try result.appendSlice(subscript);
+            },
+            .prime => |r| {
+                const orig_str = try formatOpnd(alloc, r.orig.redef.orig);
+                defer alloc.free(orig_str);
+                try result.appendSlice(orig_str);
+                try result.appendSlice("′");
+                const subscript = try formatIntAsSubscript(alloc, r.orig.redef.variant);
+                defer alloc.free(subscript);
+                try result.appendSlice(subscript);
+            },
+            else => {
+                try result.writer().print("{s}{d}", .{ op.shortName(), op.number() });
+            },
+        }
+
+        return result.toOwnedSlice();
+    }
+
     fn printIntAsSubscript(num: usize, out: anytype) !void {
         if (num < 10) {
             const val: u8 = @intCast(num);
-            const bytes = [3]u8{0xE2, 0x82, 0x80 + val };
-            try out.print("{s}", .{ bytes, });
+            const bytes = [3]u8{ 0xE2, 0x82, 0x80 + val };
+            try out.print("{s}", .{
+                bytes,
+            });
         } else {
             try printIntAsSubscript(num / 10, out);
             const val: u8 = @intCast(@mod(num, 10));
-            const bytes = [3]u8{0xE2, 0x82, 0x80 + val};
-            try out.print("{s}", .{ bytes, });
+            const bytes = [3]u8{ 0xE2, 0x82, 0x80 + val };
+            try out.print("{s}", .{
+                bytes,
+            });
         }
     }
 
@@ -78,7 +145,9 @@ const IRPrinter = struct {
         switch (op.*) {
             .immediate => |p| try out.print("{d}", .{p.value}),
             inline .local, .param => |p| {
-                try out.print("{s}", .{ p.source_name, });
+                try out.print("{s}", .{
+                    p.source_name,
+                });
             },
             .string => |p| try out.print("{s}", .{p.value}),
             .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.id }),
@@ -92,7 +161,7 @@ const IRPrinter = struct {
                 try printIntAsSubscript(r.orig.redef.variant, out);
             },
             else => {
-                try out.print("{s}{d}", .{op.shortName(), op.number()});
+                try out.print("{s}{d}", .{ op.shortName(), op.number() });
             },
         }
     }
@@ -122,7 +191,7 @@ const IRPrinter = struct {
         });
     }
 
-    fn printInsn(insn: ir.Instruction, digits: usize, insn_name_width: usize, out: anytype) ! void {
+    fn printInsn(insn: ir.Instruction, digits: usize, insn_name_width: usize, out: anytype) !void {
         if (insn.outVar()) |n| {
             const width = outVarWidth(n);
             const padding = digits - width;
@@ -130,11 +199,11 @@ const IRPrinter = struct {
             try printOpnd(n, out);
             try out.print("{[x]s: <[width]}", .{ .x = "", .width = padding });
             if (insn.isPMov()) {
-                try out.print("<-", .{ });
+                try out.print("<-", .{});
                 try printIntAsSubscript(insn.pmov.group, out);
-                try out.print(" ", .{ });
+                try out.print(" ", .{});
             } else {
-                try out.print("<- ", .{ });
+                try out.print("<- ", .{});
             }
         } else {
             try out.print("  ", .{});
@@ -211,22 +280,28 @@ const CFGPrinter = struct {
     fn printSet(comptime name: []const u8, scope: *Scope, set: *bm.BitMap, out: anytype) !void {
         const nitems = set.popCount(); // number of variables
         if (nitems > 0) {
-            var biti = set.setBitsIterator();
-            try out.print(name, .{ });
-            try out.print("(", .{});
+            var buffer = std.ArrayList(u8).init(scope.allocator);
+            defer buffer.deinit();
 
+            // Build the complete string in buffer
+            try buffer.appendSlice(name);
+            try buffer.append('(');
+
+            var biti = set.setBitsIterator();
             var first = true;
             while (biti.next()) |opnd_id| {
                 if (!first) {
-                    try out.print(", ", .{});
+                    try buffer.appendSlice(", ");
                 }
                 first = false;
 
                 const op = scope.operands.items[opnd_id];
-                try IRPrinter.printOpnd(op, out);
+                const opnd_str = try IRPrinter.formatOpnd(scope.allocator, op);
+                defer scope.allocator.free(opnd_str);
+                try buffer.appendSlice(opnd_str);
             }
-            try out.print(")", .{});
-            try out.print("\\l", .{ });
+            try buffer.append(')');
+            try out.printSet(buffer.items);
         }
     }
 
@@ -234,7 +309,7 @@ const CFGPrinter = struct {
         const nitems = set.popCount(); // number of variables
         if (nitems > 0) {
             var biti = set.setBitsIterator();
-            try out.print(name, .{ });
+            try out.print(name, .{});
             try out.print("(", .{});
 
             var first = true;
@@ -243,10 +318,10 @@ const CFGPrinter = struct {
                     try out.print(", ", .{});
                 }
                 first = false;
-                try out.print("BB{d}", .{ block_id });
+                try out.print("BB{d}", .{block_id});
             }
             try out.print(")", .{});
-            try out.print("\\l", .{ });
+            try out.print("\\l", .{});
         }
     }
 
@@ -268,7 +343,7 @@ const CFGPrinter = struct {
         try printBlockSet("DOM: ", blk.dom.?, ctx.out);
         try printBlockSet("DF: ", blk.df.?, ctx.out);
         if (blk.idom) |idom| {
-            try ctx.out.print("IDOM: BB{d}\\l", . {idom});
+            try ctx.out.print("IDOM: BB{d}\\l", .{idom});
         }
 
         // Print uninitialized variables
@@ -280,7 +355,7 @@ const CFGPrinter = struct {
             }
         }
 
-        try ctx.out.print("\\l", .{ });
+        try ctx.out.print("\\l", .{});
 
         var iter = blk.instructionIter();
         while (iter.next()) |insn| {
@@ -291,26 +366,15 @@ const CFGPrinter = struct {
             try ctx.out.print("\\l", .{});
         }
 
-        try ctx.out.print("\"];\n", .{ });
+        try ctx.out.print("\"];\n", .{});
 
         if (blk.fall_through_dest) |left| {
-            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"fall through\"];\n", .{
-                ctx.scope.id,
-                blk.name,
-                ctx.scope.id,
-                left.name
-            });
+            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"fall through\"];\n", .{ ctx.scope.id, blk.name, ctx.scope.id, left.name });
         }
 
         if (blk.jump_dest) |right| {
-            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"jump\"];\n", .{
-                ctx.scope.id,
-                blk.name,
-                ctx.scope.id,
-                right.name
-            });
+            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"jump\"];\n", .{ ctx.scope.id, blk.name, ctx.scope.id, right.name });
         }
-
     }
 
     fn printScope(alloc: std.mem.Allocator, work: *std.ArrayList(*Scope), steps: CFG.State, out: anytype) !void {
@@ -332,7 +396,7 @@ const CFGPrinter = struct {
 
             try out.printClusterHeader(work_scope);
             try cfg.compileUntil(steps);
-            const ctx = Context(@TypeOf(out.*)) {
+            const ctx = Context(@TypeOf(out.*)){
                 .out = out,
                 .work = work,
                 .scope = work_scope,
@@ -350,8 +414,8 @@ const CFGPrinter = struct {
     }
 
     pub fn printAsciiCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: anytype) !void {
-        try out.print("#####\n", .{ });
-        try out.print("# STEP \"{s}\"\n", .{ @tagName(step) });
+        try out.print("#####\n", .{});
+        try out.print("# STEP \"{s}\"\n", .{@tagName(step)});
 
         var work = std.ArrayList(*Scope).init(alloc);
         defer work.deinit();
@@ -367,8 +431,8 @@ const CFGPrinter = struct {
         try out.print("  edge[fontname=\"Comic Code\"];\n", .{});
         try out.print("\n\n", .{});
 
-        try out.print("subgraph cluster_S{d} {{\n", .{ @intFromEnum(step) });
-        try out.print("label=\"{s}\"\n", .{ @tagName(step) });
+        try out.print("subgraph cluster_S{d} {{\n", .{@intFromEnum(step)});
+        try out.print("label=\"{s}\"\n", .{@tagName(step)});
 
         var work = std.ArrayList(*Scope).init(alloc);
         defer work.deinit();
@@ -399,7 +463,7 @@ fn outVarWidth(opnd: *ir.Operand) usize {
         .string => |v| v.value.len,
         .scope => |v| countDigits(v.id) + 1,
         .immediate => |v| countDigits(v.value),
-        inline else => |v| countDigits(v.name) + 1
+        inline else => |v| countDigits(v.name) + 1,
     };
 }
 
