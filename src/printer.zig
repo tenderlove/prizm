@@ -7,8 +7,61 @@ const BasicBlock = cfg_z.BasicBlock;
 const Scope = @import("scope.zig").Scope;
 const bm = @import("utils/bitmap.zig");
 
+const DotOutputStrategy = struct {
+    writer: std.io.AnyWriter,
+
+    pub fn init(writer: std.io.AnyWriter) DotOutputStrategy {
+        return DotOutputStrategy{ .writer = writer };
+    }
+
+    pub fn printClusterHeader(self: *const DotOutputStrategy, work_scope: *Scope) !void {
+        try self.print("subgraph cluster_{d} {{\n", .{ work_scope.id });
+        try self.print("label=\"{s}\"\n", .{ work_scope.getName() });
+        try self.print("color=lightgrey;\n", .{});
+    }
+
+    pub fn printBlockHeader(self: *const @This(), scope: *Scope, blk: *BasicBlock) !void {
+        try self.print("A{d}B{d} [\n", .{ scope.id, blk.name });
+        if (blk.entry) {
+            try self.print("color=green\n", .{});
+        }
+        try self.print("label=\"BB{d}\\l", .{ blk.name });
+    }
+
+    pub fn printClusterFooter(self: *const DotOutputStrategy, _: *Scope) !void {
+        try self.print("}}\n", .{});
+    }
+
+    pub fn print(self: *const DotOutputStrategy, comptime format: []const u8, args: anytype) !void {
+        try self.writer.print(format, args);
+    }
+};
+
+const AsciiOutputStrategy = struct {
+    writer: std.io.AnyWriter,
+
+    pub fn init(writer: std.io.AnyWriter) AsciiOutputStrategy {
+        return AsciiOutputStrategy{ .writer = writer };
+    }
+
+    pub fn printBlockHeader(self: *const AsciiOutputStrategy, _: *Scope, blk: *BasicBlock) !void {
+        try self.print("### BB{d}:\n", .{ blk.name });
+    }
+
+    pub fn printClusterHeader(self: *const AsciiOutputStrategy, work_scope: *Scope) !void {
+        try self.print("## SCOPE ({d}): {s}\n", .{ work_scope.id, work_scope.getName() });
+    }
+
+    pub fn printClusterFooter(_: *const AsciiOutputStrategy, _: *Scope) !void {
+    }
+
+    pub fn print(self: *const AsciiOutputStrategy, comptime format: []const u8, args: anytype) !void {
+        try self.writer.print(format, args);
+    }
+};
+
 const IRPrinter = struct {
-    fn printIntAsSubscript(num: usize, out: *const std.io.AnyWriter) !void {
+    fn printIntAsSubscript(num: usize, out: anytype) !void {
         if (num < 10) {
             const val: u8 = @intCast(num);
             const bytes = [3]u8{0xE2, 0x82, 0x80 + val };
@@ -21,7 +74,7 @@ const IRPrinter = struct {
         }
     }
 
-    fn printOpnd(op: *const ir.Operand, out: *const std.io.AnyWriter) !void {
+    fn printOpnd(op: *const ir.Operand, out: anytype) !void {
         switch (op.*) {
             .immediate => |p| try out.print("{d}", .{p.value}),
             inline .local, .param => |p| {
@@ -44,7 +97,7 @@ const IRPrinter = struct {
         }
     }
 
-    fn printInsnParams(insn: ir.Instruction, out: *const std.io.AnyWriter) !void {
+    fn printInsnParams(insn: ir.Instruction, out: anytype) !void {
         var opiter = insn.opIter();
         var first = true;
 
@@ -62,14 +115,14 @@ const IRPrinter = struct {
         }
     }
 
-    fn printInsnName(insn: ir.Instruction, maxlen: usize, out: *const std.io.AnyWriter) !void {
+    fn printInsnName(insn: ir.Instruction, maxlen: usize, out: anytype) !void {
         try out.print("{[value]s: <[width]}", .{
             .value = @tagName(insn),
             .width = maxlen + 1,
         });
     }
 
-    fn printInsn(insn: ir.Instruction, digits: usize, insn_name_width: usize, out: *const std.io.AnyWriter) ! void {
+    fn printInsn(insn: ir.Instruction, digits: usize, insn_name_width: usize, out: anytype) ! void {
         if (insn.outVar()) |n| {
             const width = outVarWidth(n);
             const padding = digits - width;
@@ -95,7 +148,7 @@ const IRPrinter = struct {
         try printInsnParams(insn, out);
     }
 
-    pub fn printIR(alloc: std.mem.Allocator, scope: *Scope, out: *const std.io.AnyWriter) !void {
+    pub fn printIR(alloc: std.mem.Allocator, scope: *Scope, out: anytype) !void {
         var work = std.ArrayList(*Scope).init(alloc);
         defer work.deinit();
         try work.append(scope);
@@ -145,15 +198,17 @@ const IRPrinter = struct {
 };
 
 const CFGPrinter = struct {
-    const Context = struct {
-        out: *const std.io.AnyWriter,
-        work: *std.ArrayList(*Scope),
-        scope: *Scope,
-        var_width: usize,
-        insn_width: usize,
-    };
+    fn Context(comptime OutputStrategy: type) type {
+        return struct {
+            out: *const OutputStrategy,
+            work: *std.ArrayList(*Scope),
+            scope: *Scope,
+            var_width: usize,
+            insn_width: usize,
+        };
+    }
 
-    fn printSet(comptime name: []const u8, scope: *Scope, set: *bm.BitMap, out: *const std.io.AnyWriter) !void {
+    fn printSet(comptime name: []const u8, scope: *Scope, set: *bm.BitMap, out: anytype) !void {
         const nitems = set.popCount(); // number of variables
         if (nitems > 0) {
             var biti = set.setBitsIterator();
@@ -175,7 +230,7 @@ const CFGPrinter = struct {
         }
     }
 
-    fn printBlockSet(comptime name: []const u8, set: *bm.BitMap, out: *const std.io.AnyWriter) !void {
+    fn printBlockSet(comptime name: []const u8, set: *bm.BitMap, out: anytype) !void {
         const nitems = set.popCount(); // number of variables
         if (nitems > 0) {
             var biti = set.setBitsIterator();
@@ -195,12 +250,8 @@ const CFGPrinter = struct {
         }
     }
 
-    fn printBlock(scope: *Scope, blk: *BasicBlock, ctx: *const Context) !void {
-        try ctx.out.print("A{d}B{d} [\n", .{ ctx.scope.id, blk.name });
-        if (blk.entry) {
-            try ctx.out.print("color=green\n", .{});
-        }
-        try ctx.out.print("label=\"BB{d}\\l", .{ blk.name });
+    fn printBlock(scope: *Scope, blk: *BasicBlock, ctx: anytype) !void {
+        try ctx.out.printBlockHeader(scope, blk);
 
         // Print upward exposed variables
         try printSet("UE: ", scope, blk.upward_exposed_set, ctx.out);
@@ -262,7 +313,7 @@ const CFGPrinter = struct {
 
     }
 
-    fn printScope(alloc: std.mem.Allocator, work: *std.ArrayList(*Scope), steps: CFG.State, out: *const std.io.AnyWriter) !void {
+    fn printScope(alloc: std.mem.Allocator, work: *std.ArrayList(*Scope), steps: CFG.State, out: anytype) !void {
         while (work.pop()) |work_scope| {
             const cfg = try CFG.build(alloc, work_scope);
             defer cfg.deinit();
@@ -279,11 +330,9 @@ const CFGPrinter = struct {
                 }
             }
 
-            try out.print("subgraph cluster_{d} {{\n", .{ work_scope.id });
-            try out.print("label=\"{s}\"\n", .{ work_scope.getName() });
-            try out.print("color=lightgrey;\n", .{});
+            try out.printClusterHeader(work_scope);
             try cfg.compileUntil(steps);
-            const ctx = Context {
+            const ctx = Context(@TypeOf(out.*)) {
                 .out = out,
                 .work = work,
                 .scope = work_scope,
@@ -296,11 +345,11 @@ const CFGPrinter = struct {
             while (try iter.next()) |bb| {
                 try printBlock(work_scope, bb, &ctx);
             }
-            try out.print("}}\n", .{});
+            try out.printClusterFooter(work_scope);
         }
     }
 
-    pub fn printAsciiCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: *const std.io.AnyWriter) !void {
+    pub fn printAsciiCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: anytype) !void {
         try out.print("#####\n", .{ });
         try out.print("# STEP \"{s}\"\n", .{ @tagName(step) });
 
@@ -310,7 +359,7 @@ const CFGPrinter = struct {
         try printScope(alloc, &work, step, out);
     }
 
-    pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: *const std.io.AnyWriter) !void {
+    pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: anytype) !void {
         try out.print("digraph {{\n", .{});
         try out.print("  rankdir=TD; ordering=out\n", .{});
         try out.print("  fontname=\"Comic Code\";\n", .{});
@@ -369,7 +418,8 @@ fn widestOutOp(scope: *Scope) usize {
 }
 
 pub fn printIR(alloc: std.mem.Allocator, scope: *Scope, out: std.io.AnyWriter) !void {
-    try IRPrinter.printIR(alloc, scope, &out);
+    const strategy = DotOutputStrategy.init(out);
+    try IRPrinter.printIR(alloc, scope, &strategy);
 }
 
 pub const CFGOptions = struct {
@@ -383,7 +433,13 @@ pub const CFGFormat = enum {
 
 pub fn printCFGWithFormat(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, format: CFGFormat, out: std.io.AnyWriter) !void {
     switch (format) {
-        .dot => try CFGPrinter.printCFG(alloc, scope, step, &out),
-        .ascii => try CFGPrinter.printAsciiCFG(alloc, scope, step, &out),
+        .dot => {
+            const strategy = DotOutputStrategy.init(out);
+            try CFGPrinter.printCFG(alloc, scope, step, &strategy);
+        },
+        .ascii => {
+            const strategy = AsciiOutputStrategy.init(out);
+            try CFGPrinter.printAsciiCFG(alloc, scope, step, &strategy);
+        },
     }
 }
