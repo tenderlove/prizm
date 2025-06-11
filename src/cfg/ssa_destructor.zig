@@ -280,9 +280,7 @@ pub const SSADestructor = struct {
                 matrix.clear();
                 start_of_group = pcopy;
                 current_group = pcopy.data.pmov.group;
-                std.debug.print("reset\n", .{});
             }
-            std.debug.print("group: {d}\n", .{ pcopy.data.pmov.group });
         }
 
         if (matrix.popCount() > 0) {

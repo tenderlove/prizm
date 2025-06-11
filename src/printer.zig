@@ -300,6 +300,16 @@ const CFGPrinter = struct {
         }
     }
 
+    pub fn printAsciiCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: *const std.io.AnyWriter) !void {
+        try out.print("#####\n", .{ });
+        try out.print("# STEP \"{s}\"\n", .{ @tagName(step) });
+
+        var work = std.ArrayList(*Scope).init(alloc);
+        defer work.deinit();
+        try work.append(scope);
+        try printScope(alloc, &work, step, out);
+    }
+
     pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: *const std.io.AnyWriter) !void {
         try out.print("digraph {{\n", .{});
         try out.print("  rankdir=TD; ordering=out\n", .{});
@@ -366,6 +376,14 @@ pub const CFGOptions = struct {
     destruct_ssa: ?u32 = null,
 };
 
-pub fn printCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: std.io.AnyWriter) !void {
-    try CFGPrinter.printCFG(alloc, scope, step, &out);
+pub const CFGFormat = enum {
+    dot,
+    ascii,
+};
+
+pub fn printCFGWithFormat(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, format: CFGFormat, out: std.io.AnyWriter) !void {
+    switch (format) {
+        .dot => try CFGPrinter.printCFG(alloc, scope, step, &out),
+        .ascii => try CFGPrinter.printAsciiCFG(alloc, scope, step, &out),
+    }
 }

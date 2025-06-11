@@ -34,6 +34,7 @@ pub fn main() !void {
     var cfgcmd = app.createCommand("cfg", "display CFG");
     try cfgcmd.addArg(Arg.positional("FILE", null, null));
     try cfgcmd.addArg(Arg.singleValueOption("step", 's', "Compile step (0-8)"));
+    try cfgcmd.addArg(Arg.singleValueOption("format", 'f', "Output format (dot or ascii)"));
     try prizm.addSubcommand(cfgcmd);
 
     const matches = try app.parseProcess();
@@ -117,7 +118,20 @@ pub fn main() !void {
                 step = @enumFromInt(step_num);
             }
 
-            try printer.printCFG(allocator, scope, step, std.io.getStdOut().writer().any());
+            var format: printer.CFGFormat = .ascii;
+
+            if (runcmd_matches.getSingleValue("format")) |val| {
+                if (std.mem.eql(u8, val, "ascii")) {
+                    format = .ascii;
+                } else if (std.mem.eql(u8, val, "dot")) {
+                    format = .dot;
+                } else {
+                    std.log.err("Invalid format: {s}. Must be 'dot' or 'ascii'", .{val});
+                    return;
+                }
+            }
+
+            try printer.printCFGWithFormat(allocator, scope, step, format, std.io.getStdOut().writer().any());
 
             return;
         }
