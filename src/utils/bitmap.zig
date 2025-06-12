@@ -106,7 +106,7 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn dup(orig: Self, mem: std.mem.Allocator) !*Self {
+        pub fn clone(orig: Self, mem: std.mem.Allocator) !*Self {
             if (orig.isNullBlock()) {
                 return @constCast(&orig);
             }
@@ -260,7 +260,7 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         pub fn intersection(self: Self, other: *Self, mem: std.mem.Allocator) !*Self {
-            const new = try self.dup(mem);
+            const new = try self.clone(mem);
             try new.setIntersection(other);
             return new;
         }
@@ -279,7 +279,7 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         pub fn not(self: Self, mem: std.mem.Allocator) !*Self {
-            const new = try self.dup(mem);
+            const new = try self.clone(mem);
             new.toggleAll();
             return new;
         }
@@ -296,7 +296,7 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         pub fn Union(self: Self, other: *Self, mem: std.mem.Allocator) !*Self {
-            const new = try self.dup(mem);
+            const new = try self.clone(mem);
             try new.setUnion(other);
             return new;
         }
@@ -529,13 +529,13 @@ test "not small" {
 
 test "dup small" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.initEmpty(alloc, 64);
+    var bm = try BitMap.initEmpty(alloc, 64);
     defer bm.deinit(alloc);
 
     bm.set(1);
     bm.set(63);
 
-    const new = try bm.dup(alloc);
+    var new = try bm.clone(alloc);
     defer new.deinit(alloc);
 
     try std.testing.expect(new.isSet(1));
@@ -551,7 +551,7 @@ test "dup big" {
     bm.set(63);
     bm.set(70);
 
-    const new = try bm.dup(alloc);
+    const new = try bm.clone(alloc);
     defer new.deinit(alloc);
 
     try std.testing.expect(new.isSet(1));
@@ -877,7 +877,7 @@ test "iterate shared" {
 
 test "dup null" {
     const bm = BitMap.Null;
-    const duped = try bm.dup(std.testing.allocator);
+    const duped = try bm.clone(std.testing.allocator);
     try std.testing.expect(duped.isNullBlock());
     try std.testing.expectEqual(bm, duped.*);
 }

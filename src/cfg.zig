@@ -946,7 +946,7 @@ pub const BasicBlock = struct {
             return self.killed_set;
         }
 
-        const uninit = try self.killed_set.dup(mem);
+        const uninit = try self.killed_set.clone(mem);
         uninit.toggleAll();
         try uninit.setIntersection(self.liveout_set);
         try uninit.setUnion(self.upward_exposed_set);
