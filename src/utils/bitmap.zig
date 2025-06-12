@@ -106,6 +106,15 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
+        pub fn unsetAll(self: *Self) void {
+            switch(self.*) {
+                .single => self.single.buff = 0,
+                .heap => @memset(self.heap.buff, 0),
+                .shared => unreachable,
+                .nullMap => unreachable,
+            }
+        }
+
         pub fn clone(orig: Self, mem: std.mem.Allocator) !*Self {
             if (orig.isNullBlock()) {
                 return @constCast(&orig);
@@ -120,7 +129,7 @@ pub fn BitMapSized(comptime T: type) type {
             return bm;
         }
 
-        pub fn eq(self: Self, other: *Self) bool {
+        pub fn eql(self: Self, other: *Self) bool {
             if (self.getBits() != other.getBits()) return false;
 
             return switch(self) {
@@ -265,17 +274,6 @@ pub fn BitMapSized(comptime T: type) type {
                         self.heap.buff[i] = ~self.heap.buff[i];
                     }
                 },
-                .shared => unreachable,
-                .nullMap => unreachable,
-            }
-        }
-
-        pub fn replace(self: *Self, other: *Self) !void {
-            if (self.getBits() != other.getBits()) return error.ArgumentError;
-
-            switch(self.*) {
-                .single => self.single.buff = other.single.buff,
-                .heap => @memcpy(self.heap.buff, other.heap.buff),
                 .shared => unreachable,
                 .nullMap => unreachable,
             }
@@ -687,9 +685,9 @@ test "union" {
 
 test "eq small" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 16);
+    var bm1 = try dbs.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.initEmpty(alloc, 16);
+    var bm2 = try dbs.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     bm1.set(0);
@@ -698,16 +696,16 @@ test "eq small" {
     bm2.set(0);
     bm2.set(1);
 
-    try std.testing.expect(bm1.eq(bm2));
+    try std.testing.expect(bm1.eql(bm2));
     bm2.set(2);
-    try std.testing.expect(!bm1.eq(bm2));
+    try std.testing.expect(!bm1.eql(bm2));
 }
 
 test "eq large" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 128);
+    var bm1 = try dbs.initEmpty(alloc, 128);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.initEmpty(alloc, 128);
+    var bm2 = try dbs.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
     bm1.set(1);
@@ -718,49 +716,51 @@ test "eq large" {
     bm2.set(2);
     bm2.set(70);
 
-    try std.testing.expect(bm1.eq(bm2));
+    try std.testing.expect(bm1.eql(bm2));
     bm2.set(0);
-    try std.testing.expect(!bm1.eq(bm2));
+    try std.testing.expect(!bm1.eql(bm2));
 }
 
 test "replace small" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 16);
+    var bm1 = try dbs.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.initEmpty(alloc, 16);
+    var bm2 = try dbs.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     bm1.set(0);
     bm1.set(1);
     bm1.set(15);
 
-    try std.testing.expect(!bm1.eq(bm2));
+    try std.testing.expect(!bm1.eql(bm2));
     try std.testing.expect(!bm2.isSet(15));
-    try bm2.replace(bm1);
+    bm2.unsetAll();
+    bm2.setUnion(bm1);
     try std.testing.expect(bm2.isSet(0));
     try std.testing.expect(bm2.isSet(1));
     try std.testing.expect(bm2.isSet(15));
-    try std.testing.expect(bm1.eq(bm2));
+    try std.testing.expect(bm1.eql(bm2));
 }
 
 test "replace large" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 128);
+    var bm1 = try dbs.initEmpty(alloc, 128);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.initEmpty(alloc, 128);
+    var bm2 = try dbs.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
     bm1.set(1);
     bm1.set(2);
     bm1.set(70);
 
-    try std.testing.expect(!bm1.eq(bm2));
+    try std.testing.expect(!bm1.eql(bm2));
     try std.testing.expect(!bm2.isSet(70));
-    try bm2.replace(bm1);
+    bm2.unsetAll();
+    bm2.setUnion(bm1);
     try std.testing.expect(bm2.isSet(1));
     try std.testing.expect(bm2.isSet(2));
     try std.testing.expect(bm2.isSet(70));
-    try std.testing.expect(bm1.eq(bm2));
+    try std.testing.expect(bm1.eql(bm2));
 }
 
 test "clz small" {

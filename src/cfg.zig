@@ -177,8 +177,9 @@ pub const CFG = struct {
 
                     temp.setUnion(intersect);
 
-                    if (!temp.eq(bb.dom.?)) {
-                        try bb.dom.?.replace(temp);
+                    if (!temp.eql(bb.dom.?)) {
+                        bb.dom.?.unsetAll();
+                        bb.dom.?.setUnion(temp);
                         changed = true;
                     }
                 }
@@ -227,7 +228,8 @@ pub const CFG = struct {
 
     fn fillLiveIn(self: *CFG) !void {
         for (self.blocks) |blk| {
-            try blk.livein_set.replace(blk.upward_exposed_set);
+            blk.livein_set.unsetAll();
+            blk.livein_set.setUnion(blk.upward_exposed_set);
 
             // Bitwise NOT the "not defined" list
             var not_def = try blk.killed_set.clone(self.mem);
@@ -772,17 +774,19 @@ pub const BasicBlock = struct {
                 bothlo.setUnion(newlo2);
                 defer alloc.destroy(bothlo);
 
-                if (self.liveout_set.eq(bothlo)) {
+                if (self.liveout_set.eql(bothlo)) {
                     return false;
                 } else {
-                    try self.liveout_set.replace(bothlo);
+                    self.liveout_set.unsetAll();
+                    self.liveout_set.setUnion(bothlo);
                     return true;
                 }
             } else {
-                if (self.liveout_set.eq(newlo)) {
+                if (self.liveout_set.eql(newlo)) {
                     return false;
                 } else {
-                    try self.liveout_set.replace(newlo);
+                    self.liveout_set.unsetAll();
+                    self.liveout_set.setUnion(newlo);
                     return true;
                 }
             }
@@ -791,10 +795,11 @@ pub const BasicBlock = struct {
                 const newlo = try self.childLo(child2, alloc);
                 defer alloc.destroy(newlo);
 
-                if (self.liveout_set.eq(newlo)) {
+                if (self.liveout_set.eql(newlo)) {
                     return false;
                 } else {
-                    try self.liveout_set.replace(newlo);
+                    self.liveout_set.unsetAll();
+                    self.liveout_set.setUnion(newlo);
                     return true;
                 }
             } else {
