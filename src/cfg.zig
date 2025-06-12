@@ -175,7 +175,7 @@ pub const CFG = struct {
                         intersect.setIntersection(pred.dom.?);
                     }
 
-                    try temp.setUnion(intersect);
+                    temp.setUnion(intersect);
 
                     if (!temp.eq(bb.dom.?)) {
                         try bb.dom.?.replace(temp);
@@ -235,7 +235,7 @@ pub const CFG = struct {
             not_def.toggleAll();
 
             not_def.setIntersection(blk.liveout_set);
-            try blk.livein_set.setUnion(not_def);
+            blk.livein_set.setUnion(not_def);
         }
     }
 
@@ -308,7 +308,7 @@ pub const CFG = struct {
         for (all_blocks) |block| {
             if (block.reachable) {
                 // Upward exposed variables must cross between BBs
-                try globals.setUnion(block.upward_exposed_set);
+                globals.setUnion(block.upward_exposed_set);
                 var iter = block.killed_set.iterator(.{});
                 while (iter.next()) |operand_num| {
                     block_set.set(operand_num, block.name);
@@ -954,7 +954,7 @@ pub const BasicBlock = struct {
         const uninit = try self.killed_set.clone(mem);
         uninit.toggleAll();
         uninit.setIntersection(self.liveout_set);
-        try uninit.setUnion(self.upward_exposed_set);
+        uninit.setUnion(self.upward_exposed_set);
 
         var biti = uninit.iterator(.{});
         while (biti.next()) |opnd_id| {

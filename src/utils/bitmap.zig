@@ -283,13 +283,11 @@ pub fn BitMapSized(comptime T: type) type {
 
         pub fn Union(self: Self, other: *Self, mem: std.mem.Allocator) !*Self {
             const new = try self.clone(mem);
-            try new.setUnion(other);
+            new.setUnion(other);
             return new;
         }
 
-        pub fn setUnion(self: *Self, other: *Self) !void {
-            if (self.getBits() != other.getBits()) return error.ArgumentError;
-
+        pub fn setUnion(self: *Self, other: *Self) void {
             switch(self.*) {
                 .single => self.single.buff |= other.single.buff,
                 .heap => {
@@ -630,9 +628,9 @@ test "intersection" {
 
 test "set union small" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 16);
+    var bm1 = try dbs.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.initEmpty(alloc, 16);
+    var bm2 = try dbs.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     bm1.set(1);
@@ -641,7 +639,7 @@ test "set union small" {
     bm2.set(0);
     bm2.set(1);
 
-    try bm1.setUnion(bm2);
+    bm1.setUnion(bm2);
 
     try std.testing.expect(bm1.isSet(0));
     try std.testing.expect(bm1.isSet(1));
@@ -663,7 +661,7 @@ test "set union large" {
     bm2.set(1);
     bm2.set(70);
 
-    try bm1.setUnion(bm2);
+    bm1.setUnion(bm2);
 
     try std.testing.expect(bm1.isSet(0));
     try std.testing.expect(bm1.isSet(1));
