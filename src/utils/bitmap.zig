@@ -145,9 +145,7 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn setBit(self: *Self, bit: T) !void {
-            if (bit >= self.getBits()) return error.OutOfBoundsError;
-
+        pub fn set(self: *Self, bit: T) void {
             switch(self.*) {
                 .single => self.single.buff |= (@as(T, 1) << @intCast(bit)),
                 .heap => {
@@ -157,10 +155,6 @@ pub fn BitMapSized(comptime T: type) type {
                 .shared => unreachable,
                 .nullMap => unreachable,
             }
-        }
-
-        pub fn set(self: *Self, bit: T) !void {
-            try self.setBit(bit);
         }
 
         const SetBitsIterator = struct {
@@ -222,9 +216,7 @@ pub fn BitMapSized(comptime T: type) type {
             return self.setBitsIterator();
         }
 
-        pub fn unsetBit(self: *Self, bit: T) !void {
-            if (bit >= self.getBits()) return error.OutOfBoundsError;
-
+        pub fn unset(self: *Self, bit: T) void {
             switch(self.*) {
                 .single => {
                     const mask = ~(@as(T, 1) << @intCast(bit));
@@ -342,32 +334,34 @@ pub fn BitMapSized(comptime T: type) type {
 
 pub const BitMap = BitMapSized(u64);
 
+const dbs = std.DynamicBitSetUnmanaged;
+
 test "works with smaller ints" {
     const alloc = std.testing.allocator;
 
     const bmu8 = try BitMapSized(u8).initEmpty(alloc, 8);
     defer bmu8.deinit(alloc);
-    try bmu8.setBit(1);
+    bmu8.set(1);
     try std.testing.expect(bmu8.isSet(1));
 
     const bmu832 = try BitMapSized(u8).initEmpty(alloc, 32);
     defer bmu832.deinit(alloc);
-    try bmu832.setBit(31);
+    bmu832.set(31);
     try std.testing.expect(bmu832.isSet(31));
 }
 
 test "create bitmap" {
     const alloc = std.testing.allocator;
 
-    const bm = try BitMap.initEmpty(alloc, 32);
+    var bm = try BitMap.initEmpty(alloc, 32);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
+    bm.set(1);
 
     try std.testing.expect(bm.isSet(1));
     try std.testing.expect(!bm.isSet(0));
 
-    try bm.unsetBit(1);
+    bm.unset(1);
     try std.testing.expect(!bm.isSet(1));
 }
 
@@ -377,16 +371,16 @@ test "create bitmap with 100 bits" {
     const bm = try BitMap.initEmpty(alloc, 100);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(70);
+    bm.set(1);
+    bm.set(70);
 
     try std.testing.expect(bm.isSet(1));
     try std.testing.expect(bm.isSet(70));
     try std.testing.expect(!bm.isSet(0));
     try std.testing.expect(!bm.isSet(71));
 
-    try bm.unsetBit(1);
-    try bm.unsetBit(70);
+    bm.unset(1);
+    bm.unset(70);
     try std.testing.expect(!bm.isSet(1));
     try std.testing.expect(!bm.isSet(70));
 }
@@ -397,16 +391,16 @@ test "create bitmap with 64 bits" {
     const bm = try BitMap.initEmpty(alloc, 64);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(63);
+    bm.set(1);
+    bm.set(63);
 
     try std.testing.expect(bm.isSet(1));
     try std.testing.expect(bm.isSet(63));
     try std.testing.expect(!bm.isSet(0));
     try std.testing.expect(!bm.isSet(62));
 
-    try bm.unsetBit(1);
-    try bm.unsetBit(63);
+    bm.unset(1);
+    bm.unset(63);
 
     try std.testing.expect(!bm.isSet(1));
     try std.testing.expect(!bm.isSet(63));
@@ -419,8 +413,8 @@ test "bitset iterator single plane" {
     const bm = try BitMap.initEmpty(alloc, 20);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(15);
+    bm.set(1);
+    bm.set(15);
 
     var bitidx: usize = 0;
     var iter = bm.setBitsIterator();
@@ -439,8 +433,8 @@ test "bitset iterator extreme" {
     const bm = try BitMap.initEmpty(alloc, 7);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(6);
+    bm.set(1);
+    bm.set(6);
 
     var bitidx: usize = 0;
     var iter = bm.setBitsIterator();
@@ -459,12 +453,12 @@ test "bitset iterator multi plane" {
     const bm = try BitMap.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(63);
-    try bm.setBit(64);
-    try bm.setBit(127);
-    try std.testing.expectError(error.OutOfBoundsError, bm.setBit(128));
-    try std.testing.expectError(error.OutOfBoundsError, bm.unsetBit(128));
+    bm.set(1);
+    bm.set(63);
+    bm.set(64);
+    bm.set(127);
+    // try std.testing.expectError(error.OutOfBoundsError, bm.set(128));
+    // try std.testing.expectError(error.OutOfBoundsError, bm.unset(128));
 
     var bitidx: usize = 0;
     var iter = bm.setBitsIterator();
@@ -484,8 +478,8 @@ test "popcount single plane" {
     const bm = try BitMap.initEmpty(alloc, 20);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(15);
+    bm.set(1);
+    bm.set(15);
 
     try std.testing.expectEqual(2, bm.count());
 }
@@ -495,9 +489,9 @@ test "popcount multi-plane" {
     const bm = try BitMap.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(63);
-    try bm.setBit(64);
+    bm.set(1);
+    bm.set(63);
+    bm.set(64);
 
     try std.testing.expectEqual(3, bm.count());
 }
@@ -507,9 +501,9 @@ test "not big" {
     const bm = try BitMap.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(63);
-    try bm.setBit(64);
+    bm.set(1);
+    bm.set(63);
+    bm.set(64);
 
     bm.setNot();
 
@@ -526,8 +520,8 @@ test "not small" {
     const bm = try BitMap.initEmpty(alloc, 64);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(63);
+    bm.set(1);
+    bm.set(63);
 
     bm.setNot();
 
@@ -542,8 +536,8 @@ test "dup small" {
     const bm = try BitMap.initEmpty(alloc, 64);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(63);
+    bm.set(1);
+    bm.set(63);
 
     const new = try bm.dup(alloc);
     defer new.deinit(alloc);
@@ -557,9 +551,9 @@ test "dup big" {
     const bm = try BitMap.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(63);
-    try bm.setBit(70);
+    bm.set(1);
+    bm.set(63);
+    bm.set(70);
 
     const new = try bm.dup(alloc);
     defer new.deinit(alloc);
@@ -574,9 +568,9 @@ test "not" {
     const bm = try BitMap.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
-    try bm.setBit(1);
-    try bm.setBit(63);
-    try bm.setBit(70);
+    bm.set(1);
+    bm.set(63);
+    bm.set(70);
 
     const new = try bm.not(alloc);
     defer new.deinit(alloc);
@@ -593,11 +587,11 @@ test "set intersection small" {
     const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
-    try bm1.setBit(1);
-    try bm1.setBit(2);
+    bm1.set(1);
+    bm1.set(2);
 
-    try bm2.setBit(0);
-    try bm2.setBit(1);
+    bm2.set(0);
+    bm2.set(1);
 
     try bm1.setIntersection(bm2);
 
@@ -613,13 +607,13 @@ test "set intersection large" {
     const bm2 = try BitMap.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
-    try bm1.setBit(1);
-    try bm1.setBit(2);
-    try bm1.setBit(70);
+    bm1.set(1);
+    bm1.set(2);
+    bm1.set(70);
 
-    try bm2.setBit(0);
-    try bm2.setBit(1);
-    try bm2.setBit(70);
+    bm2.set(0);
+    bm2.set(1);
+    bm2.set(70);
 
     try bm1.setIntersection(bm2);
 
@@ -636,11 +630,11 @@ test "intersection" {
     const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
-    try bm1.setBit(1);
-    try bm1.setBit(2);
+    bm1.set(1);
+    bm1.set(2);
 
-    try bm2.setBit(0);
-    try bm2.setBit(1);
+    bm2.set(0);
+    bm2.set(1);
 
     const bm3 = try bm1.intersection(bm2, alloc);
     defer bm3.deinit(alloc);
@@ -657,11 +651,11 @@ test "set union small" {
     const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
-    try bm1.setBit(1);
-    try bm1.setBit(2);
+    bm1.set(1);
+    bm1.set(2);
 
-    try bm2.setBit(0);
-    try bm2.setBit(1);
+    bm2.set(0);
+    bm2.set(1);
 
     try bm1.setUnion(bm2);
 
@@ -677,13 +671,13 @@ test "set union large" {
     const bm2 = try BitMap.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
-    try bm1.setBit(1);
-    try bm1.setBit(2);
-    try bm1.setBit(70);
+    bm1.set(1);
+    bm1.set(2);
+    bm1.set(70);
 
-    try bm2.setBit(0);
-    try bm2.setBit(1);
-    try bm2.setBit(70);
+    bm2.set(0);
+    bm2.set(1);
+    bm2.set(70);
 
     try bm1.setUnion(bm2);
 
@@ -700,11 +694,11 @@ test "union" {
     const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
-    try bm1.setBit(1);
-    try bm1.setBit(2);
+    bm1.set(1);
+    bm1.set(2);
 
-    try bm2.setBit(0);
-    try bm2.setBit(1);
+    bm2.set(0);
+    bm2.set(1);
 
     const bm3 = try bm1.Union(bm2, alloc);
     defer bm3.deinit(alloc);
@@ -721,14 +715,14 @@ test "eq small" {
     const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
-    try bm1.setBit(0);
-    try bm1.setBit(1);
+    bm1.set(0);
+    bm1.set(1);
 
-    try bm2.setBit(0);
-    try bm2.setBit(1);
+    bm2.set(0);
+    bm2.set(1);
 
     try std.testing.expect(bm1.eq(bm2));
-    try bm2.setBit(2);
+    bm2.set(2);
     try std.testing.expect(!bm1.eq(bm2));
 }
 
@@ -739,16 +733,16 @@ test "eq large" {
     const bm2 = try BitMap.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
-    try bm1.setBit(1);
-    try bm1.setBit(2);
-    try bm1.setBit(70);
+    bm1.set(1);
+    bm1.set(2);
+    bm1.set(70);
 
-    try bm2.setBit(1);
-    try bm2.setBit(2);
-    try bm2.setBit(70);
+    bm2.set(1);
+    bm2.set(2);
+    bm2.set(70);
 
     try std.testing.expect(bm1.eq(bm2));
-    try bm2.setBit(0);
+    bm2.set(0);
     try std.testing.expect(!bm1.eq(bm2));
 }
 
@@ -759,9 +753,9 @@ test "replace small" {
     const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
-    try bm1.setBit(0);
-    try bm1.setBit(1);
-    try bm1.setBit(15);
+    bm1.set(0);
+    bm1.set(1);
+    bm1.set(15);
 
     try std.testing.expect(!bm1.eq(bm2));
     try std.testing.expect(!bm2.isSet(15));
@@ -779,9 +773,9 @@ test "replace large" {
     const bm2 = try BitMap.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
-    try bm1.setBit(1);
-    try bm1.setBit(2);
-    try bm1.setBit(70);
+    bm1.set(1);
+    bm1.set(2);
+    bm1.set(70);
 
     try std.testing.expect(!bm1.eq(bm2));
     try std.testing.expect(!bm2.isSet(70));
@@ -798,22 +792,22 @@ test "clz small" {
     defer bm1.deinit(alloc);
 
     try std.testing.expectEqual(16, bm1.clz());
-    try bm1.setBit(0);
+    bm1.set(0);
     try std.testing.expectEqual(15, bm1.clz());
-    try bm1.setBit(1);
+    bm1.set(1);
     try std.testing.expectEqual(14, bm1.clz());
-    try bm1.setBit(15);
+    bm1.set(15);
     try std.testing.expectEqual(0, bm1.clz());
 
     const bm2 = try BitMap.initEmpty(alloc, 64);
     defer bm2.deinit(alloc);
 
     try std.testing.expectEqual(64, bm2.clz());
-    try bm2.setBit(0);
+    bm2.set(0);
     try std.testing.expectEqual(63, bm2.clz());
-    try bm2.setBit(1);
+    bm2.set(1);
     try std.testing.expectEqual(62, bm2.clz());
-    try bm2.setBit(63);
+    bm2.set(63);
     try std.testing.expectEqual(0, bm2.clz());
 }
 
@@ -823,11 +817,11 @@ test "clz large" {
     defer bm1.deinit(alloc);
 
     try std.testing.expectEqual(70, bm1.clz());
-    try bm1.setBit(0);
+    bm1.set(0);
     try std.testing.expectEqual(69, bm1.clz());
-    try bm1.setBit(1);
+    bm1.set(1);
     try std.testing.expectEqual(68, bm1.clz());
-    try bm1.setBit(69);
+    bm1.set(69);
     try std.testing.expectEqual(0, bm1.clz());
 }
 
@@ -836,11 +830,11 @@ test "fsb" {
     const bm1 = try BitMap.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
 
-    try bm1.setBit(0);
+    bm1.set(0);
     try std.testing.expectEqual(0, bm1.fsb());
-    try bm1.setBit(1);
+    bm1.set(1);
     try std.testing.expectEqual(1, bm1.fsb());
-    try bm1.setBit(15);
+    bm1.set(15);
     try std.testing.expectEqual(15, bm1.fsb());
 }
 
@@ -849,13 +843,13 @@ test "fsb large" {
     const bm1 = try BitMap.initEmpty(alloc, 70);
     defer bm1.deinit(alloc);
 
-    try bm1.setBit(0);
+    bm1.set(0);
     try std.testing.expectEqual(0, bm1.fsb());
-    try bm1.setBit(1);
+    bm1.set(1);
     try std.testing.expectEqual(1, bm1.fsb());
-    try bm1.setBit(15);
+    bm1.set(15);
     try std.testing.expectEqual(15, bm1.fsb());
-    try bm1.setBit(64);
+    bm1.set(64);
     try std.testing.expectEqual(64, bm1.fsb());
 }
 

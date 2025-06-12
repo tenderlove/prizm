@@ -113,7 +113,7 @@ pub const CFG = struct {
                         var runner = pred;
 
                         while (runner.name != idom) {
-                            try runner.df.?.setBit(bb.name);
+                            runner.df.?.set(bb.name);
                             const runner_idom = runner.idom.?;
                             runner = bbs[runner_idom].?;
                             assert(runner.name == runner_idom);
@@ -144,7 +144,7 @@ pub const CFG = struct {
                     bb.dom = try BitMap.initEmpty(self.arena.allocator(), self.blockCount());
                     // Entry blocks dominate themselves, and nothing else
                     // dominates an entry block.
-                    try bb.dom.?.setBit(bb.name);
+                    bb.dom.?.set(bb.name);
                 } else {
                     // Default blocks to "everything dominates this block"
                     bb.dom = try BitMap.initEmpty(self.arena.allocator(), self.blockCount());
@@ -165,7 +165,7 @@ pub const CFG = struct {
                     const temp = try BitMap.initEmpty(self.mem, self.blockCount());
                     defer self.mem.destroy(temp);
 
-                    try temp.setBit(bb.name);
+                    temp.set(bb.name);
 
                     const intersect = try BitMap.initEmpty(self.mem, self.blockCount());
                     intersect.setNot();
@@ -194,13 +194,13 @@ pub const CFG = struct {
 
                 assert(bb.dom.?.isSet(bb.name));
                 // Unset ourselves real quick
-                try bb.dom.?.unsetBit(bb.name);
+                bb.dom.?.unset(bb.name);
 
                 bb.idom = bb.dom.?.fsb();
                 dom_tree.set(bb.idom.?, bb.name);
 
                 // Set ourselves back
-                try bb.dom.?.setBit(bb.name);
+                bb.dom.?.set(bb.name);
             }
         }
 
@@ -277,7 +277,7 @@ pub const CFG = struct {
                     if (seen_opnd.isSet(v.getID())) {
                         return false;
                     }
-                    try seen_opnd.setBit(v.getID());
+                    seen_opnd.set(v.getID());
                 }
             }
         }
@@ -339,7 +339,7 @@ pub const CFG = struct {
             var biter = blocks.setBitsIterator();
             while (biter.next()) |i| {
                 const block = all_blocks[i];
-                try block_seen.setBit(block.name);
+                block_seen.set(block.name);
                 try worklist.append(block);
             }
 
@@ -356,7 +356,7 @@ pub const CFG = struct {
 
                         if (!block_seen.isSet(dfblock.name)) {
                             try worklist.append(dfblock);
-                            try block_seen.setBit(dfblock.name);
+                            block_seen.set(dfblock.name);
                         }
                     }
                 }
@@ -553,7 +553,7 @@ pub const CFG = struct {
     fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *usize) !void {
         if (blk) |bb| {
             if (seen.isSet(bb.name)) return;
-            try seen.setBit(bb.name);
+            seen.set(bb.name);
             try traverseReversePostorder(bb.fall_through_dest, seen, list, counter);
             try traverseReversePostorder(bb.jump_dest, seen, list, counter);
 
@@ -834,13 +834,13 @@ pub const BasicBlock = struct {
                 // the operand to the "upward exposed" set.  This means the operand
                 // _must_ have been defined in a block that dominates this block.
                 if (op.isVariable() and !self.killed_set.isSet(op.getID())) {
-                    try self.upward_exposed_set.setBit(op.getID());
+                    self.upward_exposed_set.set(op.getID());
                 }
             }
 
             if (insn.data.outVar()) |v| {
                 if (v.isVariable()) {
-                    try self.killed_set.setBit(v.getID());
+                    self.killed_set.set(v.getID());
                 }
             }
         }
@@ -957,7 +957,7 @@ pub const BasicBlock = struct {
             // Remove parameters from the uninitialized set. They should
             // be initialized by the caller
             if (op.isParam()) {
-                try uninit.unsetBit(opnd_id);
+                uninit.unset(opnd_id);
             }
         }
         return uninit;

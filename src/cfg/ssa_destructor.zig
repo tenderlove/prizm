@@ -206,8 +206,8 @@ pub const SSADestructor = struct {
             return error.NotImplementedError;
         }
 
-        try seen.set(node);
-        try visited.set(node);
+        seen.set(node);
+        visited.set(node);
 
         const children = graph.getColumn(node);
         var iter = children.iter();
@@ -232,7 +232,7 @@ pub const SSADestructor = struct {
             // If we've visited this variable already, we can skip it
             if (visited.isSet(point.x)) continue;
 
-            try visited.set(point.x);
+            visited.set(point.x);
 
             // TODO: we should allocate this once and reuse it but we need
             // a "clear" method on bit maps.
