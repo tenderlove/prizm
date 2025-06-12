@@ -257,12 +257,6 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn intersection(self: Self, other: *Self, mem: std.mem.Allocator) !*Self {
-            const new = try self.clone(mem);
-            new.setIntersection(other);
-            return new;
-        }
-
         pub fn toggleAll(self: *Self) void {
             switch (self.*) {
                 .single => self.single.buff = ~self.single.buff,
@@ -614,9 +608,9 @@ test "set intersection large" {
 
 test "intersection" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 16);
+    var bm1 = try dbs.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.initEmpty(alloc, 16);
+    var bm2 = try dbs.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     bm1.set(1);
@@ -625,7 +619,8 @@ test "intersection" {
     bm2.set(0);
     bm2.set(1);
 
-    const bm3 = try bm1.intersection(bm2, alloc);
+    var bm3 = try bm1.clone(alloc);
+    bm3.setIntersection(bm2);
     defer bm3.deinit(alloc);
 
     try std.testing.expect(!bm3.isSet(0));

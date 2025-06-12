@@ -723,7 +723,8 @@ pub const BasicBlock = struct {
         notkill.toggleAll();
         defer alloc.destroy(notkill);
 
-        const lonk = try lo.intersection(notkill, alloc);
+        var lonk = try lo.clone(alloc);
+        lonk.setIntersection(notkill);
         defer alloc.destroy(lonk);
 
         const newlo = try ue.Union(lonk, alloc);
