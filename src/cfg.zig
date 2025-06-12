@@ -942,6 +942,9 @@ pub const BasicBlock = struct {
 
     pub fn uninitializedSet(self: *BasicBlock, scope: *Scope, mem: std.mem.Allocator) !*BitMap {
         if (!self.entry) return error.ArgumentError;
+        if (self.killed_set.isNullBlock()) {
+            return self.killed_set;
+        }
 
         const uninit = try self.killed_set.dup(mem);
         uninit.setNot();

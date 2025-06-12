@@ -408,8 +408,12 @@ const CFGPrinter = struct {
         // Print live in variables
         try printSet("LiveIn: ", scope, blk.livein_set, ctx);
 
-        try printBlockSet("DOM: ", blk.dom.?, ctx);
-        try printBlockSet("DF: ", blk.df.?, ctx);
+        if (blk.dom) |dom| {
+            try printBlockSet("DOM: ", dom, ctx);
+        }
+        if (blk.df) |df| {
+            try printBlockSet("DF: ", df, ctx);
+        }
         if (blk.idom) |idom| {
             try ctx.out.printListItem("IDOM: BB{d}", .{idom});
         }

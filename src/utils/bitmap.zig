@@ -107,6 +107,9 @@ pub fn BitMapSized(comptime T: type) type {
         }
 
         pub fn dup(orig: Self, mem: std.mem.Allocator) !*Self {
+            if (orig.isNullBlock()) {
+                return @constCast(&orig);
+            }
             const bm = try mem.create(Self);
             bm.* = try fillBm(mem, 0, orig.getBits());
             switch(bm.*) {
@@ -880,4 +883,11 @@ test "iterate shared" {
     }
     try std.testing.expectEqual(0, check[0]);
     try std.testing.expectEqual(64, check[1]);
+}
+
+test "dup null" {
+    const bm = BitMap.Null;
+    const duped = try bm.dup(std.testing.allocator);
+    try std.testing.expect(duped.isNullBlock());
+    try std.testing.expectEqual(bm, duped.*);
 }
