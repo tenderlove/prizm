@@ -32,8 +32,38 @@ const DotOutputStrategy = struct {
         try self.print("{s}\\l", .{string});
     }
 
+    pub fn printBlockSeparator(_: *const @This()) !void {
+    }
+
     pub fn printClusterFooter(self: *const DotOutputStrategy, _: *Scope) !void {
         try self.print("}}\n", .{});
+    }
+
+    pub fn printListItem(self: *const DotOutputStrategy, comptime format: []const u8, args: anytype) !void {
+        try self.print(format, args);
+        try self.print("\\l", .{});
+    }
+
+    pub fn printBlockFooter(self: *const @This()) !void {
+        try self.print("\"];\n", .{});
+    }
+
+    pub fn printFallThrough(self: *const @This(), scope: *Scope, blk: *BasicBlock, dest: *BasicBlock) !void {
+        try self.print("A{d}B{d} -> A{d}B{d} [label=\"fall through\"];\n", .{ scope.id, blk.name, scope.id, dest.name });
+    }
+
+    pub fn printJump(self: *const @This(), scope: *Scope, blk: *BasicBlock, dest: *BasicBlock) !void {
+        try self.print("A{d}B{d} -> A{d}B{d} [label=\"jump\"];\n", .{ scope.id, blk.name, scope.id, dest.name });
+    }
+
+    pub fn printLineBreak(self: *const @This()) !void {
+        try self.print("\\l", .{});
+    }
+
+    pub fn printInsnHeader(_: *const @This()) !void {
+    }
+
+    pub fn printInsnFooter(_: *const @This()) !void {
     }
 
     pub fn print(self: *const DotOutputStrategy, comptime format: []const u8, args: anytype) !void {
@@ -60,6 +90,40 @@ const AsciiOutputStrategy = struct {
 
     pub fn printSet(self: *const @This(), string: []const u8) !void {
         try self.print("* {s}\n", .{string});
+    }
+
+    pub fn printListItem(self: *const @This(), comptime format: []const u8, args: anytype) !void {
+        try self.print("* ", .{});
+        try self.print(format, args);
+        try self.print("\n", .{});
+    }
+
+    pub fn printFallThrough(self: *const @This(), _: *Scope, _: *BasicBlock, dest: *BasicBlock) !void {
+        try self.print("* Falls Through To: BB{d}\n", .{ dest.name });
+    }
+
+    pub fn printJump(self: *const @This(), _: *Scope, _: *BasicBlock, dest: *BasicBlock) !void {
+        try self.print("* Jumps To: BB{d}\n", .{ dest.name });
+    }
+
+    pub fn printBlockFooter(self: *const @This()) !void {
+        try self.print("\n", .{});
+    }
+
+    pub fn printBlockSeparator(self: *const @This()) !void {
+        try self.print("\n", .{});
+    }
+
+    pub fn printLineBreak(self: *const @This()) !void {
+        try self.print("\n", .{});
+    }
+
+    pub fn printInsnHeader(self: *const @This()) !void {
+        try self.print("```\n", .{});
+    }
+
+    pub fn printInsnFooter(self: *const @This()) !void {
+        try self.print("```\n", .{});
     }
 
     pub fn print(self: *const AsciiOutputStrategy, comptime format: []const u8, args: anytype) !void {
@@ -274,13 +338,14 @@ const CFGPrinter = struct {
             scope: *Scope,
             var_width: usize,
             insn_width: usize,
+            allocator: std.mem.Allocator,
         };
     }
 
-    fn printSet(comptime name: []const u8, scope: *Scope, set: *bm.BitMap, out: anytype) !void {
+    fn printSet(comptime name: []const u8, scope: *Scope, set: *bm.BitMap, ctx: anytype) !void {
         const nitems = set.popCount(); // number of variables
         if (nitems > 0) {
-            var buffer = std.ArrayList(u8).init(scope.allocator);
+            var buffer = std.ArrayList(u8).init(ctx.allocator);
             defer buffer.deinit();
 
             // Build the complete string in buffer
@@ -296,32 +361,38 @@ const CFGPrinter = struct {
                 first = false;
 
                 const op = scope.operands.items[opnd_id];
-                const opnd_str = try IRPrinter.formatOpnd(scope.allocator, op);
-                defer scope.allocator.free(opnd_str);
+                const opnd_str = try IRPrinter.formatOpnd(ctx.allocator, op);
+                defer ctx.allocator.free(opnd_str);
                 try buffer.appendSlice(opnd_str);
             }
             try buffer.append(')');
-            try out.printSet(buffer.items);
+            try ctx.out.printSet(buffer.items);
         }
     }
 
-    fn printBlockSet(comptime name: []const u8, set: *bm.BitMap, out: anytype) !void {
+    fn printBlockSet(comptime name: []const u8, set: *bm.BitMap, ctx: anytype) !void {
         const nitems = set.popCount(); // number of variables
         if (nitems > 0) {
-            var biti = set.setBitsIterator();
-            try out.print(name, .{});
-            try out.print("(", .{});
+            var buffer = std.ArrayList(u8).init(ctx.allocator);
+            defer buffer.deinit();
 
+            // Build the complete string in buffer
+            try buffer.appendSlice(name);
+            try buffer.append('(');
+
+            var biti = set.setBitsIterator();
             var first = true;
             while (biti.next()) |block_id| {
                 if (!first) {
-                    try out.print(", ", .{});
+                    try buffer.appendSlice(", ");
                 }
                 first = false;
-                try out.print("BB{d}", .{block_id});
+                try buffer.writer().print("BB{d}", .{block_id});
             }
-            try out.print(")", .{});
-            try out.print("\\l", .{});
+            try buffer.append(')');
+
+            // Print the complete string in one go
+            try ctx.out.printSet(buffer.items);
         }
     }
 
@@ -329,21 +400,21 @@ const CFGPrinter = struct {
         try ctx.out.printBlockHeader(scope, blk);
 
         // Print upward exposed variables
-        try printSet("UE: ", scope, blk.upward_exposed_set, ctx.out);
+        try printSet("UE: ", scope, blk.upward_exposed_set, ctx);
 
         // Print killed variables
-        try printSet("Killed: ", scope, blk.killed_set, ctx.out);
+        try printSet("Killed: ", scope, blk.killed_set, ctx);
 
         // Print live out variables
-        try printSet("LiveOut: ", scope, blk.liveout_set, ctx.out);
+        try printSet("LiveOut: ", scope, blk.liveout_set, ctx);
 
         // Print live in variables
-        try printSet("LiveIn: ", scope, blk.livein_set, ctx.out);
+        try printSet("LiveIn: ", scope, blk.livein_set, ctx);
 
-        try printBlockSet("DOM: ", blk.dom.?, ctx.out);
-        try printBlockSet("DF: ", blk.df.?, ctx.out);
+        try printBlockSet("DOM: ", blk.dom.?, ctx);
+        try printBlockSet("DF: ", blk.df.?, ctx);
         if (blk.idom) |idom| {
-            try ctx.out.print("IDOM: BB{d}\\l", .{idom});
+            try ctx.out.printListItem("IDOM: BB{d}", .{idom});
         }
 
         // Print uninitialized variables
@@ -351,11 +422,12 @@ const CFGPrinter = struct {
             const uninitialized = try blk.uninitializedSet(scope, scope.allocator);
             defer scope.allocator.destroy(uninitialized);
             if (uninitialized.popCount() > 0) {
-                try printSet("Uninitialized: ", scope, uninitialized, ctx.out);
+                try printSet("Uninitialized: ", scope, uninitialized, ctx);
             }
         }
 
-        try ctx.out.print("\\l", .{});
+        try ctx.out.printLineBreak();
+        try ctx.out.printInsnHeader();
 
         var iter = blk.instructionIter();
         while (iter.next()) |insn| {
@@ -363,17 +435,19 @@ const CFGPrinter = struct {
                 try ctx.work.append(insn.data.define_method.func.scope.value);
             }
             try IRPrinter.printInsn(insn.data, ctx.var_width, ctx.insn_width, ctx.out);
-            try ctx.out.print("\\l", .{});
+            try ctx.out.printLineBreak();
         }
 
-        try ctx.out.print("\"];\n", .{});
+        try ctx.out.printInsnFooter();
+
+        try ctx.out.printBlockFooter();
 
         if (blk.fall_through_dest) |left| {
-            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"fall through\"];\n", .{ ctx.scope.id, blk.name, ctx.scope.id, left.name });
+            try ctx.out.printFallThrough(ctx.scope, blk, left);
         }
 
         if (blk.jump_dest) |right| {
-            try ctx.out.print("A{d}B{d} -> A{d}B{d} [label=\"jump\"];\n", .{ ctx.scope.id, blk.name, ctx.scope.id, right.name });
+            try ctx.out.printJump(ctx.scope, blk, right);
         }
     }
 
@@ -402,12 +476,14 @@ const CFGPrinter = struct {
                 .scope = work_scope,
                 .var_width = widestOutOp(work_scope),
                 .insn_width = widest_insn + 1,
+                .allocator = alloc,
             };
 
             var iter = try cfg.depthFirstIterator();
             defer iter.deinit();
             while (try iter.next()) |bb| {
                 try printBlock(work_scope, bb, &ctx);
+                try ctx.out.printBlockSeparator();
             }
             try out.printClusterFooter(work_scope);
         }
