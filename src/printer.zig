@@ -32,8 +32,7 @@ const DotOutputStrategy = struct {
         try self.print("{s}\\l", .{string});
     }
 
-    pub fn printBlockSeparator(_: *const @This()) !void {
-    }
+    pub fn printBlockSeparator(_: *const @This()) !void {}
 
     pub fn printClusterFooter(self: *const DotOutputStrategy, _: *Scope) !void {
         try self.print("}}\n", .{});
@@ -60,11 +59,9 @@ const DotOutputStrategy = struct {
         try self.print("\\l", .{});
     }
 
-    pub fn printInsnHeader(_: *const @This()) !void {
-    }
+    pub fn printInsnHeader(_: *const @This()) !void {}
 
-    pub fn printInsnFooter(_: *const @This()) !void {
-    }
+    pub fn printInsnFooter(_: *const @This()) !void {}
 
     pub fn print(self: *const DotOutputStrategy, comptime format: []const u8, args: anytype) !void {
         try self.writer.print(format, args);
@@ -99,11 +96,11 @@ const AsciiOutputStrategy = struct {
     }
 
     pub fn printFallThrough(self: *const @This(), _: *Scope, _: *BasicBlock, dest: *BasicBlock) !void {
-        try self.print("* Falls Through To: BB{d}\n", .{ dest.name });
+        try self.print("* Falls Through To: BB{d}\n", .{dest.name});
     }
 
     pub fn printJump(self: *const @This(), _: *Scope, _: *BasicBlock, dest: *BasicBlock) !void {
-        try self.print("* Jumps To: BB{d}\n", .{ dest.name });
+        try self.print("* Jumps To: BB{d}\n", .{dest.name});
     }
 
     pub fn printBlockFooter(self: *const @This()) !void {
