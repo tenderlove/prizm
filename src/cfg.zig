@@ -148,7 +148,7 @@ pub const CFG = struct {
                 } else {
                     // Default blocks to "everything dominates this block"
                     bb.dom = try BitMap.initEmpty(self.arena.allocator(), self.blockCount());
-                    bb.dom.?.setNot();
+                    bb.dom.?.toggleAll();
                 }
             }
         }
@@ -168,7 +168,7 @@ pub const CFG = struct {
                     temp.set(bb.name);
 
                     const intersect = try BitMap.initEmpty(self.mem, self.blockCount());
-                    intersect.setNot();
+                    intersect.toggleAll();
                     defer self.mem.destroy(intersect);
 
                     for (bb.predecessors.items) |pred| {
@@ -947,7 +947,7 @@ pub const BasicBlock = struct {
         }
 
         const uninit = try self.killed_set.dup(mem);
-        uninit.setNot();
+        uninit.toggleAll();
         try uninit.setIntersection(self.liveout_set);
         try uninit.setUnion(self.upward_exposed_set);
 

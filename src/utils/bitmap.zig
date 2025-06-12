@@ -265,7 +265,7 @@ pub fn BitMapSized(comptime T: type) type {
             return new;
         }
 
-        pub fn setNot(self: *Self) void {
+        pub fn toggleAll(self: *Self) void {
             switch (self.*) {
                 .single => self.single.buff = ~self.single.buff,
                 .heap => {
@@ -280,7 +280,7 @@ pub fn BitMapSized(comptime T: type) type {
 
         pub fn not(self: Self, mem: std.mem.Allocator) !*Self {
             const new = try self.dup(mem);
-            new.setNot();
+            new.toggleAll();
             return new;
         }
 
@@ -349,7 +349,7 @@ test "works with smaller ints" {
 test "create bitmap" {
     const alloc = std.testing.allocator;
 
-    var bm = try BitMap.initEmpty(alloc, 32);
+    var bm = try dbs.initEmpty(alloc, 32);
     defer bm.deinit(alloc);
 
     bm.set(1);
@@ -364,7 +364,7 @@ test "create bitmap" {
 test "create bitmap with 100 bits" {
     const alloc = std.testing.allocator;
 
-    const bm = try BitMap.initEmpty(alloc, 100);
+    var bm = try dbs.initEmpty(alloc, 100);
     defer bm.deinit(alloc);
 
     bm.set(1);
@@ -384,7 +384,7 @@ test "create bitmap with 100 bits" {
 test "create bitmap with 64 bits" {
     const alloc = std.testing.allocator;
 
-    const bm = try BitMap.initEmpty(alloc, 64);
+    var bm = try dbs.initEmpty(alloc, 64);
     defer bm.deinit(alloc);
 
     bm.set(1);
@@ -406,7 +406,7 @@ test "bitset iterator single plane" {
     const alloc = std.testing.allocator;
     var bits = [_]usize { 0, 0 };
 
-    var bm = try BitMap.initEmpty(alloc, 20);
+    var bm = try dbs.initEmpty(alloc, 20);
     defer bm.deinit(alloc);
 
     bm.set(1);
@@ -426,7 +426,7 @@ test "bitset iterator extreme" {
     const alloc = std.testing.allocator;
     var bits = [_]usize { 0, 0 };
 
-    const bm = try BitMap.initEmpty(alloc, 7);
+    var bm = try dbs.initEmpty(alloc, 7);
     defer bm.deinit(alloc);
 
     bm.set(1);
@@ -446,7 +446,7 @@ test "bitset iterator multi plane" {
     const alloc = std.testing.allocator;
     var bits = [_]usize { 0, 0, 0, 0, 0 };
 
-    const bm = try BitMap.initEmpty(alloc, 128);
+    var bm = try dbs.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
     bm.set(1);
@@ -471,7 +471,7 @@ test "bitset iterator multi plane" {
 test "popcount single plane" {
     const alloc = std.testing.allocator;
 
-    const bm = try BitMap.initEmpty(alloc, 20);
+    var bm = try dbs.initEmpty(alloc, 20);
     defer bm.deinit(alloc);
 
     bm.set(1);
@@ -482,7 +482,7 @@ test "popcount single plane" {
 
 test "popcount multi-plane" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.initEmpty(alloc, 128);
+    var bm = try dbs.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
     bm.set(1);
@@ -494,14 +494,14 @@ test "popcount multi-plane" {
 
 test "not big" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.initEmpty(alloc, 128);
+    var bm = try dbs.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
     bm.set(1);
     bm.set(63);
     bm.set(64);
 
-    bm.setNot();
+    bm.toggleAll();
 
     try std.testing.expect(!bm.isSet(1));
     try std.testing.expect(!bm.isSet(63));
@@ -513,13 +513,13 @@ test "not big" {
 
 test "not small" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.initEmpty(alloc, 64);
+    var bm = try dbs.initEmpty(alloc, 64);
     defer bm.deinit(alloc);
 
     bm.set(1);
     bm.set(63);
 
-    bm.setNot();
+    bm.toggleAll();
 
     try std.testing.expect(!bm.isSet(1));
     try std.testing.expect(!bm.isSet(63));
