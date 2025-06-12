@@ -278,12 +278,6 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn not(self: Self, mem: std.mem.Allocator) !*Self {
-            const new = try self.clone(mem);
-            new.toggleAll();
-            return new;
-        }
-
         pub fn replace(self: *Self, other: *Self) !void {
             if (self.getBits() != other.getBits()) return error.ArgumentError;
 
@@ -529,7 +523,7 @@ test "not small" {
 
 test "dup small" {
     const alloc = std.testing.allocator;
-    var bm = try BitMap.initEmpty(alloc, 64);
+    var bm = try dbs.initEmpty(alloc, 64);
     defer bm.deinit(alloc);
 
     bm.set(1);
@@ -544,14 +538,14 @@ test "dup small" {
 
 test "dup big" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.initEmpty(alloc, 128);
+    var bm = try dbs.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
     bm.set(1);
     bm.set(63);
     bm.set(70);
 
-    const new = try bm.clone(alloc);
+    var new = try bm.clone(alloc);
     defer new.deinit(alloc);
 
     try std.testing.expect(new.isSet(1));
@@ -561,15 +555,16 @@ test "dup big" {
 
 test "not" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.initEmpty(alloc, 128);
+    var bm = try dbs.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
     bm.set(1);
     bm.set(63);
     bm.set(70);
 
-    const new = try bm.not(alloc);
+    var new = try bm.clone(alloc);
     defer new.deinit(alloc);
+    new.toggleAll();
 
     try std.testing.expect(!new.isSet(1));
     try std.testing.expect(!new.isSet(63));

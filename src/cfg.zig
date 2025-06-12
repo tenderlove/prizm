@@ -229,8 +229,10 @@ pub const CFG = struct {
         for (self.blocks) |blk| {
             try blk.livein_set.replace(blk.upward_exposed_set);
 
-            const not_def = try blk.killed_set.not(self.mem);
+            // Bitwise NOT the "not defined" list
+            var not_def = try blk.killed_set.clone(self.mem);
             defer not_def.deinit(self.mem);
+            not_def.toggleAll();
 
             try not_def.setIntersection(blk.liveout_set);
             try blk.livein_set.setUnion(not_def);
@@ -716,7 +718,9 @@ pub const BasicBlock = struct {
         const lo = child.liveout_set;
         const varkill = child.killed_set;
 
-        const notkill = try varkill.not(alloc);
+        // Bitwise NOT the kill list
+        var notkill = try varkill.clone(alloc);
+        notkill.toggleAll();
         defer alloc.destroy(notkill);
 
         const lonk = try lo.intersection(notkill, alloc);
