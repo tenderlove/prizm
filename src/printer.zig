@@ -349,7 +349,7 @@ const CFGPrinter = struct {
             try buffer.appendSlice(name);
             try buffer.append('(');
 
-            var biti = set.setBitsIterator();
+            var biti = set.iterator(.{});
             var first = true;
             while (biti.next()) |opnd_id| {
                 if (!first) {
@@ -377,7 +377,7 @@ const CFGPrinter = struct {
             try buffer.appendSlice(name);
             try buffer.append('(');
 
-            var biti = set.setBitsIterator();
+            var biti = set.iterator(.{});
             var first = true;
             while (biti.next()) |block_id| {
                 if (!first) {

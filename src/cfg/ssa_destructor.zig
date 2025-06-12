@@ -210,7 +210,7 @@ pub const SSADestructor = struct {
         visited.set(node);
 
         const children = graph.getColumn(node);
-        var iter = children.iter();
+        var iter = children.iterator(.{});
         while (iter.next()) |child| {
             // If we've already seen this subgraph, just return. We know there
             // aren't any cycles in the subgraph.

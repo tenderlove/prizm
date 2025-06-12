@@ -197,7 +197,7 @@ pub fn BitMapSized(comptime T: type) type {
             }
         };
 
-        pub fn setBitsIterator(self: Self) SetBitsIterator {
+        pub fn iterator(self: Self, _: anytype) SetBitsIterator {
             const plane = switch(self) {
                 inline .shared, .heap => |p| p.buff[0],
                 .single => |p| p.buff,
@@ -210,10 +210,6 @@ pub fn BitMapSized(comptime T: type) type {
                 .current_plane = plane,
                 .bm = self
             };
-        }
-
-        pub fn iter(self: Self) SetBitsIterator {
-            return self.setBitsIterator();
         }
 
         pub fn unset(self: *Self, bit: T) void {
@@ -410,14 +406,14 @@ test "bitset iterator single plane" {
     const alloc = std.testing.allocator;
     var bits = [_]usize { 0, 0 };
 
-    const bm = try BitMap.initEmpty(alloc, 20);
+    var bm = try BitMap.initEmpty(alloc, 20);
     defer bm.deinit(alloc);
 
     bm.set(1);
     bm.set(15);
 
     var bitidx: usize = 0;
-    var iter = bm.setBitsIterator();
+    var iter = bm.iterator(.{});
     while (iter.next()) |num| {
         bits[bitidx] = num;
         bitidx += 1;
@@ -437,7 +433,7 @@ test "bitset iterator extreme" {
     bm.set(6);
 
     var bitidx: usize = 0;
-    var iter = bm.setBitsIterator();
+    var iter = bm.iterator(.{});
     while (iter.next()) |num| {
         bits[bitidx] = num;
         bitidx += 1;
@@ -461,7 +457,7 @@ test "bitset iterator multi plane" {
     // try std.testing.expectError(error.OutOfBoundsError, bm.unset(128));
 
     var bitidx: usize = 0;
-    var iter = bm.setBitsIterator();
+    var iter = bm.iterator(.{});
     while (iter.next()) |num| {
         bits[bitidx] = num;
         bitidx += 1;
@@ -870,7 +866,7 @@ test "iterate shared" {
     var check = [_]usize { 0, 0 };
 
     var bitidx: usize = 0;
-    var iter = bm.setBitsIterator();
+    var iter = bm.iterator(.{});
     while (iter.next()) |num| {
         check[bitidx] = num;
         bitidx += 1;

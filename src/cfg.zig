@@ -307,7 +307,7 @@ pub const CFG = struct {
             if (block.reachable) {
                 // Upward exposed variables must cross between BBs
                 try globals.setUnion(block.upward_exposed_set);
-                var iter = block.killed_set.setBitsIterator();
+                var iter = block.killed_set.iterator(.{});
                 while (iter.next()) |operand_num| {
                     block_set.set(operand_num, block.name);
                 }
@@ -319,7 +319,7 @@ pub const CFG = struct {
         // the instructions in a block.
         const phi_map = try BitMatrix.init(self.arena.allocator(), opnd_count, all_blocks.len);
 
-        var global_iter = globals.setBitsIterator();
+        var global_iter = globals.iterator(.{});
         var worklist = std.ArrayList(*BasicBlock).init(self.mem);
         defer worklist.deinit();
 
@@ -336,7 +336,7 @@ pub const CFG = struct {
             const opnd = self.scope.getOperandById(operand_num);
 
             // Add each block to our worklist
-            var biter = blocks.setBitsIterator();
+            var biter = blocks.iterator(.{});
             while (biter.next()) |i| {
                 const block = all_blocks[i];
                 block_seen.set(block.name);
@@ -344,7 +344,7 @@ pub const CFG = struct {
             }
 
             while (worklist.pop()) |block| {
-                var dfiter = block.df.?.setBitsIterator();
+                var dfiter = block.df.?.iterator(.{});
                 while (dfiter.next()) |dfi| {
                     const dfblock = all_blocks[dfi];
                     if (!phi_map.isSet(operand_num, dfblock.name)) {
@@ -461,7 +461,7 @@ pub const CFG = struct {
             // For each successor in the dominator tree
             //   rename the successor
             const dt = cfg.dom_tree.?;
-            var bititer = dt.getColumn(bb.name).setBitsIterator();
+            var bititer = dt.getColumn(bb.name).iterator(.{});
             while (bititer.next()) |child_id| {
                 try self.rename(cfg, cfg.blocks[child_id]);
             }
@@ -951,7 +951,7 @@ pub const BasicBlock = struct {
         try uninit.setIntersection(self.liveout_set);
         try uninit.setUnion(self.upward_exposed_set);
 
-        var biti = uninit.setBitsIterator();
+        var biti = uninit.iterator(.{});
         while (biti.next()) |opnd_id| {
             const op = scope.getOperandById(opnd_id);
             // Remove parameters from the uninitialized set. They should
