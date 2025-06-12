@@ -727,7 +727,8 @@ pub const BasicBlock = struct {
         lonk.setIntersection(notkill);
         defer alloc.destroy(lonk);
 
-        const newlo = try ue.Union(lonk, alloc);
+        var newlo = try ue.clone(alloc);
+        newlo.setUnion(lonk);
         return newlo;
     }
 
@@ -767,7 +768,8 @@ pub const BasicBlock = struct {
                 const newlo2 = try self.childLo(child2, alloc);
                 defer alloc.destroy(newlo2);
 
-                const bothlo = try newlo.Union(newlo2, alloc);
+                var bothlo = try newlo.clone(alloc);
+                bothlo.setUnion(newlo2);
                 defer alloc.destroy(bothlo);
 
                 if (self.liveout_set.eq(bothlo)) {

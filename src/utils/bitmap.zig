@@ -281,12 +281,6 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub fn Union(self: Self, other: *Self, mem: std.mem.Allocator) !*Self {
-            const new = try self.clone(mem);
-            new.setUnion(other);
-            return new;
-        }
-
         pub fn setUnion(self: *Self, other: *Self) void {
             switch(self.*) {
                 .single => self.single.buff |= other.single.buff,
@@ -648,9 +642,9 @@ test "set union small" {
 
 test "set union large" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 128);
+    var bm1 = try dbs.initEmpty(alloc, 128);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.initEmpty(alloc, 128);
+    var bm2 = try dbs.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
     bm1.set(1);
@@ -671,9 +665,9 @@ test "set union large" {
 
 test "union" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 16);
+    var bm1 = try dbs.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.initEmpty(alloc, 16);
+    var bm2 = try dbs.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     bm1.set(1);
@@ -682,7 +676,8 @@ test "union" {
     bm2.set(0);
     bm2.set(1);
 
-    const bm3 = try bm1.Union(bm2, alloc);
+    var bm3 = try bm1.clone(alloc);
+    bm3.setUnion(bm2);
     defer bm3.deinit(alloc);
 
     try std.testing.expect(bm3.isSet(0));
