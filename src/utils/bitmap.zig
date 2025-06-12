@@ -131,16 +131,16 @@ pub fn BitMapSized(comptime T: type) type {
             };
         }
 
-        pub fn popCount(self: Self) usize {
+        pub fn count(self: Self) usize {
             switch(self) {
                 .single => |p| return @popCount(p.buff),
                 .nullMap => return 0,
                 inline .shared, .heap => |p| {
-                    var count: usize = 0;
+                    var n: usize = 0;
                     for (p.buff) |plane| {
-                        count += @popCount(plane);
+                        n += @popCount(plane);
                     }
-                    return count;
+                    return n;
                 }
             }
         }
@@ -487,7 +487,7 @@ test "popcount single plane" {
     try bm.setBit(1);
     try bm.setBit(15);
 
-    try std.testing.expectEqual(2, bm.popCount());
+    try std.testing.expectEqual(2, bm.count());
 }
 
 test "popcount multi-plane" {
@@ -499,7 +499,7 @@ test "popcount multi-plane" {
     try bm.setBit(63);
     try bm.setBit(64);
 
-    try std.testing.expectEqual(3, bm.popCount());
+    try std.testing.expectEqual(3, bm.count());
 }
 
 test "not big" {

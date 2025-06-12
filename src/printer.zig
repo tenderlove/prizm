@@ -340,7 +340,7 @@ const CFGPrinter = struct {
     }
 
     fn printSet(comptime name: []const u8, scope: *Scope, set: *bm.BitMap, ctx: anytype) !void {
-        const nitems = set.popCount(); // number of variables
+        const nitems = set.count(); // number of variables
         if (nitems > 0) {
             var buffer = std.ArrayList(u8).init(ctx.allocator);
             defer buffer.deinit();
@@ -368,7 +368,7 @@ const CFGPrinter = struct {
     }
 
     fn printBlockSet(comptime name: []const u8, set: *bm.BitMap, ctx: anytype) !void {
-        const nitems = set.popCount(); // number of variables
+        const nitems = set.count(); // number of variables
         if (nitems > 0) {
             var buffer = std.ArrayList(u8).init(ctx.allocator);
             defer buffer.deinit();
@@ -422,7 +422,7 @@ const CFGPrinter = struct {
         if (blk.entry) {
             const uninitialized = try blk.uninitializedSet(scope, scope.allocator);
             defer scope.allocator.destroy(uninitialized);
-            if (uninitialized.popCount() > 0) {
+            if (uninitialized.count() > 0) {
                 try printSet("Uninitialized: ", scope, uninitialized, ctx);
             }
         }

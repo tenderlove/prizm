@@ -283,7 +283,7 @@ pub const SSADestructor = struct {
             }
         }
 
-        if (matrix.popCount() > 0) {
+        if (matrix.count() > 0) {
             try self.checkForCycles(cfg, matrix);
             try self.serializeCopyGroup(cfg, start_of_group, current_group);
         }

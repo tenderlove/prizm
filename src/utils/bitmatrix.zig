@@ -124,12 +124,12 @@ pub fn BitMatrixSize(comptime T: type) type {
             };
         }
 
-        pub fn popCount(self: Self) usize {
-            var count: usize = 0;
+        pub fn count(self: Self) usize {
+            var n: usize = 0;
             for (self.buffer) |slice| {
-                count += @popCount(slice);
+                n += @popCount(slice);
             }
-            return count;
+            return n;
         }
 
         pub fn clear(self: Self) void {
@@ -210,13 +210,13 @@ test "popcount" {
     defer matrix.deinit(alloc);
 
     matrix.set(0, 0);
-    try std.testing.expectEqual(1, matrix.popCount());
+    try std.testing.expectEqual(1, matrix.count());
     matrix.set(0, 1);
-    try std.testing.expectEqual(2, matrix.popCount());
+    try std.testing.expectEqual(2, matrix.count());
     matrix.set(0, 1);
-    try std.testing.expectEqual(2, matrix.popCount());
+    try std.testing.expectEqual(2, matrix.count());
     matrix.clear();
-    try std.testing.expectEqual(0, matrix.popCount());
+    try std.testing.expectEqual(0, matrix.count());
 }
 
 test "3d matrix init" {

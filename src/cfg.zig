@@ -510,7 +510,7 @@ pub const CFG = struct {
     };
 
     pub fn rename(self: *CFG) !void {
-        const global_count = self.globals.?.popCount();
+        const global_count = self.globals.?.count();
         var renamer = try Renamer.init(self.mem, global_count);
         defer renamer.deinit(self.mem);
         try renamer.rename(self, self.head);
@@ -685,11 +685,11 @@ pub const BasicBlock = struct {
     }
 
     pub fn killedVariableCount(self: *BasicBlock) usize {
-        return self.killed_set.popCount();
+        return self.killed_set.count();
     }
 
     pub fn upwardExposedCount(self: *BasicBlock) usize {
-        return self.upward_exposed_set.popCount();
+        return self.upward_exposed_set.count();
     }
 
     pub fn startInsn(self: *BasicBlock) ?*ir.InstructionList.Node {
@@ -1174,7 +1174,7 @@ test "no uninitialized in ternary" {
     const uninitialized = try cfg.head.uninitializedSet(scope, allocator);
     defer uninitialized.deinit(allocator);
 
-    try std.testing.expectEqual(0, uninitialized.popCount());
+    try std.testing.expectEqual(0, uninitialized.count());
 }
 
 test "if statement should have 2 children blocks" {
@@ -1475,24 +1475,24 @@ test "blocks have dominators" {
     try std.testing.expect(blocks[0].entry);
 
     // Entry dominates itself
-    try std.testing.expectEqual(1, blocks[0].dom.?.popCount());
+    try std.testing.expectEqual(1, blocks[0].dom.?.count());
     try std.testing.expect(blocks[0].dom.?.isSet(0));
     try std.testing.expectEqual(null, blocks[0].idom);
 
     // BB1 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].dom.?.popCount());
+    try std.testing.expectEqual(2, blocks[1].dom.?.count());
     try std.testing.expect(blocks[1].dom.?.isSet(0));
     try std.testing.expect(blocks[1].dom.?.isSet(1));
     try std.testing.expectEqual(0, blocks[1].idom.?);
 
     // BB2 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].dom.?.popCount());
+    try std.testing.expectEqual(2, blocks[1].dom.?.count());
     try std.testing.expect(blocks[2].dom.?.isSet(0));
     try std.testing.expect(blocks[2].dom.?.isSet(2));
     try std.testing.expectEqual(0, blocks[1].idom.?);
 
     // BB3 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].dom.?.popCount());
+    try std.testing.expectEqual(2, blocks[1].dom.?.count());
     try std.testing.expect(blocks[3].dom.?.isSet(0));
     try std.testing.expect(blocks[3].dom.?.isSet(3));
     try std.testing.expectEqual(0, blocks[1].idom.?);
@@ -1563,7 +1563,7 @@ test "dominance frontiers" {
             try std.testing.expect(blocks[i].reachable);
         }
     }
-    try std.testing.expectEqual(0, blocks[0].df.?.popCount());
+    try std.testing.expectEqual(0, blocks[0].df.?.count());
 }
 
 test "dominator tree" {
@@ -1583,24 +1583,24 @@ test "dominator tree" {
 
     // Block 0 should point to 1
     try std.testing.expect(dt.isSet(0, 1));
-    try std.testing.expectEqual(1, dt.getColumn(0).popCount());
+    try std.testing.expectEqual(1, dt.getColumn(0).count());
 
     try std.testing.expect(dt.isSet(1, 2));
     try std.testing.expect(dt.isSet(1, 3));
     try std.testing.expect(dt.isSet(1, 7));
-    try std.testing.expectEqual(3, dt.getColumn(1).popCount());
+    try std.testing.expectEqual(3, dt.getColumn(1).count());
 
-    try std.testing.expectEqual(0, dt.getColumn(2).popCount());
+    try std.testing.expectEqual(0, dt.getColumn(2).count());
 
     try std.testing.expect(dt.isSet(3, 4));
     try std.testing.expect(dt.isSet(3, 5));
     try std.testing.expect(dt.isSet(3, 6));
-    try std.testing.expectEqual(3, dt.getColumn(3).popCount());
+    try std.testing.expectEqual(3, dt.getColumn(3).count());
 
-    try std.testing.expectEqual(0, dt.getColumn(4).popCount());
-    try std.testing.expectEqual(0, dt.getColumn(5).popCount());
-    try std.testing.expectEqual(0, dt.getColumn(6).popCount());
-    try std.testing.expectEqual(0, dt.getColumn(7).popCount());
+    try std.testing.expectEqual(0, dt.getColumn(4).count());
+    try std.testing.expectEqual(0, dt.getColumn(5).count());
+    try std.testing.expectEqual(0, dt.getColumn(6).count());
+    try std.testing.expectEqual(0, dt.getColumn(7).count());
 }
 
 test "rename" {
