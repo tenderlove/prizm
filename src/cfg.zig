@@ -172,7 +172,7 @@ pub const CFG = struct {
                     defer self.mem.destroy(intersect);
 
                     for (bb.predecessors.items) |pred| {
-                        try intersect.setIntersection(pred.dom.?);
+                        intersect.setIntersection(pred.dom.?);
                     }
 
                     try temp.setUnion(intersect);
@@ -234,7 +234,7 @@ pub const CFG = struct {
             defer not_def.deinit(self.mem);
             not_def.toggleAll();
 
-            try not_def.setIntersection(blk.liveout_set);
+            not_def.setIntersection(blk.liveout_set);
             try blk.livein_set.setUnion(not_def);
         }
     }
@@ -952,7 +952,7 @@ pub const BasicBlock = struct {
 
         const uninit = try self.killed_set.clone(mem);
         uninit.toggleAll();
-        try uninit.setIntersection(self.liveout_set);
+        uninit.setIntersection(self.liveout_set);
         try uninit.setUnion(self.upward_exposed_set);
 
         var biti = uninit.iterator(.{});
