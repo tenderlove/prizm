@@ -138,16 +138,16 @@ pub const CFG = struct {
             if (maybebb) |bb| {
                 blocklist[bb.name] = bb;
 
-                bb.df = try BitMap.init(self.arena.allocator(), self.blockCount());
+                bb.df = try BitMap.initEmpty(self.arena.allocator(), self.blockCount());
 
                 if (bb.entry) {
-                    bb.dom = try BitMap.init(self.arena.allocator(), self.blockCount());
+                    bb.dom = try BitMap.initEmpty(self.arena.allocator(), self.blockCount());
                     // Entry blocks dominate themselves, and nothing else
                     // dominates an entry block.
                     try bb.dom.?.setBit(bb.name);
                 } else {
                     // Default blocks to "everything dominates this block"
-                    bb.dom = try BitMap.init(self.arena.allocator(), self.blockCount());
+                    bb.dom = try BitMap.initEmpty(self.arena.allocator(), self.blockCount());
                     bb.dom.?.setNot();
                 }
             }
@@ -162,12 +162,12 @@ pub const CFG = struct {
                 if (maybebb) |bb| {
                     if (bb.entry) continue;
 
-                    const temp = try BitMap.init(self.mem, self.blockCount());
+                    const temp = try BitMap.initEmpty(self.mem, self.blockCount());
                     defer self.mem.destroy(temp);
 
                     try temp.setBit(bb.name);
 
-                    const intersect = try BitMap.init(self.mem, self.blockCount());
+                    const intersect = try BitMap.initEmpty(self.mem, self.blockCount());
                     intersect.setNot();
                     defer self.mem.destroy(intersect);
 
@@ -265,7 +265,7 @@ pub const CFG = struct {
 
     pub fn isSSA(self: CFG) !bool {
         const allocator = self.mem;
-        const seen_opnd = try BitMap.init(allocator, self.opndCount());
+        const seen_opnd = try BitMap.initEmpty(allocator, self.opndCount());
         defer seen_opnd.deinit(allocator);
 
         for (self.blocks) |block| {
@@ -291,7 +291,7 @@ pub const CFG = struct {
 
     pub fn placePhis(self: *CFG) !void {
         const opnd_count = self.opndCount();
-        const globals = try BitMap.init(self.arena.allocator(), opnd_count);
+        const globals = try BitMap.initEmpty(self.arena.allocator(), opnd_count);
 
         const all_blocks = self.blockList();
 
@@ -327,7 +327,7 @@ pub const CFG = struct {
             // We only want to process a block once per global name
             // This bitmap keeps track of whether or not we've processed
             // a particular block for this name.
-            const block_seen = try BitMap.init(self.mem, all_blocks.len);
+            const block_seen = try BitMap.initEmpty(self.mem, all_blocks.len);
             defer block_seen.deinit(self.mem);
 
             // Get all blocks that define this variable
@@ -567,7 +567,7 @@ pub const CFG = struct {
         const blocklist: []?*BasicBlock = try mem.alloc(?*BasicBlock, self.blockCount());
         @memset(blocklist, null);
 
-        const seen = try BitMap.init(mem, self.blockCount());
+        const seen = try BitMap.initEmpty(mem, self.blockCount());
         defer seen.deinit(mem);
         var counter = self.blockCount();
 
@@ -678,10 +678,10 @@ pub const BasicBlock = struct {
         self.liveout_set.deinit(alloc);
         self.livein_set.deinit(alloc);
 
-        self.killed_set = try BitMap.init(alloc, vars);
-        self.upward_exposed_set = try BitMap.init(alloc, vars);
-        self.liveout_set = try BitMap.init(alloc, vars);
-        self.livein_set = try BitMap.init(alloc, vars);
+        self.killed_set = try BitMap.initEmpty(alloc, vars);
+        self.upward_exposed_set = try BitMap.initEmpty(alloc, vars);
+        self.liveout_set = try BitMap.initEmpty(alloc, vars);
+        self.livein_set = try BitMap.initEmpty(alloc, vars);
     }
 
     pub fn killedVariableCount(self: *BasicBlock) usize {

@@ -34,7 +34,7 @@ pub fn BitMapSized(comptime T: type) type {
             return .{ .shared = .{ .bits = bits, .buff = buff } };
         }
 
-        pub fn init(mem: std.mem.Allocator, bits: usize) !*Self {
+        pub fn initEmpty(mem: std.mem.Allocator, bits: usize) !*Self {
             const bm = try mem.create(Self);
             bm.* = try fillBm(mem, 0, bits);
 
@@ -345,12 +345,12 @@ pub const BitMap = BitMapSized(u64);
 test "works with smaller ints" {
     const alloc = std.testing.allocator;
 
-    const bmu8 = try BitMapSized(u8).init(alloc, 8);
+    const bmu8 = try BitMapSized(u8).initEmpty(alloc, 8);
     defer bmu8.deinit(alloc);
     try bmu8.setBit(1);
     try std.testing.expect(bmu8.isSet(1));
 
-    const bmu832 = try BitMapSized(u8).init(alloc, 32);
+    const bmu832 = try BitMapSized(u8).initEmpty(alloc, 32);
     defer bmu832.deinit(alloc);
     try bmu832.setBit(31);
     try std.testing.expect(bmu832.isSet(31));
@@ -359,7 +359,7 @@ test "works with smaller ints" {
 test "create bitmap" {
     const alloc = std.testing.allocator;
 
-    const bm = try BitMap.init(alloc, 32);
+    const bm = try BitMap.initEmpty(alloc, 32);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -374,7 +374,7 @@ test "create bitmap" {
 test "create bitmap with 100 bits" {
     const alloc = std.testing.allocator;
 
-    const bm = try BitMap.init(alloc, 100);
+    const bm = try BitMap.initEmpty(alloc, 100);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -394,7 +394,7 @@ test "create bitmap with 100 bits" {
 test "create bitmap with 64 bits" {
     const alloc = std.testing.allocator;
 
-    const bm = try BitMap.init(alloc, 64);
+    const bm = try BitMap.initEmpty(alloc, 64);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -416,7 +416,7 @@ test "bitset iterator single plane" {
     const alloc = std.testing.allocator;
     var bits = [_]usize { 0, 0 };
 
-    const bm = try BitMap.init(alloc, 20);
+    const bm = try BitMap.initEmpty(alloc, 20);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -436,7 +436,7 @@ test "bitset iterator extreme" {
     const alloc = std.testing.allocator;
     var bits = [_]usize { 0, 0 };
 
-    const bm = try BitMap.init(alloc, 7);
+    const bm = try BitMap.initEmpty(alloc, 7);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -456,7 +456,7 @@ test "bitset iterator multi plane" {
     const alloc = std.testing.allocator;
     var bits = [_]usize { 0, 0, 0, 0, 0 };
 
-    const bm = try BitMap.init(alloc, 128);
+    const bm = try BitMap.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -481,7 +481,7 @@ test "bitset iterator multi plane" {
 test "popcount single plane" {
     const alloc = std.testing.allocator;
 
-    const bm = try BitMap.init(alloc, 20);
+    const bm = try BitMap.initEmpty(alloc, 20);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -492,7 +492,7 @@ test "popcount single plane" {
 
 test "popcount multi-plane" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.init(alloc, 128);
+    const bm = try BitMap.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -504,7 +504,7 @@ test "popcount multi-plane" {
 
 test "not big" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.init(alloc, 128);
+    const bm = try BitMap.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -523,7 +523,7 @@ test "not big" {
 
 test "not small" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.init(alloc, 64);
+    const bm = try BitMap.initEmpty(alloc, 64);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -539,7 +539,7 @@ test "not small" {
 
 test "dup small" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.init(alloc, 64);
+    const bm = try BitMap.initEmpty(alloc, 64);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -554,7 +554,7 @@ test "dup small" {
 
 test "dup big" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.init(alloc, 128);
+    const bm = try BitMap.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -571,7 +571,7 @@ test "dup big" {
 
 test "not" {
     const alloc = std.testing.allocator;
-    const bm = try BitMap.init(alloc, 128);
+    const bm = try BitMap.initEmpty(alloc, 128);
     defer bm.deinit(alloc);
 
     try bm.setBit(1);
@@ -588,9 +588,9 @@ test "not" {
 
 test "set intersection small" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 16);
+    const bm1 = try BitMap.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.init(alloc, 16);
+    const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     try bm1.setBit(1);
@@ -608,9 +608,9 @@ test "set intersection small" {
 
 test "set intersection large" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 128);
+    const bm1 = try BitMap.initEmpty(alloc, 128);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.init(alloc, 128);
+    const bm2 = try BitMap.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
     try bm1.setBit(1);
@@ -631,9 +631,9 @@ test "set intersection large" {
 
 test "intersection" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 16);
+    const bm1 = try BitMap.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.init(alloc, 16);
+    const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     try bm1.setBit(1);
@@ -652,9 +652,9 @@ test "intersection" {
 
 test "set union small" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 16);
+    const bm1 = try BitMap.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.init(alloc, 16);
+    const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     try bm1.setBit(1);
@@ -672,9 +672,9 @@ test "set union small" {
 
 test "set union large" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 128);
+    const bm1 = try BitMap.initEmpty(alloc, 128);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.init(alloc, 128);
+    const bm2 = try BitMap.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
     try bm1.setBit(1);
@@ -695,9 +695,9 @@ test "set union large" {
 
 test "union" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 16);
+    const bm1 = try BitMap.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.init(alloc, 16);
+    const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     try bm1.setBit(1);
@@ -716,9 +716,9 @@ test "union" {
 
 test "eq small" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 16);
+    const bm1 = try BitMap.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.init(alloc, 16);
+    const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     try bm1.setBit(0);
@@ -734,9 +734,9 @@ test "eq small" {
 
 test "eq large" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 128);
+    const bm1 = try BitMap.initEmpty(alloc, 128);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.init(alloc, 128);
+    const bm2 = try BitMap.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
     try bm1.setBit(1);
@@ -754,9 +754,9 @@ test "eq large" {
 
 test "replace small" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 16);
+    const bm1 = try BitMap.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.init(alloc, 16);
+    const bm2 = try BitMap.initEmpty(alloc, 16);
     defer bm2.deinit(alloc);
 
     try bm1.setBit(0);
@@ -774,9 +774,9 @@ test "replace small" {
 
 test "replace large" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 128);
+    const bm1 = try BitMap.initEmpty(alloc, 128);
     defer bm1.deinit(alloc);
-    const bm2 = try BitMap.init(alloc, 128);
+    const bm2 = try BitMap.initEmpty(alloc, 128);
     defer bm2.deinit(alloc);
 
     try bm1.setBit(1);
@@ -794,7 +794,7 @@ test "replace large" {
 
 test "clz small" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 16);
+    const bm1 = try BitMap.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
 
     try std.testing.expectEqual(16, bm1.clz());
@@ -805,7 +805,7 @@ test "clz small" {
     try bm1.setBit(15);
     try std.testing.expectEqual(0, bm1.clz());
 
-    const bm2 = try BitMap.init(alloc, 64);
+    const bm2 = try BitMap.initEmpty(alloc, 64);
     defer bm2.deinit(alloc);
 
     try std.testing.expectEqual(64, bm2.clz());
@@ -819,7 +819,7 @@ test "clz small" {
 
 test "clz large" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 70);
+    const bm1 = try BitMap.initEmpty(alloc, 70);
     defer bm1.deinit(alloc);
 
     try std.testing.expectEqual(70, bm1.clz());
@@ -833,7 +833,7 @@ test "clz large" {
 
 test "fsb" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 16);
+    const bm1 = try BitMap.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
 
     try bm1.setBit(0);
@@ -846,7 +846,7 @@ test "fsb" {
 
 test "fsb large" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.init(alloc, 70);
+    const bm1 = try BitMap.initEmpty(alloc, 70);
     defer bm1.deinit(alloc);
 
     try bm1.setBit(0);
