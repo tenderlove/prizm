@@ -1,64 +1,60 @@
 const std = @import("std");
 const BitMap = std.DynamicBitSetUnmanaged;
 
-pub fn BitMatrixSize(comptime T: type) type {
-    return struct {
-        const Self = @This();
+pub const BitMatrix = struct {
+    const Self = @This();
 
-        rows: usize,
-        columns: usize,
-        buffer: []BitMap,
+    rows: usize,
+    columns: usize,
+    buffer: []BitMap,
 
-        pub fn init(mem: std.mem.Allocator, rows: usize, y: usize) !*Self {
-            const bm = try mem.create(Self);
+    pub fn init(mem: std.mem.Allocator, rows: usize, y: usize) !*Self {
+        const bm = try mem.create(Self);
 
-            const bitmap_array = try mem.alloc(BitMap, rows);
-            for (0..rows) |i| {
-                bitmap_array[i] = try BitMap.initEmpty(mem, y);
-            }
-
-            bm.* = .{ .rows = rows, .columns = y, .buffer = bitmap_array };
-            return bm;
+        const bitmap_array = try mem.alloc(BitMap, rows);
+        for (0..rows) |i| {
+            bitmap_array[i] = try BitMap.initEmpty(mem, y);
         }
 
-        pub fn set(self: *const Self, row: usize, column: T) void {
-            self.buffer[row].set(column);
-        }
+        bm.* = .{ .rows = rows, .columns = y, .buffer = bitmap_array };
+        return bm;
+    }
 
-        pub fn isSet(self: Self, x: usize, y: T) bool {
-            return self.buffer[x].isSet(y);
-        }
+    pub fn set(self: *const Self, row: usize, column: usize) void {
+        self.buffer[row].set(column);
+    }
 
-        // Get all of the Y values for a given X
-        pub fn getColumn(self: Self, x: usize) BitMap {
-            return self.buffer[x];
-        }
+    pub fn isSet(self: Self, x: usize, y: usize) bool {
+        return self.buffer[x].isSet(y);
+    }
 
-        pub fn count(self: Self) usize {
-            var n: usize = 0;
-            for (self.buffer) |slice| {
-                n += slice.count();
-            }
-            return n;
-        }
+    // Get all of the Y values for a given X
+    pub fn getColumn(self: Self, x: usize) BitMap {
+        return self.buffer[x];
+    }
 
-        pub fn clear(self: Self) void {
-            for (self.buffer) |*slice| {
-                slice.unsetAll();
-            }
+    pub fn count(self: Self) usize {
+        var n: usize = 0;
+        for (self.buffer) |slice| {
+            n += slice.count();
         }
+        return n;
+    }
 
-        pub fn deinit(self: *const Self, mem: std.mem.Allocator) void {
-            for (self.buffer) |*slice| {
-                slice.deinit(mem);
-            }
-            mem.free(self.buffer);
-            mem.destroy(self);
+    pub fn clear(self: Self) void {
+        for (self.buffer) |*slice| {
+            slice.unsetAll();
         }
-    };
-}
+    }
 
-pub const BitMatrix = BitMatrixSize(u64);
+    pub fn deinit(self: *const Self, mem: std.mem.Allocator) void {
+        for (self.buffer) |*slice| {
+            slice.deinit(mem);
+        }
+        mem.free(self.buffer);
+        mem.destroy(self);
+    }
+};
 
 test "popcount" {
     const alloc = std.testing.allocator;
@@ -79,15 +75,11 @@ test "popcount" {
 test "bit64" {
     const alloc = std.testing.allocator;
 
-    const bm64 = try BitMatrixSize(u64).init(alloc, 64, 64);
+    const bm64 = try BitMatrix.init(alloc, 64, 64);
     defer bm64.deinit(alloc);
 
     // Number of rows * Atoms per row
     try std.testing.expectEqual(64, bm64.buffer.len);
-
-    const bm8 = try BitMatrixSize(u8).init(alloc, 64, 64);
-    defer bm8.deinit(alloc);
-    try std.testing.expectEqual(64, bm8.buffer.len);
 }
 
 test "can allocate" {
