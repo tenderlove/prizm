@@ -422,7 +422,7 @@ const CFGPrinter = struct {
         // Print uninitialized variables
         if (blk.entry) {
             var uninitialized = try blk.uninitializedSet(scope, scope.allocator);
-            defer scope.allocator.destroy(uninitialized);
+            defer uninitialized.deinit(scope.allocator);
             if (uninitialized.count() > 0) {
                 try printSet("Uninitialized: ", scope, &uninitialized, ctx);
             }

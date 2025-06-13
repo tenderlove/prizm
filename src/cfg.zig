@@ -164,13 +164,13 @@ pub const CFG = struct {
                     if (bb.entry) continue;
 
                     var temp = try BitMap.initEmpty(self.mem, self.blockCount());
-                    defer self.mem.destroy(temp);
+                    defer temp.deinit(self.mem);
 
                     temp.set(bb.name);
 
                     var intersect = try BitMap.initEmpty(self.mem, self.blockCount());
                     intersect.toggleAll();
-                    defer self.mem.destroy(intersect);
+                    defer intersect.deinit(self.mem);
 
                     for (bb.predecessors.items) |pred| {
                         intersect.setIntersection(pred.dom);
@@ -270,7 +270,7 @@ pub const CFG = struct {
 
     pub fn isSSA(self: CFG) !bool {
         const allocator = self.mem;
-        const seen_opnd = try BitMap.initEmpty(allocator, self.opndCount());
+        var seen_opnd = try BitMap.initEmpty(allocator, self.opndCount());
         defer seen_opnd.deinit(allocator);
 
         for (self.blocks) |block| {
@@ -726,11 +726,11 @@ pub const BasicBlock = struct {
         // Bitwise NOT the kill list
         var notkill = try varkill.clone(alloc);
         notkill.toggleAll();
-        defer alloc.destroy(notkill);
+        defer notkill.deinit(alloc);
 
         var lonk = try lo.clone(alloc);
         lonk.setIntersection(notkill);
-        defer alloc.destroy(lonk);
+        defer lonk.deinit(alloc);
 
         var newlo = try ue.clone(alloc);
         newlo.setUnion(lonk);
@@ -766,16 +766,16 @@ pub const BasicBlock = struct {
         // Engineering a compiler, 3rd ed, 8.6, "Defining the Data-Flow Problem" (page 419)
         // Also Figure 8.15
         if (self.fall_through_dest) |child1| {
-            const newlo = try self.childLo(child1, alloc);
-            defer alloc.destroy(newlo);
+            var newlo = try self.childLo(child1, alloc);
+            defer newlo.deinit(alloc);
 
             if (self.jump_dest) |child2| {
-                const newlo2 = try self.childLo(child2, alloc);
-                defer alloc.destroy(newlo2);
+                var newlo2 = try self.childLo(child2, alloc);
+                defer newlo2.deinit(alloc);
 
                 var bothlo = try newlo.clone(alloc);
                 bothlo.setUnion(newlo2);
-                defer alloc.destroy(bothlo);
+                defer bothlo.deinit(alloc);
 
                 if (self.liveout_set.eql(bothlo)) {
                     return false;
@@ -795,8 +795,8 @@ pub const BasicBlock = struct {
             }
         } else {
             if (self.jump_dest) |child2| {
-                const newlo = try self.childLo(child2, alloc);
-                defer alloc.destroy(newlo);
+                var newlo = try self.childLo(child2, alloc);
+                defer newlo.deinit(alloc);
 
                 if (self.liveout_set.eql(newlo)) {
                     return false;
@@ -1184,7 +1184,7 @@ test "no uninitialized in ternary" {
     const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
-    const uninitialized = try cfg.head.uninitializedSet(scope, allocator);
+    var uninitialized = try cfg.head.uninitializedSet(scope, allocator);
     defer uninitialized.deinit(allocator);
 
     try std.testing.expectEqual(0, uninitialized.count());
@@ -1488,26 +1488,26 @@ test "blocks have dominators" {
     try std.testing.expect(blocks[0].entry);
 
     // Entry dominates itself
-    try std.testing.expectEqual(1, blocks[0].dom.?.count());
-    try std.testing.expect(blocks[0].dom.?.isSet(0));
+    try std.testing.expectEqual(1, blocks[0].dom.count());
+    try std.testing.expect(blocks[0].dom.isSet(0));
     try std.testing.expectEqual(null, blocks[0].idom);
 
     // BB1 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].dom.?.count());
-    try std.testing.expect(blocks[1].dom.?.isSet(0));
-    try std.testing.expect(blocks[1].dom.?.isSet(1));
+    try std.testing.expectEqual(2, blocks[1].dom.count());
+    try std.testing.expect(blocks[1].dom.isSet(0));
+    try std.testing.expect(blocks[1].dom.isSet(1));
     try std.testing.expectEqual(0, blocks[1].idom.?);
 
     // BB2 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].dom.?.count());
-    try std.testing.expect(blocks[2].dom.?.isSet(0));
-    try std.testing.expect(blocks[2].dom.?.isSet(2));
+    try std.testing.expectEqual(2, blocks[1].dom.count());
+    try std.testing.expect(blocks[2].dom.isSet(0));
+    try std.testing.expect(blocks[2].dom.isSet(2));
     try std.testing.expectEqual(0, blocks[1].idom.?);
 
     // BB3 dominated by self and BB0
-    try std.testing.expectEqual(2, blocks[1].dom.?.count());
-    try std.testing.expect(blocks[3].dom.?.isSet(0));
-    try std.testing.expect(blocks[3].dom.?.isSet(3));
+    try std.testing.expectEqual(2, blocks[1].dom.count());
+    try std.testing.expect(blocks[3].dom.isSet(0));
+    try std.testing.expect(blocks[3].dom.isSet(3));
     try std.testing.expectEqual(0, blocks[1].idom.?);
 }
 
@@ -1541,7 +1541,7 @@ test "while loop dominators" {
     // We should have 7 blocks
     try std.testing.expectEqual(7, blocks.len);
     try std.testing.expectEqual(6, blocks[6].name);
-    try std.testing.expect(blocks[6].dom.?.isSet(6));
+    try std.testing.expect(blocks[6].dom.isSet(6));
 }
 
 test "dominance frontiers" {
@@ -1561,13 +1561,13 @@ test "dominance frontiers" {
 
     try std.testing.expectEqual(9, blocks.len);
     try std.testing.expectEqual(6, blocks[6].name);
-    try std.testing.expect(blocks[1].df.?.isSet(1));
-    try std.testing.expect(blocks[2].df.?.isSet(7));
-    try std.testing.expect(blocks[3].df.?.isSet(7));
-    try std.testing.expect(blocks[4].df.?.isSet(6));
-    try std.testing.expect(blocks[5].df.?.isSet(6));
-    try std.testing.expect(blocks[6].df.?.isSet(7));
-    try std.testing.expect(blocks[7].df.?.isSet(1));
+    try std.testing.expect(blocks[1].df.isSet(1));
+    try std.testing.expect(blocks[2].df.isSet(7));
+    try std.testing.expect(blocks[3].df.isSet(7));
+    try std.testing.expect(blocks[4].df.isSet(6));
+    try std.testing.expect(blocks[5].df.isSet(6));
+    try std.testing.expect(blocks[6].df.isSet(7));
+    try std.testing.expect(blocks[7].df.isSet(1));
 
     for (0..blocks.len) |i| {
         if (i == 8) {
@@ -1576,7 +1576,7 @@ test "dominance frontiers" {
             try std.testing.expect(blocks[i].reachable);
         }
     }
-    try std.testing.expectEqual(0, blocks[0].df.?.count());
+    try std.testing.expectEqual(0, blocks[0].df.count());
 }
 
 test "dominator tree" {
