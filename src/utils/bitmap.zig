@@ -30,10 +30,6 @@ pub fn BitMapSized(comptime T: type) type {
         nullMap: struct {
         },
 
-        pub fn initShared(bits: usize, buff: []const T) Self {
-            return .{ .shared = .{ .bits = bits, .buff = buff } };
-        }
-
         pub fn initEmpty(mem: std.mem.Allocator, bits: usize) !*Self {
             const bm = try mem.create(Self);
             bm.* = try fillBm(mem, 0, bits);
@@ -789,32 +785,6 @@ test "fsb large" {
     try std.testing.expectEqual(15, bm1.findLastSet());
     bm1.set(64);
     try std.testing.expectEqual(64, bm1.findLastSet());
-}
-
-test "init shared" {
-    const bits = [_]u64 { 0b1, 0b1 };
-    const bm = BitMapSized(u64).initShared(128, &bits);
-    try std.testing.expect(bm.isSet(0));
-    try std.testing.expect(!bm.isSet(1));
-    try std.testing.expect(bm.isSet(64));
-}
-
-test "iterate shared" {
-    const bits = [_]u64 { 0b1, 0b1 };
-    const bm = BitMapSized(u64).initShared(128, &bits);
-    try std.testing.expect(bm.isSet(0));
-    try std.testing.expect(bm.isSet(64));
-
-    var check = [_]usize { 0, 0 };
-
-    var bitidx: usize = 0;
-    var iter = bm.iterator(.{});
-    while (iter.next()) |num| {
-        check[bitidx] = num;
-        bitidx += 1;
-    }
-    try std.testing.expectEqual(0, check[0]);
-    try std.testing.expectEqual(64, check[1]);
 }
 
 test "dup null" {
