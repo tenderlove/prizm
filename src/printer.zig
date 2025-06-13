@@ -28,8 +28,8 @@ const DotOutputStrategy = struct {
         try self.print("label=\"BB{d}\\l", .{blk.name});
     }
 
-    pub fn printSet(self: *const DotOutputStrategy, string: []const u8) !void {
-        try self.print("{s}\\l", .{string});
+    pub fn printSet(self: *const DotOutputStrategy, name: []const u8, string: []const u8) !void {
+        try self.print("{s}: {s}\\l", .{name, string});
     }
 
     pub fn printBlockSeparator(_: *const @This()) !void {}
@@ -70,13 +70,16 @@ const DotOutputStrategy = struct {
 
 const AsciiOutputStrategy = struct {
     writer: std.io.AnyWriter,
+    table_started: bool = false,
 
     pub fn init(writer: std.io.AnyWriter) AsciiOutputStrategy {
-        return AsciiOutputStrategy{ .writer = writer };
+        return AsciiOutputStrategy{ .writer = writer, .table_started = false };
     }
 
     pub fn printBlockHeader(self: *const AsciiOutputStrategy, _: *Scope, blk: *BasicBlock) !void {
-        try self.print("### BB{d}:\n", .{blk.name});
+        try self.print("### BB{d}:\n\n", .{blk.name});
+        try self.print("| Property | Value |\n", .{});
+        try self.print("|----------|-------|\n", .{});
     }
 
     pub fn printClusterHeader(self: *const AsciiOutputStrategy, work_scope: *Scope) !void {
@@ -85,14 +88,21 @@ const AsciiOutputStrategy = struct {
 
     pub fn printClusterFooter(_: *const AsciiOutputStrategy, _: *Scope) !void {}
 
-    pub fn printSet(self: *const @This(), string: []const u8) !void {
-        try self.print("* {s}\n", .{string});
+    pub fn printSet(self: *const @This(), name: []const u8, string: []const u8) !void {
+        // Remove the colon and space from the name for table display
+        try self.print("| {s} | {s} |\n", .{name, string});
     }
 
     pub fn printListItem(self: *const @This(), comptime format: []const u8, args: anytype) !void {
-        try self.print("* ", .{});
-        try self.print(format, args);
-        try self.print("\n", .{});
+        // For the table format, we'll handle common cases explicitly
+        if (std.mem.eql(u8, format, "IDOM: BB{d}")) {
+            try self.print("| IDOM | BB{d} |\n", args);
+        } else {
+            // Fallback for other formats - just put the whole thing in the value column
+            try self.print("| Info | ", .{});
+            try self.print(format, args);
+            try self.print(" |\n", .{});
+        }
     }
 
     pub fn printFallThrough(self: *const @This(), _: *Scope, _: *BasicBlock, dest: *BasicBlock) !void {
@@ -116,7 +126,7 @@ const AsciiOutputStrategy = struct {
     }
 
     pub fn printInsnHeader(self: *const @This()) !void {
-        try self.print("```\n", .{});
+        try self.print("#### Instructions:\n```\n", .{});
     }
 
     pub fn printInsnFooter(self: *const @This()) !void {
@@ -350,7 +360,6 @@ const CFGPrinter = struct {
             defer buffer.deinit();
 
             // Build the complete string in buffer
-            try buffer.appendSlice(name);
             try buffer.append('(');
 
             var biti = set.iterator(.{});
@@ -367,7 +376,7 @@ const CFGPrinter = struct {
                 try buffer.appendSlice(opnd_str);
             }
             try buffer.append(')');
-            try ctx.out.printSet(buffer.items);
+            try ctx.out.printSet(name, buffer.items);
         }
     }
 
@@ -378,7 +387,6 @@ const CFGPrinter = struct {
             defer buffer.deinit();
 
             // Build the complete string in buffer
-            try buffer.appendSlice(name);
             try buffer.append('(');
 
             var biti = set.iterator(.{});
@@ -393,7 +401,7 @@ const CFGPrinter = struct {
             try buffer.append(')');
 
             // Print the complete string in one go
-            try ctx.out.printSet(buffer.items);
+            try ctx.out.printSet(name, buffer.items);
         }
     }
 
@@ -401,19 +409,19 @@ const CFGPrinter = struct {
         try ctx.out.printBlockHeader(scope, blk);
 
         // Print upward exposed variables
-        try printSet("UE: ", scope, &blk.upward_exposed_set, ctx);
+        try printSet("UE", scope, &blk.upward_exposed_set, ctx);
 
         // Print killed variables
-        try printSet("Killed: ", scope, &blk.killed_set, ctx);
+        try printSet("Killed", scope, &blk.killed_set, ctx);
 
         // Print live out variables
-        try printSet("LiveOut: ", scope, &blk.liveout_set, ctx);
+        try printSet("LiveOut", scope, &blk.liveout_set, ctx);
 
         // Print live in variables
-        try printSet("LiveIn: ", scope, &blk.livein_set, ctx);
+        try printSet("LiveIn", scope, &blk.livein_set, ctx);
 
-        try printBlockSet("DOM: ", &blk.dom, ctx);
-        try printBlockSet("DF: ", &blk.df, ctx);
+        try printBlockSet("DOM", &blk.dom, ctx);
+        try printBlockSet("DF", &blk.df, ctx);
 
         if (blk.idom) |idom| {
             try ctx.out.printListItem("IDOM: BB{d}", .{idom});
@@ -472,6 +480,9 @@ const CFGPrinter = struct {
 
             try out.printClusterHeader(work_scope);
             try cfg.compileUntil(steps);
+            // try cfg.analyze();
+            // try cfg.placePhis();
+            // try cfg.rename();
             const ctx = Context(@TypeOf(out.*)){
                 .out = out,
                 .work = work,

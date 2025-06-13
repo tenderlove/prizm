@@ -139,7 +139,6 @@ pub const CFG = struct {
                 blocklist[bb.name] = bb;
 
                 try bb.df.resize(self.arena.allocator(), self.blockCount(), false);
-
                 try bb.dom.resize(self.arena.allocator(), self.blockCount(), false);
 
                 if (bb.entry) {
@@ -688,6 +687,8 @@ pub const BasicBlock = struct {
         self.upward_exposed_set.unsetAll();
         self.liveout_set.unsetAll();
         self.livein_set.unsetAll();
+        self.df.unsetAll();
+        self.dom.unsetAll();
     }
 
     pub fn killedVariableCount(self: *BasicBlock) usize {

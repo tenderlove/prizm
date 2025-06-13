@@ -135,7 +135,7 @@ pub const Operand = union(OperandType) {
 
     pub fn isVariable(self: Operand) bool {
         return switch (self) {
-            .param, .temp, .local => true,
+            .param, .temp, .local, .redef, .prime => true,
             inline else => false,
         };
     }
