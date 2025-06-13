@@ -166,7 +166,7 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        const SetBitsIterator = struct {
+        pub const SetBitsIterator = struct {
             bit_index: usize,
             plane_index: usize,
             current_plane: T,

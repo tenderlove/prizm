@@ -225,24 +225,27 @@ pub const SSADestructor = struct {
         const visited = try BitMap.initEmpty(self.mem, cfg.opndCount());
         defer visited.deinit(self.mem);
 
-        var itr = matrix.iter();
-        // For each variable in our matrix
-        while (itr.next()) |point| {
-            // The y value depends on the x value.  For example
-            // `a <- b`, "b" will be the x value and we can get all
-            // variables that depend on b by asking for the column (y values)
-            // If we've visited this variable already, we can skip it
-            if (visited.isSet(point.x)) continue;
+        for (matrix.buffer, 0..) |ys, x| {
+            var y_itr = ys.iterator(.{});
 
-            visited.set(point.x);
+            // For each variable in our matrix
+            while (y_itr.next()) |_| {
+                // The y value depends on the x value.  For example
+                // `a <- b`, "b" will be the x value and we can get all
+                // variables that depend on b by asking for the column (y values)
+                // If we've visited this variable already, we can skip it
+                if (visited.isSet(x)) continue;
 
-            // TODO: we should allocate this once and reuse it but we need
-            // a "clear" method on bit maps.
-            const seen = try BitMap.initEmpty(self.mem, cfg.opndCount());
-            defer seen.deinit(self.mem);
+                visited.set(x);
 
-            // Otherwise, we need to recursively walk its edges
-            try self.walkChildren(matrix, visited, seen, point.x);
+                // TODO: we should allocate this once and reuse it but we need
+                // a "clear" method on bit maps.
+                const seen = try BitMap.initEmpty(self.mem, cfg.opndCount());
+                defer seen.deinit(self.mem);
+
+                // Otherwise, we need to recursively walk its edges
+                try self.walkChildren(matrix, visited, seen, x);
+            }
         }
     }
 
