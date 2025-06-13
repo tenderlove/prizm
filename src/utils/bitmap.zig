@@ -56,8 +56,6 @@ pub fn BitMapSized(comptime T: type) type {
             }
         }
 
-        pub const Null: Self = .{ .nullMap = .{ } };
-
         pub fn isNullBlock(self: Self) bool {
             return switch(self) {
                 .nullMap => true,
@@ -785,11 +783,4 @@ test "fsb large" {
     try std.testing.expectEqual(15, bm1.findLastSet());
     bm1.set(64);
     try std.testing.expectEqual(64, bm1.findLastSet());
-}
-
-test "dup null" {
-    const bm = BitMap.Null;
-    const duped = try bm.clone(std.testing.allocator);
-    try std.testing.expect(duped.isNullBlock());
-    try std.testing.expectEqual(bm, duped.*);
 }

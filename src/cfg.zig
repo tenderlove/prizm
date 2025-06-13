@@ -666,10 +666,10 @@ pub const BasicBlock = struct {
             .start = start,
             .finish = finish,
             .entry = entry,
-            .killed_set = @constCast(&BitMap.Null),
-            .upward_exposed_set = @constCast(&BitMap.Null),
-            .liveout_set = @constCast(&BitMap.Null),
-            .livein_set = @constCast(&BitMap.Null),
+            .killed_set = try BitMap.initEmpty(alloc, 0),
+            .upward_exposed_set = try BitMap.initEmpty(alloc, 0),
+            .liveout_set = try BitMap.initEmpty(alloc, 0),
+            .livein_set = try BitMap.initEmpty(alloc, 0),
             .predecessors = std.ArrayList(*BasicBlock).init(alloc),
         };
 
