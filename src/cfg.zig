@@ -263,7 +263,7 @@ pub const CFG = struct {
         return self.blocks.len;
     }
 
-    pub fn makeMov(self: *CFG, out: *Op, in: *Op) !*ir.InstructionList.Node {
+    pub fn makeMov(self: *CFG, out: *Op, in: *Op) !*ir.InstructionListNode {
         return try self.scope.makeMov(out, in);
     }
 
@@ -289,7 +289,7 @@ pub const CFG = struct {
         return true;
     }
 
-    pub fn replace(self: *CFG, block: *BasicBlock, old: *ir.InstructionList.Node, new: *ir.InstructionList.Node) void {
+    pub fn replace(self: *CFG, block: *BasicBlock, old: *ir.InstructionListNode, new: *ir.InstructionListNode) void {
         block.replace(self.scope, old, new);
     }
 
@@ -645,8 +645,8 @@ pub const BasicBlock = struct {
     name: u64,
     entry: bool,
     reachable: bool = false,
-    start: *ir.InstructionList.Node,
-    finish: *ir.InstructionList.Node,
+    start: *ir.InstructionListNode,
+    finish: *ir.InstructionListNode,
     predecessors: std.ArrayList(*BasicBlock),
     killed_set: *BitMap,
     upward_exposed_set: *BitMap,
@@ -696,17 +696,17 @@ pub const BasicBlock = struct {
         return self.upward_exposed_set.count();
     }
 
-    pub fn startInsn(self: *BasicBlock) ?*ir.InstructionList.Node {
+    pub fn startInsn(self: *BasicBlock) ?*ir.InstructionListNode {
         return self.start;
     }
 
-    pub fn finishInsn(self: *BasicBlock) ?*ir.InstructionList.Node {
+    pub fn finishInsn(self: *BasicBlock) ?*ir.InstructionListNode {
         return self.finish;
     }
 
-    pub fn replace(self: *BasicBlock, scope: *Scope, old: *ir.InstructionList.Node, new: *ir.InstructionList.Node) void {
-        scope.insns.insertAfter(old, new);
-        scope.insns.remove(old);
+    pub fn replace(self: *BasicBlock, scope: *Scope, old: *ir.InstructionListNode, new: *ir.InstructionListNode) void {
+        scope.insns.insertAfter(&old.node, &new.node);
+        scope.insns.remove(&old.node);
         if (self.start == old) {
             self.start = new;
         }
@@ -734,7 +734,7 @@ pub const BasicBlock = struct {
         return newlo;
     }
 
-    pub fn insertParallelCopy(self: *BasicBlock, scope: *Scope, node: *ir.InstructionList.Node, dest: *Op, src: *Op, group: usize) !*ir.InstructionList.Node {
+    pub fn insertParallelCopy(self: *BasicBlock, scope: *Scope, node: *ir.InstructionListNode, dest: *Op, src: *Op, group: usize) !*ir.InstructionListNode {
         const ret = try scope.insertParallelCopy(node, dest, src, self, group);
 
         if (node == self.finish) {
@@ -748,11 +748,11 @@ pub const BasicBlock = struct {
         return ret;
     }
 
-    pub fn appendParallelCopy(self: *BasicBlock, scope: *Scope, dest: *Op, src: *Op, group: usize) !*ir.InstructionList.Node {
+    pub fn appendParallelCopy(self: *BasicBlock, scope: *Scope, dest: *Op, src: *Op, group: usize) !*ir.InstructionListNode {
         var node = self.finish;
 
         if (self.finish.data.isJump()) {
-            node = self.finish.prev.?;
+            node = @fieldParentPtr("node", self.finish.node.prev.?);
         }
 
         return self.insertParallelCopy(scope, node, dest, src, group);
@@ -809,21 +809,21 @@ pub const BasicBlock = struct {
     }
 
     const InstructionIter = struct {
-        current: ?*ir.InstructionList.Node,
-        finish: *ir.InstructionList.Node,
+        current: ?*std.DoublyLinkedList.Node,
+        finish: *std.DoublyLinkedList.Node,
         done: bool,
 
-        pub fn next(self: *InstructionIter) ?*ir.InstructionList.Node {
+        pub fn next(self: *InstructionIter) ?*ir.InstructionListNode {
             if (self.done) return null;
 
             if (self.current) |node| {
                 if (node == self.finish) {
                     self.done = true;
-                    return node;
+                    return @fieldParentPtr("node", node);
                 }
 
                 self.current = node.next;
-                return node;
+                return @fieldParentPtr("node", node);
             } else {
                 return null;
             }
@@ -831,7 +831,7 @@ pub const BasicBlock = struct {
     };
 
     pub fn instructionIter(self: *BasicBlock) InstructionIter {
-        return .{ .current = self.start, .finish = self.finish, .done = false };
+        return .{ .current = &self.start.node, .finish = &self.finish.node, .done = false };
     }
 
     pub fn fillVarSets(self: *BasicBlock) !void {
@@ -858,7 +858,7 @@ pub const BasicBlock = struct {
         }
     }
 
-    fn addInstruction(self: *BasicBlock, insn: *ir.InstructionList.Node) void {
+    fn addInstruction(self: *BasicBlock, insn: *ir.InstructionListNode) void {
         // Set the definition block for the outvar on the instruction.
         // We need this for phi placement / renaming etc
         if (insn.data.getOut()) |outvar| {
@@ -894,8 +894,8 @@ pub const BasicBlock = struct {
             switch(insn.data) {
                 inline .phi, .putlabel => { }, // Skip phi and putlabel
                 else => {
-                    if (insn.prev) |prev| {
-                        const phi_insn = try scope.insertPhi(prev, opnd);
+                    if (insn.node.prev) |prev| {
+                        const phi_insn = try scope.insertPhi(@fieldParentPtr("node", prev), opnd);
                         if (insn == self.start) {
                             self.start = phi_insn;
                         }
@@ -984,7 +984,7 @@ const CFGBuilder = struct {
     block_name: u32 = 0,
     scope: *Scope,
 
-    fn makeBlock(self: *CFGBuilder, mem: std.mem.Allocator, start: *ir.InstructionList.Node, finish: *ir.InstructionList.Node, entry: bool) !*BasicBlock {
+    fn makeBlock(self: *CFGBuilder, mem: std.mem.Allocator, start: *ir.InstructionListNode, finish: *ir.InstructionListNode, entry: bool) !*BasicBlock {
         const block = try BasicBlock.initBlock(mem,
             self.block_name,
             start,
@@ -1025,7 +1025,7 @@ const CFGBuilder = struct {
         // For all of our instructions
         while (node) |insn| {
             // Create a new block
-            const current_block = try self.makeBlock(arena.allocator(), insn, insn, entry);
+            const current_block = try self.makeBlock(arena.allocator(), @ptrCast(insn), @ptrCast(insn), entry);
             try all_blocks.append(current_block);
             entry = false;
 
@@ -1033,11 +1033,12 @@ const CFGBuilder = struct {
             // that should end the block.
             while (node) |finish_insn| {
                 // Add each instruction to the current block
-                current_block.addInstruction(finish_insn);
+                current_block.addInstruction(@fieldParentPtr("node", finish_insn));
 
                 node = finish_insn.next;
 
-                const insn_node = finish_insn.data;
+                const insn_node_: *ir.InstructionListNode = @fieldParentPtr("node", finish_insn);
+                const insn_node = insn_node_.data;
 
                 // If the last instruction is a jump we should end the block
                 if (insn_node.isJump() or insn_node.isReturn()) {
@@ -1046,7 +1047,7 @@ const CFGBuilder = struct {
 
                 // If the next instruction is a label we should end the block
                 if (node) |next_insn| {
-                    if (next_insn.data.isLabel()) {
+                    if (@as(*ir.InstructionListNode, @fieldParentPtr("node", next_insn)).data.isLabel()) {
                         break;
                     }
                 }
@@ -1127,8 +1128,8 @@ test "basic block one instruction" {
 
     const bb = cfg.head;
 
-    try std.testing.expectEqual(scope.insns.first.?, bb.start);
-    try std.testing.expectEqual(scope.insns.first.?, bb.finish);
+    try std.testing.expectEqual(scope.insns.first.?, &bb.start.node);
+    try std.testing.expectEqual(scope.insns.first.?, &bb.finish.node);
     try std.testing.expectEqual(null, bb.fall_through_dest);
     try std.testing.expectEqual(null, bb.jump_dest);
 }
@@ -1145,8 +1146,8 @@ test "basic block two instruction" {
 
     const bb = cfg.head;
 
-    try std.testing.expectEqual(scope.insns.first.?, bb.start);
-    try std.testing.expectEqual(scope.insns.last.?, bb.finish);
+    try std.testing.expectEqual(scope.insns.first.?, &bb.start.node);
+    try std.testing.expectEqual(scope.insns.last.?, &bb.finish.node);
 }
 
 test "CFG from compiler" {
@@ -1200,7 +1201,7 @@ test "if statement should have 2 children blocks" {
     defer scope.deinit();
 
     // Get the scope for the method
-    const method_scope: *Scope = scope.insns.first.?.data.define_method.func.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.scope.value;
 
     const cfg = try buildCFG(allocator, method_scope);
     defer cfg.deinit();
@@ -1683,7 +1684,7 @@ fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
     return null;
 }
 
-fn findInsn(cfg: *CFG, name: ir.InstructionName) !?*ir.InstructionList.Node {
+fn findInsn(cfg: *CFG, name: ir.InstructionName) !?*ir.InstructionListNode {
     var iter = try cfg.depthFirstIterator();
     defer iter.deinit();
 
@@ -1713,9 +1714,13 @@ fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8)
 }
 
 fn expectInstructionList(expected: []const ir.InstructionName, block: *BasicBlock) !void {
-    var insn: ?*ir.InstructionList.Node = block.start;
+    var insn: ?*ir.InstructionListNode = block.start;
     for (expected) |expected_insn| {
         try std.testing.expectEqual(expected_insn, @as(ir.InstructionName, insn.?.data));
-        insn = insn.?.next;
+        if (insn.?.node.next) |n| {
+            insn = @fieldParentPtr("node", n);
+        } else {
+            insn = null;
+        }
     }
 }

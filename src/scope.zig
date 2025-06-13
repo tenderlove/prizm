@@ -132,20 +132,20 @@ pub const Scope = struct {
         return try self.addOpnd(try ir.Operand.initLabel(self.arena.allocator(), self.nextOpndId(), name));
     }
 
-    fn makeInsn(self: *Scope, insn: ir.Instruction) !*ir.InstructionList.Node {
-        const node = try self.arena.allocator().create(ir.InstructionList.Node);
+    fn makeInsn(self: *Scope, insn: ir.Instruction) !*ir.InstructionListNode {
+        const node = try self.arena.allocator().create(ir.InstructionListNode);
         node.*.data = insn;
         return node;
     }
 
     fn pushVoidInsn(self: *Scope, insn: ir.Instruction) !void {
-        self.insns.append(try self.makeInsn(insn));
+        self.insns.append(&(try self.makeInsn(insn)).node);
     }
 
     fn pushInsn(self: *Scope, insn: ir.Instruction) !*ir.Operand {
-        const node = try self.arena.allocator().create(ir.InstructionList.Node);
+        const node = try self.arena.allocator().create(ir.InstructionListNode);
         node.*.data = insn;
-        self.insns.append(node);
+        self.insns.append(&node.node);
 
         return switch (insn) {
             .putlabel => unreachable,
@@ -225,22 +225,22 @@ pub const Scope = struct {
         return out;
     }
 
-    pub fn makeMov(self: *Scope, out: *ir.Operand, in: *ir.Operand) !*ir.InstructionList.Node {
+    pub fn makeMov(self: *Scope, out: *ir.Operand, in: *ir.Operand) !*ir.InstructionListNode {
         return try self.makeInsn(.{ .mov = .{ .out = out, .in = in } });
     }
 
-    pub fn insertPhi(self: *Scope, node: *ir.InstructionList.Node, op: *ir.Operand) !*ir.InstructionList.Node {
-        const new_node = try self.arena.allocator().create(ir.InstructionList.Node);
+    pub fn insertPhi(self: *Scope, node: *ir.InstructionListNode, op: *ir.Operand) !*ir.InstructionListNode {
+        const new_node = try self.arena.allocator().create(ir.InstructionListNode);
         const params = std.ArrayList(*ir.Operand).init(self.arena.allocator());
         new_node.*.data = .{ .phi = .{ .out = op, .params = params } };
-        self.insns.insertAfter(node, new_node);
+        self.insns.insertAfter(&node.node, &new_node.node);
         return new_node;
     }
 
-    pub fn insertParallelCopy(self: *Scope, node: *ir.InstructionList.Node, dest: *Op, src: *Op, block: *BasicBlock, group: usize) !*ir.InstructionList.Node {
-        const new_node = try self.arena.allocator().create(ir.InstructionList.Node);
+    pub fn insertParallelCopy(self: *Scope, node: *ir.InstructionListNode, dest: *Op, src: *Op, block: *BasicBlock, group: usize) !*ir.InstructionListNode {
+        const new_node = try self.arena.allocator().create(ir.InstructionListNode);
         new_node.*.data = .{ .pmov = .{ .out = dest, .in = src, .block = block, .group = group } };
-        self.insns.insertAfter(node, new_node);
+        self.insns.insertAfter(&node.node, &new_node.node);
         return new_node;
     }
 
@@ -271,7 +271,7 @@ pub const Scope = struct {
         var it = self.insns.first;
         while (it) |insn| {
             it = insn.next;
-            insn.data.deinit();
+            @as(*ir.InstructionListNode, @fieldParentPtr("node", insn)).data.deinit();
         }
         self.locals.deinit(self.allocator);
         self.params.deinit(self.allocator);
