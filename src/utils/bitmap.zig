@@ -298,7 +298,8 @@ pub fn BitMapSized(comptime T: type) type {
     };
 }
 
-pub const BitMap = BitMapSized(u64);
+//pub const BitMap = BitMapSized(u64);
+pub const BitMap = std.DynamicBitSetUnmanaged;
 
 const dbs = std.DynamicBitSetUnmanaged;
 

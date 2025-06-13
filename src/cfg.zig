@@ -32,7 +32,7 @@ pub const CFG = struct {
     head: *BasicBlock,
     blocks: []const *BasicBlock,
     dom_tree: ?*BitMatrix = null,
-    globals: ?*BitMap = null,
+    globals: BitMap,
     ssa_destructor: *SSADestructor,
     scope: *Scope,
     state: State = .start,
@@ -46,6 +46,7 @@ pub const CFG = struct {
             .head = head,
             .blocks = blocks,
             .scope = scope,
+            .globals = try BitMap.initEmpty(mem, 0),
             .ssa_destructor = try SSADestructor.init(mem),
         };
 
@@ -113,7 +114,7 @@ pub const CFG = struct {
                         var runner = pred;
 
                         while (runner.name != idom) {
-                            runner.df.?.set(bb.name);
+                            runner.df.set(bb.name);
                             const runner_idom = runner.idom.?;
                             runner = bbs[runner_idom].?;
                             assert(runner.name == runner_idom);
@@ -138,17 +139,17 @@ pub const CFG = struct {
             if (maybebb) |bb| {
                 blocklist[bb.name] = bb;
 
-                bb.df = try BitMap.initEmpty(self.arena.allocator(), self.blockCount());
+                try bb.df.resize(self.arena.allocator(), self.blockCount(), false);
+
+                try bb.dom.resize(self.arena.allocator(), self.blockCount(), false);
 
                 if (bb.entry) {
-                    bb.dom = try BitMap.initEmpty(self.arena.allocator(), self.blockCount());
                     // Entry blocks dominate themselves, and nothing else
                     // dominates an entry block.
-                    bb.dom.?.set(bb.name);
+                    bb.dom.set(bb.name);
                 } else {
                     // Default blocks to "everything dominates this block"
-                    bb.dom = try BitMap.initEmpty(self.arena.allocator(), self.blockCount());
-                    bb.dom.?.toggleAll();
+                    bb.dom.toggleAll();
                 }
             }
         }
@@ -162,24 +163,24 @@ pub const CFG = struct {
                 if (maybebb) |bb| {
                     if (bb.entry) continue;
 
-                    const temp = try BitMap.initEmpty(self.mem, self.blockCount());
+                    var temp = try BitMap.initEmpty(self.mem, self.blockCount());
                     defer self.mem.destroy(temp);
 
                     temp.set(bb.name);
 
-                    const intersect = try BitMap.initEmpty(self.mem, self.blockCount());
+                    var intersect = try BitMap.initEmpty(self.mem, self.blockCount());
                     intersect.toggleAll();
                     defer self.mem.destroy(intersect);
 
                     for (bb.predecessors.items) |pred| {
-                        intersect.setIntersection(pred.dom.?);
+                        intersect.setIntersection(pred.dom);
                     }
 
                     temp.setUnion(intersect);
 
-                    if (!temp.eql(bb.dom.?)) {
-                        bb.dom.?.unsetAll();
-                        bb.dom.?.setUnion(temp);
+                    if (!temp.eql(bb.dom)) {
+                        bb.dom.unsetAll();
+                        bb.dom.setUnion(temp);
                         changed = true;
                     }
                 }
@@ -193,15 +194,15 @@ pub const CFG = struct {
             if (maybebb) |bb| {
                 if (bb.entry) continue;
 
-                assert(bb.dom.?.isSet(bb.name));
+                assert(bb.dom.isSet(bb.name));
                 // Unset ourselves real quick
-                bb.dom.?.unset(bb.name);
+                bb.dom.unset(bb.name);
 
-                bb.idom = bb.dom.?.findLastSet();
+                bb.idom = bb.dom.findLastSet();
                 dom_tree.set(bb.idom.?, bb.name);
 
                 // Set ourselves back
-                bb.dom.?.set(bb.name);
+                bb.dom.set(bb.name);
             }
         }
 
@@ -295,7 +296,8 @@ pub const CFG = struct {
 
     pub fn placePhis(self: *CFG) !void {
         const opnd_count = self.opndCount();
-        const globals = try BitMap.initEmpty(self.arena.allocator(), opnd_count);
+        try self.globals.resize(self.arena.allocator(), opnd_count, false);
+        var globals = self.globals;
 
         const all_blocks = self.blockList();
 
@@ -331,7 +333,7 @@ pub const CFG = struct {
             // We only want to process a block once per global name
             // This bitmap keeps track of whether or not we've processed
             // a particular block for this name.
-            const block_seen = try BitMap.initEmpty(self.mem, all_blocks.len);
+            var block_seen = try BitMap.initEmpty(self.mem, all_blocks.len);
             defer block_seen.deinit(self.mem);
 
             // Get all blocks that define this variable
@@ -348,7 +350,7 @@ pub const CFG = struct {
             }
 
             while (worklist.pop()) |block| {
-                var dfiter = block.df.?.iterator(.{});
+                var dfiter = block.df.iterator(.{});
                 while (dfiter.next()) |dfi| {
                     const dfblock = all_blocks[dfi];
                     if (!phi_map.isSet(operand_num, dfblock.name)) {
@@ -366,7 +368,6 @@ pub const CFG = struct {
                 }
             }
         }
-        self.globals = globals;
         self.state = .phi_placed;
     }
 
@@ -434,7 +435,7 @@ pub const CFG = struct {
                         // Rename operands
                         var itr = insn.data.opIter();
                         while (itr.next()) |op| {
-                            if (cfg.globals.?.isSet(op.getID())) {
+                            if (cfg.globals.isSet(op.getID())) {
                                 insn.data.replaceOpnd(op, self.stackTop(op).?);
                                 should_append = true;
                             }
@@ -442,7 +443,7 @@ pub const CFG = struct {
 
                         // Rename output variable
                         if (insn.data.getOut()) |out| {
-                            if (cfg.globals.?.isSet(out.getID())) {
+                            if (cfg.globals.isSet(out.getID())) {
                                 try pushed.append(out);
                                 const newname = try self.newName(out, bb, cfg.scope);
                                 insn.data.setOut(newname);
@@ -514,7 +515,7 @@ pub const CFG = struct {
     };
 
     pub fn rename(self: *CFG) !void {
-        const global_count = self.globals.?.count();
+        const global_count = self.globals.count();
         var renamer = try Renamer.init(self.mem, global_count);
         defer renamer.deinit(self.mem);
         try renamer.rename(self, self.head);
@@ -571,11 +572,11 @@ pub const CFG = struct {
         const blocklist: []?*BasicBlock = try mem.alloc(?*BasicBlock, self.blockCount());
         @memset(blocklist, null);
 
-        const seen = try BitMap.initEmpty(mem, self.blockCount());
+        var seen = try BitMap.initEmpty(mem, self.blockCount());
         defer seen.deinit(mem);
         var counter = self.blockCount();
 
-        try traverseReversePostorder(self.head, seen, blocklist, &counter);
+        try traverseReversePostorder(self.head, &seen, blocklist, &counter);
 
         return blocklist;
     }
@@ -648,12 +649,12 @@ pub const BasicBlock = struct {
     start: *ir.InstructionListNode,
     finish: *ir.InstructionListNode,
     predecessors: std.ArrayList(*BasicBlock),
-    killed_set: *BitMap,
-    upward_exposed_set: *BitMap,
-    liveout_set: *BitMap,
-    livein_set: *BitMap,
-    dom: ?*BitMap = null,
-    df: ?*BitMap = null,
+    killed_set: BitMap,
+    upward_exposed_set: BitMap,
+    liveout_set: BitMap,
+    livein_set: BitMap,
+    dom: BitMap,
+    df: BitMap,
     fall_through_dest: ?*BasicBlock = null,
     jump_dest: ?*BasicBlock = null,
     idom: ?u64 = null,
@@ -670,6 +671,8 @@ pub const BasicBlock = struct {
             .upward_exposed_set = try BitMap.initEmpty(alloc, 0),
             .liveout_set = try BitMap.initEmpty(alloc, 0),
             .livein_set = try BitMap.initEmpty(alloc, 0),
+            .dom = try BitMap.initEmpty(alloc, 0),
+            .df = try BitMap.initEmpty(alloc, 0),
             .predecessors = std.ArrayList(*BasicBlock).init(alloc),
         };
 
@@ -677,15 +680,15 @@ pub const BasicBlock = struct {
     }
 
     pub fn resetSets(self: *BasicBlock, vars: usize, alloc: std.mem.Allocator) !void {
-        self.killed_set.deinit(alloc);
-        self.upward_exposed_set.deinit(alloc);
-        self.liveout_set.deinit(alloc);
-        self.livein_set.deinit(alloc);
+        try self.killed_set.resize(alloc, vars, false);
+        try self.upward_exposed_set.resize(alloc, vars, false);
+        try self.liveout_set.resize(alloc, vars, false);
+        try self.livein_set.resize(alloc, vars, false);
 
-        self.killed_set = try BitMap.initEmpty(alloc, vars);
-        self.upward_exposed_set = try BitMap.initEmpty(alloc, vars);
-        self.liveout_set = try BitMap.initEmpty(alloc, vars);
-        self.livein_set = try BitMap.initEmpty(alloc, vars);
+        self.killed_set.unsetAll();
+        self.upward_exposed_set.unsetAll();
+        self.liveout_set.unsetAll();
+        self.livein_set.unsetAll();
     }
 
     pub fn killedVariableCount(self: *BasicBlock) usize {
@@ -715,7 +718,7 @@ pub const BasicBlock = struct {
         }
     }
 
-    fn childLo(_: *BasicBlock, child: *BasicBlock, alloc: std.mem.Allocator) !*BitMap {
+    fn childLo(_: *BasicBlock, child: *BasicBlock, alloc: std.mem.Allocator) !BitMap {
         const ue = child.upward_exposed_set;
         const lo = child.liveout_set;
         const varkill = child.killed_set;
@@ -952,13 +955,10 @@ pub const BasicBlock = struct {
         }
     }
 
-    pub fn uninitializedSet(self: *BasicBlock, scope: *Scope, mem: std.mem.Allocator) !*BitMap {
+    pub fn uninitializedSet(self: *BasicBlock, scope: *Scope, mem: std.mem.Allocator) !BitMap {
         if (!self.entry) return error.ArgumentError;
-        if (self.killed_set.isNullBlock()) {
-            return self.killed_set;
-        }
 
-        const uninit = try self.killed_set.clone(mem);
+        var uninit = try self.killed_set.clone(mem);
         uninit.toggleAll();
         uninit.setIntersection(self.liveout_set);
         uninit.setUnion(self.upward_exposed_set);

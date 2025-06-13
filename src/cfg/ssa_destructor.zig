@@ -222,7 +222,7 @@ pub const SSADestructor = struct {
 
     fn checkForCycles(self: *SSADestructor, cfg: *CFG, matrix: *BitMatrix) !void {
         // We need to keep track of the nodes we've visited
-        const visited = try BitMap.initEmpty(self.mem, cfg.opndCount());
+        var visited = try BitMap.initEmpty(self.mem, cfg.opndCount());
         defer visited.deinit(self.mem);
 
         for (matrix.buffer, 0..) |ys, x| {
@@ -240,11 +240,11 @@ pub const SSADestructor = struct {
 
                 // TODO: we should allocate this once and reuse it but we need
                 // a "clear" method on bit maps.
-                const seen = try BitMap.initEmpty(self.mem, cfg.opndCount());
+                var seen = try BitMap.initEmpty(self.mem, cfg.opndCount());
                 defer seen.deinit(self.mem);
 
                 // Otherwise, we need to recursively walk its edges
-                try self.walkChildren(matrix, visited, seen, x);
+                try self.walkChildren(matrix, &visited, &seen, x);
             }
         }
     }
