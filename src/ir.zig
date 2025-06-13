@@ -4,7 +4,7 @@ const cfg = @import("cfg.zig");
 const Scope = @import("scope.zig").Scope;
 const BasicBlock = cfg.BasicBlock;
 
-pub const InstructionList = std.DoublyLinkedList(Instruction);
+pub const InstructionList = std.DoublyLinkedList;
 
 pub const OperandType = enum {
     immediate,
@@ -575,6 +575,11 @@ pub const Instruction = union(InstructionName) {
             else => {},
         }
     }
+};
+
+pub const InstructionListNode = struct {
+    node: std.DoublyLinkedList.Node,
+    data: Instruction,
 };
 
 test "can iterate on ops" {

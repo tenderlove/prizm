@@ -297,24 +297,28 @@ const IRPrinter = struct {
             var widest_insn: usize = 0;
             var n = work_scope.insns.first;
             while (n) |insn| {
-                if (@tagName(insn.data).len > widest_insn) {
-                    widest_insn = @tagName(insn.data).len;
+                const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
+
+                if (@tagName(insn_node.data).len > widest_insn) {
+                    widest_insn = @tagName(insn_node.data).len;
                 }
                 n = insn.next;
             }
 
             while (node) |unwrapped| {
-                switch (unwrapped.data) {
+                const unwrapped_node: *ir.InstructionListNode = @fieldParentPtr("node", unwrapped);
+
+                switch (unwrapped_node.data) {
                     .putlabel => |insn| {
                         try out.print("{s}{d}:\n", .{ insn.name.shortName(), insn.name.label.name });
                     },
                     .define_method => |insn| {
                         try work.append(insn.func.scope.value);
-                        try printInsn(unwrapped.data, digits, widest_insn + 1, out);
+                        try printInsn(unwrapped_node.data, digits, widest_insn + 1, out);
                         try out.print("\n", .{});
                     },
                     else => {
-                        try printInsn(unwrapped.data, digits, widest_insn + 1, out);
+                        try printInsn(unwrapped_node.data, digits, widest_insn + 1, out);
                         try out.print("\n", .{});
                     },
                 }
@@ -549,7 +553,8 @@ fn widestOutOp(scope: *Scope) usize {
     var node = insns.first;
     var widest: usize = 0;
     while (node) |insn| {
-        if (insn.data.outVar()) |variable| {
+        const insnn: *ir.InstructionListNode = @fieldParentPtr("node", insn);
+        if (insnn.data.outVar()) |variable| {
             const len = outVarWidth(variable);
             if (len > widest) widest = len;
         }

@@ -15,7 +15,7 @@ pub const SSADestructor = struct {
     mem: std.mem.Allocator,
     group: usize = 0,
     phi_copies: ParallelCopyList,
-    copy_groups: std.ArrayList(*ir.InstructionList.Node),
+    copy_groups: std.ArrayList(*ir.InstructionListNode),
 
     const ParallelCopy = struct {
         source_block: *BasicBlock,
@@ -35,7 +35,7 @@ pub const SSADestructor = struct {
         self.* = SSADestructor {
             .mem = mem,
             .phi_copies = ParallelCopyList.init(mem),
-            .copy_groups = std.ArrayList(*ir.InstructionList.Node).init(mem),
+            .copy_groups = std.ArrayList(*ir.InstructionListNode).init(mem),
         };
         return self;
     }
@@ -60,13 +60,15 @@ pub const SSADestructor = struct {
             var isolation_copies = std.ArrayList(ParallelCopy).init(self.mem);
             defer isolation_copies.deinit();
 
-            var iter: ?*ir.InstructionList.Node = bb.start;
+            var iter: ?*std.DoublyLinkedList.Node = &bb.start.node;
 
             while (iter) |insn| {
-                switch(insn.data) {
+                const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
+
+                switch(insn_node.data) {
                     .putlabel => { }, // Skip putlabel
                     .phi => |p| {
-                        const current_out = insn.data.getOut().?;
+                        const current_out = insn_node.data.getOut().?;
                         const prime_out = try cfg.scope.newPrime(current_out);
 
                         for (0..p.params.items.len) |param_i| {
@@ -97,13 +99,13 @@ pub const SSADestructor = struct {
                             .input = current_out,
                         });
 
-                        insn.data.setOut(prime_out);
+                        insn_node.data.setOut(prime_out);
                     },
                     // Quit after we've passed phi's
                     else => { break; }
                 }
 
-                if (insn == bb.finish) break;
+                if (insn == &bb.finish.node) break;
 
                 iter = insn.next;
             }
@@ -113,14 +115,14 @@ pub const SSADestructor = struct {
             if (isolation_copies.items.len > 0) {
                 // The insn we're on should be the one right after the last Phi.
                 std.debug.assert(iter != null);
-                std.debug.assert(!iter.?.data.isPhi());
-                std.debug.assert(iter.?.prev.?.data.isPhi());
+                std.debug.assert(!@as(*ir.InstructionListNode, @fieldParentPtr("node", iter.?)).data.isPhi());
+                std.debug.assert(@as(*ir.InstructionListNode, @fieldParentPtr("node", iter.?.prev.?)).data.isPhi());
 
                 var insn = iter.?.prev.?; // Should be the last Phi in the block
 
                 for (isolation_copies.items) |copy| {
-                    insn = try bb.insertParallelCopy(cfg.scope, insn, copy.input, copy.output, self.group);
-                    try self.copy_groups.append(insn);
+                    insn = &(try bb.insertParallelCopy(cfg.scope, @fieldParentPtr("node", insn), copy.input, copy.output, self.group)).node;
+                    try self.copy_groups.append(@fieldParentPtr("node", insn));
                 }
                 self.group += 1;
             }
@@ -185,17 +187,17 @@ pub const SSADestructor = struct {
         for (cfg.blocks) |bb| {
             if (!bb.reachable) continue;
 
-            var iter: ?*ir.InstructionList.Node = bb.start;
+            var iter: ?*std.DoublyLinkedList.Node = &bb.start.node;
 
             while (iter) |insn| {
-                switch(insn.data) {
+                switch(@as(*ir.InstructionListNode, @fieldParentPtr("node", insn)).data) {
                     .putlabel => { }, // Skip putlabel
                     .phi => cfg.scope.insns.remove(insn),
                     // Quit after we've passed phi's
                     else => { break; }
                 }
 
-                if (insn == bb.finish) break;
+                if (insn == &bb.finish.node) break;
                 iter = insn.next;
             }
         }
@@ -244,7 +246,7 @@ pub const SSADestructor = struct {
         }
     }
 
-    fn serializeCopyGroup(_: *SSADestructor, cfg: *CFG, insn: *ir.InstructionList.Node, group: usize) !void {
+    fn serializeCopyGroup(_: *SSADestructor, cfg: *CFG, insn: *ir.InstructionListNode, group: usize) !void {
         // There shouldn't be any cycles, so we should be able to just insert
         // copies.
         var cursor = insn;
@@ -253,7 +255,7 @@ pub const SSADestructor = struct {
             const dst = cursor.data.pmov.out;
             const old = cursor;
 
-            cursor = cursor.next.?;
+            cursor = @fieldParentPtr("node", cursor.node.next.?);
 
             const copy = try cfg.makeMov(dst, src);
             cfg.replace(old.data.pmov.block, old, copy);
@@ -357,17 +359,17 @@ test "phi isolation adds I/O variable copies" {
     // instructions after the phi instructions to isolate the phi return value
 
     // Get the 2 phi instructions from BB1
-    const phi1 = cfg.blocks[1].start.next.?;
+    const phi1 = @as(*ir.InstructionListNode, @fieldParentPtr("node", cfg.blocks[1].start.node.next.?));
     try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi1.data));
 
-    const phi2 = phi1.next.?;
+    const phi2 = @as(*ir.InstructionListNode, @fieldParentPtr("node", phi1.node.next.?));
     try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi2.data));
 
     // Lets test that the Phi return values are isolated first
-    const isolation1 = phi2.next.?;
+    const isolation1 = @as(*ir.InstructionListNode, @fieldParentPtr("node", phi2.node.next.?));
     try expectIsolatedPhiOutput(phi1.data, isolation1.data);
 
-    const isolation2 = isolation1.next.?;
+    const isolation2 = @as(*ir.InstructionListNode, @fieldParentPtr("node", isolation1.node.next.?));
     try expectIsolatedPhiOutput(phi2.data, isolation2.data);
 
     // Now lets test that the input values are isolated.
@@ -378,17 +380,23 @@ test "phi isolation adds I/O variable copies" {
 
 fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
     var insn = bb.finishInsn();
-    if (insn.?.data.isJump()) insn = insn.?.prev;
+    if (insn.?.data.isJump()) {
+        insn = @fieldParentPtr("node", insn.?.node.prev.?);
+    }
 
     while (true) {
         if (insn == bb.start) { // If we hit this start, then there were no pmov
             try std.testing.expect(false);
         }
 
-        if (!insn.?.prev.?.data.isPMov()) {
+        if (!@as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?.node.prev.?)).data.isPMov()) {
             break;
         } else {
-            insn = insn.?.prev;
+            if (insn.?.node.prev) |m| {
+                insn = @fieldParentPtr("node", m);
+            } else {
+                insn = null;
+            }
         }
     }
 
@@ -412,17 +420,23 @@ fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
             } else false;
             try std.testing.expect(found);
         }
-        insn = insn.?.next;
+        if (insn.?.node.next) |m| {
+            insn = @fieldParentPtr("node", m);
+        } else {
+            insn = null;
+        }
         count += 1;
     }
 }
 
 fn expectPhiOutputCopies(block: *BasicBlock, phis: []const ir.Instruction) !void {
     var insn = block.finishInsn();
-    if (insn.?.data.isJump()) insn = insn.?.prev;
+    if (insn.?.data.isJump()) {
+        insn = @fieldParentPtr("node", insn.?.node.prev.?);
+    }
 
     for (0..(phis.len - 1)) |_| {
-        insn = insn.?.prev;
+        insn = @fieldParentPtr("node", insn.?.node.prev.?);
     }
 
     for (phis) |phi_insn| {
@@ -436,7 +450,11 @@ fn expectPhiOutputCopies(block: *BasicBlock, phis: []const ir.Instruction) !void
             if (item == in) break true;
         } else false;
         try std.testing.expect(found);
-        insn = insn.?.next;
+        if (insn.?.node.next) |x| {
+            insn = @fieldParentPtr("node", x);
+        } else {
+            insn = null;
+        }
     }
 }
 
@@ -497,10 +515,10 @@ test "inserting phi copies actually copies the right thing" {
     // Adding these copies make it no longer SSA (since we're copying to the Phi output twice)
 
     // Get the 2 phi instructions from BB1
-    const phi1 = cfg.blocks[1].start.next.?;
+    const phi1 = @as(*ir.InstructionListNode, @fieldParentPtr("node", cfg.blocks[1].start.node.next.?));
     try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi1.data));
 
-    const phi2 = phi1.next.?;
+    const phi2 = @as(*ir.InstructionListNode, @fieldParentPtr("node", phi1.node.next.?));
     try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi2.data));
 
     try expectPhiOutputCopies(cfg.blocks[0], &[_] ir.Instruction { phi1.data, phi2.data });
@@ -555,7 +573,11 @@ test "destructor fixes all variables" {
                 try std.testing.expect(ir.OperandType.prime != @as(ir.OperandType, op.*));
             }
 
-            iter = insn.next;
+            if (insn.node.next) |n| {
+                iter = @fieldParentPtr("node", n);
+            } else {
+                break;
+            }
         }
     }
 }
@@ -660,7 +682,11 @@ test "destruction removes all parallel copies" {
             if (iter == block.finishInsn()) break;
             try std.testing.expect(ir.InstructionName.pmov != @as(ir.InstructionName, insn.data));
 
-            iter = insn.next;
+            if (insn.node.next) |n| {
+                iter = @fieldParentPtr("node", n);
+            } else {
+                break;
+            }
         }
     }
 }
@@ -711,7 +737,11 @@ test "destruction maintains block endings" {
                 try std.testing.expectEqual(block.finishInsn(), insn);
             }
 
-            iter = insn.next;
+            if (insn.node.next) |n| {
+                iter = @fieldParentPtr("node", n);
+            } else {
+                break;
+            }
         }
     }
 }
