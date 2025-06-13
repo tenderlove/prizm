@@ -765,7 +765,7 @@ test "replace large" {
 
 test "fsb" {
     const alloc = std.testing.allocator;
-    var bm1 = try BitMap.initEmpty(alloc, 16);
+    var bm1 = try dbs.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
 
     bm1.set(0);
@@ -778,7 +778,7 @@ test "fsb" {
 
 test "fsb large" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 70);
+    var bm1 = try dbs.initEmpty(alloc, 70);
     defer bm1.deinit(alloc);
 
     bm1.set(0);
