@@ -197,7 +197,7 @@ pub const CFG = struct {
                 // Unset ourselves real quick
                 bb.dom.?.unset(bb.name);
 
-                bb.idom = bb.dom.?.fsb();
+                bb.idom = bb.dom.?.findLastSet();
                 dom_tree.set(bb.idom.?, bb.name);
 
                 // Set ourselves back

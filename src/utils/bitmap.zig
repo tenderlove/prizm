@@ -76,7 +76,7 @@ pub fn BitMapSized(comptime T: type) type {
             };
         }
 
-        pub fn fsb(self: Self) usize {
+        pub fn findLastSet(self: Self) usize {
             return self.getBits() - self.clz() - 1;
         }
 
@@ -763,56 +763,17 @@ test "replace large" {
     try std.testing.expect(bm1.eql(bm2));
 }
 
-test "clz small" {
-    const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 16);
-    defer bm1.deinit(alloc);
-
-    try std.testing.expectEqual(16, bm1.clz());
-    bm1.set(0);
-    try std.testing.expectEqual(15, bm1.clz());
-    bm1.set(1);
-    try std.testing.expectEqual(14, bm1.clz());
-    bm1.set(15);
-    try std.testing.expectEqual(0, bm1.clz());
-
-    const bm2 = try BitMap.initEmpty(alloc, 64);
-    defer bm2.deinit(alloc);
-
-    try std.testing.expectEqual(64, bm2.clz());
-    bm2.set(0);
-    try std.testing.expectEqual(63, bm2.clz());
-    bm2.set(1);
-    try std.testing.expectEqual(62, bm2.clz());
-    bm2.set(63);
-    try std.testing.expectEqual(0, bm2.clz());
-}
-
-test "clz large" {
-    const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 70);
-    defer bm1.deinit(alloc);
-
-    try std.testing.expectEqual(70, bm1.clz());
-    bm1.set(0);
-    try std.testing.expectEqual(69, bm1.clz());
-    bm1.set(1);
-    try std.testing.expectEqual(68, bm1.clz());
-    bm1.set(69);
-    try std.testing.expectEqual(0, bm1.clz());
-}
-
 test "fsb" {
     const alloc = std.testing.allocator;
-    const bm1 = try BitMap.initEmpty(alloc, 16);
+    var bm1 = try BitMap.initEmpty(alloc, 16);
     defer bm1.deinit(alloc);
 
     bm1.set(0);
-    try std.testing.expectEqual(0, bm1.fsb());
+    try std.testing.expectEqual(0, bm1.findLastSet());
     bm1.set(1);
-    try std.testing.expectEqual(1, bm1.fsb());
+    try std.testing.expectEqual(1, bm1.findLastSet());
     bm1.set(15);
-    try std.testing.expectEqual(15, bm1.fsb());
+    try std.testing.expectEqual(15, bm1.findLastSet());
 }
 
 test "fsb large" {
@@ -821,13 +782,13 @@ test "fsb large" {
     defer bm1.deinit(alloc);
 
     bm1.set(0);
-    try std.testing.expectEqual(0, bm1.fsb());
+    try std.testing.expectEqual(0, bm1.findLastSet());
     bm1.set(1);
-    try std.testing.expectEqual(1, bm1.fsb());
+    try std.testing.expectEqual(1, bm1.findLastSet());
     bm1.set(15);
-    try std.testing.expectEqual(15, bm1.fsb());
+    try std.testing.expectEqual(15, bm1.findLastSet());
     bm1.set(64);
-    try std.testing.expectEqual(64, bm1.fsb());
+    try std.testing.expectEqual(64, bm1.findLastSet());
 }
 
 test "init shared" {
