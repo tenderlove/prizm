@@ -8,8 +8,7 @@ const vm = @import("../vm.zig");
 const cmp = @import("../compiler.zig");
 const bitmatrix = @import("../utils/bitmatrix.zig");
 const BitMatrix = bitmatrix.BitMatrix;
-const bitmap = @import("../utils/bitmap.zig");
-const BitMap = bitmap.BitMap;
+const BitMap = std.DynamicBitSetUnmanaged;
 
 pub const SSADestructor = struct {
     mem: std.mem.Allocator,

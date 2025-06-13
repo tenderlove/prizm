@@ -5,7 +5,7 @@ const cfg_z = @import("cfg.zig");
 const CFG = cfg_z.CFG;
 const BasicBlock = cfg_z.BasicBlock;
 const Scope = @import("scope.zig").Scope;
-const bm = @import("utils/bitmap.zig");
+const BitMap = std.DynamicBitSetUnmanaged;
 
 const DotOutputStrategy = struct {
     writer: std.io.AnyWriter,
@@ -343,7 +343,7 @@ const CFGPrinter = struct {
         };
     }
 
-    fn printSet(comptime name: []const u8, scope: *Scope, set: *bm.BitMap, ctx: anytype) !void {
+    fn printSet(comptime name: []const u8, scope: *Scope, set: *BitMap, ctx: anytype) !void {
         const nitems = set.count(); // number of variables
         if (nitems > 0) {
             var buffer = std.ArrayList(u8).init(ctx.allocator);
@@ -371,7 +371,7 @@ const CFGPrinter = struct {
         }
     }
 
-    fn printBlockSet(comptime name: []const u8, set: *bm.BitMap, ctx: anytype) !void {
+    fn printBlockSet(comptime name: []const u8, set: *BitMap, ctx: anytype) !void {
         const nitems = set.count(); // number of variables
         if (nitems > 0) {
             var buffer = std.ArrayList(u8).init(ctx.allocator);

@@ -1,5 +1,5 @@
 const std = @import("std");
-const bitmap = @import("bitmap.zig");
+const BitMap = std.DynamicBitSetUnmanaged;
 
 pub fn BitMatrixSize(comptime T: type) type {
     return struct {
@@ -7,14 +7,14 @@ pub fn BitMatrixSize(comptime T: type) type {
 
         rows: usize,
         columns: usize,
-        buffer: []bitmap.BitMap,
+        buffer: []BitMap,
 
         pub fn init(mem: std.mem.Allocator, rows: usize, y: usize) !*Self {
             const bm = try mem.create(Self);
 
-            const bitmap_array = try mem.alloc(bitmap.BitMap, rows);
+            const bitmap_array = try mem.alloc(BitMap, rows);
             for (0..rows) |i| {
-                bitmap_array[i] = try bitmap.BitMap.initEmpty(mem, y);
+                bitmap_array[i] = try BitMap.initEmpty(mem, y);
             }
 
             bm.* = .{ .rows = rows, .columns = y, .buffer = bitmap_array };
@@ -30,7 +30,7 @@ pub fn BitMatrixSize(comptime T: type) type {
         }
 
         // Get all of the Y values for a given X
-        pub fn getColumn(self: Self, x: usize) bitmap.BitMap {
+        pub fn getColumn(self: Self, x: usize) BitMap {
             return self.buffer[x];
         }
 
