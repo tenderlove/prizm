@@ -579,6 +579,7 @@ pub const Instruction = union(InstructionName) {
 
 pub const InstructionListNode = struct {
     node: std.DoublyLinkedList.Node,
+    number: usize = 0,
     data: Instruction,
 };
 
