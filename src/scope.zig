@@ -312,6 +312,8 @@ pub const Scope = struct {
             }
         }
 
+        var counter: usize = 0;
+
         // Now walk through the scope's instruction list and remove dead instructions
         var it = self.insns.first;
         while (it) |insn| {
@@ -322,6 +324,10 @@ pub const Scope = struct {
             if (!alive_numbers.isSet(insn_node.number)) {
                 self.insns.remove(insn);
                 insn_node.data.deinit();
+            } else {
+                // While we're here, renumber the instructions
+                insn_node.number = counter;
+                counter += 1;
             }
             
             it = next_insn;
