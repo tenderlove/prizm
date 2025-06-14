@@ -480,9 +480,12 @@ const CFGPrinter = struct {
 
             try out.printClusterHeader(work_scope);
             try cfg.compileUntil(steps);
-            // try cfg.analyze();
-            // try cfg.placePhis();
-            // try cfg.rename();
+            std.debug.print("opnd count {d}\n", .{ work_scope.opndCount() });
+            try cfg.analyze();
+            try cfg.placePhis();
+            try cfg.rename();
+            std.debug.print("opnd count {d}\n", .{ work_scope.opndCount() });
+            //std.debug.print("live count {d}\n", .{ cfg.liveOpndCount() });
             const ctx = Context(@TypeOf(out.*)){
                 .out = out,
                 .work = work,

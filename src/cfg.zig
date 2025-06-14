@@ -1544,6 +1544,30 @@ test "while loop dominators" {
     try std.testing.expect(blocks[6].dom.isSet(6));
 }
 
+test "method definitions" {
+    const mem = std.testing.allocator;
+
+    const machine = try vm.init(mem);
+    defer machine.deinit(mem);
+
+    const code =
+\\ def foo
+\\   1234
+\\ end
+\\ foo
+;
+    const scope = try compileScope(mem, machine, code);
+    defer scope.deinit();
+
+    const cfg = try CFG.build(mem, scope);
+    try cfg.compileUntil(.phi_removed);
+    defer cfg.deinit();
+
+    const blocks = cfg.blockList();
+
+    try std.testing.expectEqual(1, blocks.len);
+}
+
 test "dominance frontiers" {
     const allocator = std.testing.allocator;
 

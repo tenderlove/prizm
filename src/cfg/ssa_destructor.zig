@@ -267,6 +267,10 @@ pub const SSADestructor = struct {
 
     // Figure 9.20, part F & G
     pub fn serializeCopyGroups(self: *SSADestructor, cfg: *CFG) !void {
+        if (self.copy_groups.items.len == 0) {
+            return;
+        }
+
         const bits = cfg.opndCount();
         const matrix = try BitMatrix.init(self.mem, bits, bits);
         defer matrix.deinit(self.mem);
