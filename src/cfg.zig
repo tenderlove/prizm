@@ -240,6 +240,36 @@ pub const CFG = struct {
         }
     }
 
+    pub fn sweepUnreachableBlocks(mem: std.mem.Allocator, head: *BasicBlock, blocks: std.ArrayList(*BasicBlock)) ![]const *BasicBlock {
+        for (blocks.items) |block| {
+            block.reachable = false;
+        }
+
+        var worklist = std.ArrayList(*BasicBlock).init(mem);
+        defer worklist.deinit();
+        try worklist.append(head);
+
+        var iter: DepthFirstIterator = .{
+            .seen = std.AutoHashMap(u64, *BasicBlock).init(mem),
+            .work = worklist,
+        };
+        defer iter.seen.deinit();
+
+        while (try iter.next()) |bb| {
+            bb.reachable = true;
+        }
+
+        var live_blocks = std.ArrayList(*BasicBlock).init(mem);
+        defer live_blocks.deinit();
+
+        for (blocks.items) |block| {
+            if (block.reachable) {
+                try live_blocks.append(block);
+            }
+        }
+        return try live_blocks.toOwnedSlice();
+    }
+
     // Analyze the CFG.
     pub fn analyze(self: *CFG) !void {
         for (self.blocks) |block| {
@@ -1088,9 +1118,9 @@ const CFGBuilder = struct {
             try target.addPredecessor(want_label);
         }
 
-        const cfg = try CFG.init(allocator, arena, scope, head.?, try all_blocks.toOwnedSlice());
+        const live_blocks = try CFG.sweepUnreachableBlocks(allocator, head.?, all_blocks);
 
-        // TODO: sweep unreachable blocks?
+        const cfg = try CFG.init(allocator, arena, scope, head.?, live_blocks);
 
         // TODO: We could calculate the killed set and the upward exposed set
         // while building the basic blocks, rather than here.  But then we
@@ -1559,18 +1589,46 @@ test "method definitions" {
     const scope = try compileScope(mem, machine, code);
     defer scope.deinit();
 
-    const cfg = try CFG.build(mem, scope);
+    const children = try scope.childScopes(mem);
+    defer children.deinit();
+    try std.testing.expectEqual(1, children.items.len);
+
+    // Get a CFG for the foo method
+    const cfg = try CFG.build(mem, children.items[0]);
     try cfg.compileUntil(.phi_removed);
     defer cfg.deinit();
 
     const blocks = cfg.blockList();
 
     try std.testing.expectEqual(1, blocks.len);
+}
+
+test "dead code removal" {
+    const mem = std.testing.allocator;
+
+    const machine = try vm.init(mem);
+    defer machine.deinit(mem);
+
+    const code =
+\\ def foo
+\\   return 1234
+\\   puts 456
+\\ end
+;
+    const scope = try compileScope(mem, machine, code);
+    defer scope.deinit();
 
     const children = try scope.childScopes(mem);
     defer children.deinit();
-
     try std.testing.expectEqual(1, children.items.len);
+
+    // Get a CFG for the foo method
+    const cfg = try CFG.build(mem, children.items[0]);
+    defer cfg.deinit();
+
+    const blocks = cfg.blockList();
+    // CFG.build now automatically sweeps unreachable blocks, so we should only have 1 reachable block
+    try std.testing.expectEqual(1, blocks.len);
 }
 
 test "dominance frontiers" {
@@ -1588,7 +1646,8 @@ test "dominance frontiers" {
 
     const blocks = cfg.blockList();
 
-    try std.testing.expectEqual(9, blocks.len);
+    // CFG.build now automatically sweeps unreachable blocks, so we have 8 blocks instead of 9
+    try std.testing.expectEqual(8, blocks.len);
     try std.testing.expectEqual(6, blocks[6].name);
     try std.testing.expect(blocks[1].df.isSet(1));
     try std.testing.expect(blocks[2].df.isSet(7));
@@ -1598,12 +1657,9 @@ test "dominance frontiers" {
     try std.testing.expect(blocks[6].df.isSet(7));
     try std.testing.expect(blocks[7].df.isSet(1));
 
+    // All remaining blocks should be reachable since unreachable ones were swept
     for (0..blocks.len) |i| {
-        if (i == 8) {
-            try std.testing.expect(!blocks[i].reachable);
-        } else {
-            try std.testing.expect(blocks[i].reachable);
-        }
+        try std.testing.expect(blocks[i].reachable);
     }
     try std.testing.expectEqual(0, blocks[0].df.count());
 }
