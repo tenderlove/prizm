@@ -95,7 +95,6 @@ pub const CFG = struct {
         defer iter.deinit();
 
         while (try iter.next()) |bb| {
-            bb.reachable = true;
             try bb.fillVarSets();
         }
     }
@@ -273,7 +272,7 @@ pub const CFG = struct {
     // Analyze the CFG.
     pub fn analyze(self: *CFG) !void {
         for (self.blocks) |block| {
-            block.reachable = false;
+            assert(block.reachable);
             try block.resetSets(self.scope.nextOpndId(), self.arena.allocator());
         }
 
@@ -302,7 +301,7 @@ pub const CFG = struct {
         defer seen_opnd.deinit(allocator);
 
         for (self.blocks) |block| {
-            if (!block.reachable) continue;
+            assert(block.reachable);
 
             var iter = block.instructionIter();
             while (iter.next()) |insn| {
@@ -338,13 +337,13 @@ pub const CFG = struct {
         // live between basic blocks.
         // Engineering a Compiler: Figure 9.11
         for (all_blocks) |block| {
-            if (block.reachable) {
-                // Upward exposed variables must cross between BBs
-                globals.setUnion(block.upward_exposed_set);
-                var iter = block.killed_set.iterator(.{});
-                while (iter.next()) |operand_num| {
-                    block_set.set(operand_num, block.name);
-                }
+            assert(block.reachable);
+
+            // Upward exposed variables must cross between BBs
+            globals.setUnion(block.upward_exposed_set);
+            var iter = block.killed_set.iterator(.{});
+            while (iter.next()) |operand_num| {
+                block_set.set(operand_num, block.name);
             }
         }
 
