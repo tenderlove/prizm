@@ -177,11 +177,6 @@ pub const Scope = struct {
         } });
     }
 
-    pub fn pushGetLocal(self: *Scope, in: *ir.Operand) !*ir.Operand {
-        const outreg = try self.newTemp();
-        return try self.pushInsn(.{ .getlocal = .{ .out = outreg, .in = in } });
-    }
-
     pub fn pushGetself(self: *Scope) !*ir.Operand {
         const outreg = try self.newTemp();
         return try self.pushInsn(.{ .getself = .{ .out = outreg } });

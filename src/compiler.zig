@@ -420,10 +420,6 @@ pub const Compiler = struct {
         return try self.scope.?.pushCall(out, recv, name, params);
     }
 
-    fn pushGetLocal(self: *Compiler, in: *ir.Operand) !*ir.Operand {
-        return try self.scope.?.pushGetLocal(in);
-    }
-
     fn pushGetself(self: *Compiler) !*ir.Operand {
         return try self.scope.?.pushGetself();
     }

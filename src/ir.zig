@@ -195,7 +195,6 @@ pub const Operand = union(OperandType) {
 pub const InstructionName = enum {
     call,
     define_method,
-    getlocal,
     getself,
     jump,
     jumpif,
@@ -239,15 +238,6 @@ pub const Instruction = union(InstructionName) {
         pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
             if (old == self.name) self.name = new;
             if (old == self.func) self.func = new;
-        }
-    },
-
-    getlocal: struct {
-        const Self = @This();
-        out: *Operand,
-        in: *Operand,
-        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
-            if (old == self.in) self.in = new;
         }
     },
 
