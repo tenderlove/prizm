@@ -3,6 +3,7 @@ const std = @import("std");
 const cfg = @import("cfg.zig");
 const Op = ir.Operand;
 const BasicBlock = cfg.BasicBlock;
+const BitMap = std.DynamicBitSetUnmanaged;
 
 pub const Scope = struct {
     tmp_id: u32 = 0,
@@ -297,15 +298,17 @@ pub const Scope = struct {
     }
 
     pub fn sweepUnusedInstructions(self: *Scope, alloc: std.mem.Allocator, live_blocks: []const *cfg.BasicBlock) !void {
+        const last_insn: *ir.InstructionListNode = @fieldParentPtr("node", self.insns.last.?);
+
         // First, collect all instruction numbers that are alive
-        var alive_numbers = std.AutoHashMap(usize, void).init(alloc);
-        defer alive_numbers.deinit();
+        var alive_numbers = try BitMap.initEmpty(alloc, last_insn.number + 1);
+        defer alive_numbers.deinit(alloc);
 
         // Walk through all live basic blocks and mark their instructions as alive
         for (live_blocks) |block| {
             var iter = block.instructionIter();
             while (iter.next()) |insn| {
-                try alive_numbers.put(insn.number, {});
+                alive_numbers.set(insn.number);
             }
         }
 
@@ -316,10 +319,9 @@ pub const Scope = struct {
             const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
             
             // If this instruction number is not in the alive set, remove it
-            if (!alive_numbers.contains(insn_node.number)) {
+            if (!alive_numbers.isSet(insn_node.number)) {
                 self.insns.remove(insn);
-                // Note: We don't deinit the instruction here as it may still be referenced
-                // The caller should handle cleanup if needed
+                insn_node.data.deinit();
             }
             
             it = next_insn;
