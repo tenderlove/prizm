@@ -39,7 +39,7 @@ pub const CFG = struct {
     pub fn init(mem: std.mem.Allocator, arena: std.heap.ArenaAllocator, scope: *Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
         const cfg = try mem.create(CFG);
 
-        cfg.* = CFG {
+        cfg.* = CFG{
             .arena = arena,
             .mem = mem,
             .head = head,
@@ -64,8 +64,12 @@ pub const CFG = struct {
             while (self.work.pop()) |bb| {
                 if (!self.seen.contains(bb.name)) {
                     try self.seen.put(bb.name, bb);
-                    if (bb.jump_dest) |bb2| { try self.work.append(bb2); }
-                    if (bb.fall_through_dest) |bb1| { try self.work.append(bb1); }
+                    if (bb.jump_dest) |bb2| {
+                        try self.work.append(bb2);
+                    }
+                    if (bb.fall_through_dest) |bb1| {
+                        try self.work.append(bb1);
+                    }
                     return bb;
                 }
             }
@@ -100,7 +104,7 @@ pub const CFG = struct {
     }
 
     // Fill in dominance frontier sets on all BBs
-    fn fillDominanceFrontiers(_: *CFG, bbs: []?* BasicBlock) !void {
+    fn fillDominanceFrontiers(_: *CFG, bbs: []?*BasicBlock) !void {
         for (bbs) |maybebb| {
             if (maybebb) |bb| {
                 if (bb.entry) continue;
@@ -431,8 +435,8 @@ pub const CFG = struct {
         pub fn fillPhiParams(self: *Renamer, _: *BasicBlock, variable_source_bb: *BasicBlock) !void {
             var iter = variable_source_bb.instructionIter();
             while (iter.next()) |insn| {
-                switch(insn.data) {
-                    .putlabel => { }, // Skip putlabel
+                switch (insn.data) {
+                    .putlabel => {}, // Skip putlabel
                     .phi => |*p| {
                         const v = insn.data.getOut().?.getVar();
                         if (self.stackTop(v)) |op| {
@@ -440,7 +444,9 @@ pub const CFG = struct {
                         }
                     },
                     // Quit after we've passed phi's
-                    else => { return; }
+                    else => {
+                        return;
+                    },
                 }
             }
         }
@@ -451,8 +457,8 @@ pub const CFG = struct {
             defer pushed.deinit();
 
             while (iter.next()) |insn| {
-                switch(insn.data) {
-                    .putlabel => { }, // Skip putlabel
+                switch (insn.data) {
+                    .putlabel => {}, // Skip putlabel
                     .phi => |p| {
                         try pushed.append(p.out);
                         insn.data.setOut(try self.newName(p.out, bb, cfg.scope));
@@ -477,7 +483,7 @@ pub const CFG = struct {
                                 should_append = true;
                             }
                         }
-                    }
+                    },
                 }
             }
 
@@ -499,7 +505,7 @@ pub const CFG = struct {
             }
 
             // Pop any pushed variables
-            while(pushed.pop()) |op| {
+            while (pushed.pop()) |op| {
                 self.stackPop(op);
             }
         }
@@ -652,7 +658,7 @@ pub const CFG = struct {
             .renamed_variables_removed => {
                 try self.removePhi();
             },
-            .phi_removed => { },
+            .phi_removed => {},
         }
         return self.state;
     }
@@ -664,7 +670,7 @@ pub const CFG = struct {
     }
 
     pub fn build(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
-        var builder = CFGBuilder { .scope = scope };
+        var builder = CFGBuilder{ .scope = scope };
         return try builder.build(allocator, scope);
     }
 };
@@ -900,21 +906,23 @@ pub const BasicBlock = struct {
     }
 
     fn fallsThrough(self: *BasicBlock) bool {
-        return switch(self.finish.data) {
+        return switch (self.finish.data) {
             .jump, .leave => false,
-            else => true
+            else => true,
         };
     }
 
     pub fn hasPhiFor(self: *BasicBlock, opnd: *ir.Operand) bool {
         var iter = self.instructionIter();
         while (iter.next()) |insn| {
-            switch(insn.data) {
-                .putlabel => { }, // Skip putlabel
+            switch (insn.data) {
+                .putlabel => {}, // Skip putlabel
                 .phi => |p| {
                     if (p.out == opnd) return true;
                 },
-                else => { return false; }
+                else => {
+                    return false;
+                },
             }
         }
         return false;
@@ -923,8 +931,8 @@ pub const BasicBlock = struct {
     pub fn addPhi(self: *BasicBlock, scope: *Scope, opnd: *ir.Operand) !void {
         var iter = self.instructionIter();
         while (iter.next()) |insn| {
-            switch(insn.data) {
-                inline .phi, .putlabel => { }, // Skip phi and putlabel
+            switch (insn.data) {
+                inline .phi, .putlabel => {}, // Skip phi and putlabel
                 else => {
                     if (insn.node.prev) |prev| {
                         const phi_insn = try scope.insertPhi(@fieldParentPtr("node", prev), opnd);
@@ -935,7 +943,7 @@ pub const BasicBlock = struct {
                         unreachable;
                     }
                     return;
-                }
+                },
             }
         }
         unreachable;
@@ -953,7 +961,7 @@ pub const BasicBlock = struct {
         var count: u32 = 0;
         var iter = self.instructionIter();
 
-        while(iter.next()) |_| {
+        while (iter.next()) |_| {
             count += 1;
         }
 
@@ -1005,7 +1013,7 @@ pub const BasicBlock = struct {
     }
 };
 
-pub const CompileError = error {
+pub const CompileError = error{
     EmptyInstructionSequence,
 };
 
@@ -1014,11 +1022,7 @@ const CFGBuilder = struct {
     scope: *Scope,
 
     fn makeBlock(self: *CFGBuilder, mem: std.mem.Allocator, start: *ir.InstructionListNode, finish: *ir.InstructionListNode, entry: bool) !*BasicBlock {
-        const block = try BasicBlock.initBlock(mem,
-            self.block_name,
-            start,
-            finish,
-            entry);
+        const block = try BasicBlock.initBlock(mem, self.block_name, start, finish, entry);
 
         self.block_name += 1;
 
@@ -1237,7 +1241,7 @@ test "if statement should have 2 children blocks" {
 
     const block = cfg.head;
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.jumpunless,
     }, block);
     try std.testing.expectEqual(block.finish, block.start);
@@ -1245,7 +1249,7 @@ test "if statement should have 2 children blocks" {
     try std.testing.expectEqual(1, block.instructionCount());
 
     var child = block.fall_through_dest.?;
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.jump,
     }, child);
@@ -1261,7 +1265,7 @@ test "if statement should have 2 children blocks" {
     // Last block via fallthrough then jump
     const last_block = block.fall_through_dest.?.jump_dest.?;
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.putlabel,
         ir.Instruction.phi,
         ir.Instruction.leave,
@@ -1292,7 +1296,7 @@ test "killed operands" {
 
     const bb = (try iter.next()).?;
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
     }, bb);
 
@@ -1320,7 +1324,7 @@ test "killed operands de-duplicate" {
 
     const bb = (try iter.next()).?;
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.loadi,
     }, bb);
@@ -1364,21 +1368,21 @@ test "complex loop with if" {
     defer machine.deinit(allocator);
 
     const code =
-\\ def foo y, z
-\\   while y
-\\     if y < 3
-\\       y + 1
-\\     else
-\\       if y > 5
-\\         y + 1
-\\       else
-\\         z + 1
-\\       end
-\\     end
-\\   end
-\\   y
-\\ end
-;
+        \\ def foo y, z
+        \\   while y
+        \\     if y < 3
+        \\       y + 1
+        \\     else
+        \\       if y > 5
+        \\         y + 1
+        \\       else
+        \\         z + 1
+        \\       end
+        \\     end
+        \\   end
+        \\   y
+        \\ end
+    ;
     const scope = try compileScope(allocator, machine, code);
     defer scope.deinit();
 
@@ -1400,16 +1404,16 @@ test "live out passes through if statement" {
     defer machine.deinit(allocator);
 
     const code =
-\\ def foo y, z
-\\   x = z + 5
-\\   if y < 123
-\\     y = 1
-\\   else
-\\     y = 2
-\\   end
-\\   x + y
-\\ end
-;
+        \\ def foo y, z
+        \\   x = z + 5
+        \\   if y < 123
+        \\     y = 1
+        \\   else
+        \\     y = 2
+        \\   end
+        \\   x + y
+        \\ end
+    ;
     const scope = try compileScope(allocator, machine, code);
     defer scope.deinit();
 
@@ -1441,14 +1445,14 @@ test "jumps targets get predecessors" {
     defer machine.deinit(allocator);
 
     const code =
-\\ def foo y
-\\   if y < 3
-\\     y + 1
-\\   else
-\\     y + 4
-\\   end
-\\ end
-;
+        \\ def foo y
+        \\   if y < 3
+        \\     y + 1
+        \\   else
+        \\     y + 4
+        \\   end
+        \\ end
+    ;
     const scope = try compileScope(allocator, machine, code);
     defer scope.deinit();
 
@@ -1490,14 +1494,14 @@ test "blocks have dominators" {
     defer machine.deinit(allocator);
 
     const code =
-\\ def foo y
-\\   if y < 3
-\\     y + 1
-\\   else
-\\     y + 4
-\\   end
-\\ end
-;
+        \\ def foo y
+        \\   if y < 3
+        \\     y + 1
+        \\   else
+        \\     y + 4
+        \\   end
+        \\ end
+    ;
     const scope = try compileScope(allocator, machine, code);
     defer scope.deinit();
 
@@ -1547,18 +1551,18 @@ test "while loop dominators" {
     defer machine.deinit(allocator);
 
     const code =
-\\ a = 1
-\\ while a
-\\   a = a + 1
-\\   if a > 100
-\\     z = a - 1
-\\   else
-\\     z = a + 1
-\\   end
-\\   puts z
-\\ end
-\\ puts a
-;
+        \\ a = 1
+        \\ while a
+        \\   a = a + 1
+        \\   if a > 100
+        \\     z = a - 1
+        \\   else
+        \\     z = a + 1
+        \\   end
+        \\   puts z
+        \\ end
+        \\ puts a
+    ;
     const scope = try compileScope(allocator, machine, code);
     defer scope.deinit();
 
@@ -1580,11 +1584,11 @@ test "method definitions" {
     defer machine.deinit(mem);
 
     const code =
-\\ def foo
-\\   1234
-\\ end
-\\ foo
-;
+        \\ def foo
+        \\   1234
+        \\ end
+        \\ foo
+    ;
     const scope = try compileScope(mem, machine, code);
     defer scope.deinit();
 
@@ -1609,11 +1613,11 @@ test "dead code removal" {
     defer machine.deinit(mem);
 
     const code =
-\\ def foo
-\\   return 1234
-\\   puts 456
-\\ end
-;
+        \\ def foo
+        \\   return 1234
+        \\   puts 456
+        \\ end
+    ;
     const scope = try compileScope(mem, machine, code);
     defer scope.deinit();
 
@@ -1621,13 +1625,23 @@ test "dead code removal" {
     defer children.deinit();
     try std.testing.expectEqual(1, children.items.len);
 
+    const method_scope = children.items[0];
     // Get a CFG for the foo method
-    const cfg = try CFG.build(mem, children.items[0]);
+    try std.testing.expectEqual(6, method_scope.insnCount());
+
+    const cfg = try CFG.build(mem, method_scope);
     defer cfg.deinit();
 
     const blocks = cfg.blockList();
     // CFG.build now automatically sweeps unreachable blocks, so we should only have 1 reachable block
     try std.testing.expectEqual(1, blocks.len);
+
+    // Number all instructions
+    method_scope.numberAllInstructions();
+    // Manually sweep unused instructions
+    try method_scope.sweepUnusedInstructions(mem, blocks);
+
+    try std.testing.expectEqual(2, method_scope.insnCount());
 }
 
 test "dominance frontiers" {
@@ -1722,33 +1736,33 @@ test "rename" {
 
 fn complexExampleCFG() []const u8 {
     const code =
-\\ i = 1
-\\ while true
-\\   a = i
-\\   c = i + 3
-\\ 
-\\   if c > 5
-\\     b = 15
-\\     c = i + 5
-\\     d = 16
-\\   else
-\\     a = 789
-\\     d = 222
-\\ 
-\\     if c < 2
-\\       d = 111
-\\     else
-\\       c = 15
-\\     end
-\\ 
-\\     b = 888
-\\   end
-\\ 
-\\   y = a + b
-\\   z = c + d
-\\   i = i + 1
-\\ end
-;
+        \\ i = 1
+        \\ while true
+        \\   a = i
+        \\   c = i + 3
+        \\ 
+        \\   if c > 5
+        \\     b = 15
+        \\     c = i + 5
+        \\     d = 16
+        \\   else
+        \\     a = 789
+        \\     d = 222
+        \\ 
+        \\     if c < 2
+        \\       d = 111
+        \\     else
+        \\       c = 15
+        \\     end
+        \\ 
+        \\     b = 888
+        \\   end
+        \\ 
+        \\   y = a + b
+        \\   z = c + d
+        \\   i = i + 1
+        \\ end
+    ;
     return code;
 }
 

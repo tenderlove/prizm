@@ -76,6 +76,10 @@ pub const Scope = struct {
         return self.operands.items.len;
     }
 
+    pub fn insnCount(self: *Scope) usize {
+        return self.insns.len();
+    }
+
     pub fn getOperandById(self: Scope, id: usize) *ir.Operand {
         return self.operands.items[id];
     }
@@ -281,6 +285,47 @@ pub const Scope = struct {
         return children;
     }
 
+    pub fn numberAllInstructions(self: *Scope) void {
+        var counter: usize = 0;
+        var it = self.insns.first;
+        while (it) |insn| {
+            const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
+            insn_node.number = counter;
+            counter += 1;
+            it = insn.next;
+        }
+    }
+
+    pub fn sweepUnusedInstructions(self: *Scope, alloc: std.mem.Allocator, live_blocks: []const *cfg.BasicBlock) !void {
+        // First, collect all instruction numbers that are alive
+        var alive_numbers = std.AutoHashMap(usize, void).init(alloc);
+        defer alive_numbers.deinit();
+
+        // Walk through all live basic blocks and mark their instructions as alive
+        for (live_blocks) |block| {
+            var iter = block.instructionIter();
+            while (iter.next()) |insn| {
+                try alive_numbers.put(insn.number, {});
+            }
+        }
+
+        // Now walk through the scope's instruction list and remove dead instructions
+        var it = self.insns.first;
+        while (it) |insn| {
+            const next_insn = insn.next; // Save next before potentially removing current
+            const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
+            
+            // If this instruction number is not in the alive set, remove it
+            if (!alive_numbers.contains(insn_node.number)) {
+                self.insns.remove(insn);
+                // Note: We don't deinit the instruction here as it may still be referenced
+                // The caller should handle cleanup if needed
+            }
+            
+            it = next_insn;
+        }
+    }
+
     pub fn deinit(self: *Scope) void {
         var it = self.insns.first;
         while (it) |insn| {
@@ -294,3 +339,39 @@ pub const Scope = struct {
         self.allocator.destroy(self);
     }
 };
+
+test "number and sweep unused instructions" {
+    const alloc = std.testing.allocator;
+    
+    // Create a scope with some instructions
+    const scope = try Scope.init(alloc, 0, "test", null);
+    defer scope.deinit();
+    
+    // Add some instructions to the scope
+    _ = try scope.pushLoadi(null, 123);
+    _ = try scope.pushLoadi(null, 456);
+    _ = try scope.pushGetself();
+    
+    // Number all instructions
+    scope.numberAllInstructions();
+    
+    // Verify instructions were numbered correctly
+    try std.testing.expectEqual(3, scope.insnCount());
+    var it = scope.insns.first;
+    var expected_number: usize = 0;
+    while (it) |insn| {
+        const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
+        try std.testing.expectEqual(expected_number, insn_node.number);
+        expected_number += 1;
+        it = insn.next;
+    }
+    
+    // For testing, we'll verify the function doesn't crash with empty live blocks
+    const live_blocks = [_]*cfg.BasicBlock{};
+    
+    // Call sweep with no live blocks - this should remove all instructions
+    try scope.sweepUnusedInstructions(alloc, &live_blocks);
+    
+    // Count remaining instructions (should be 0 since no blocks were live)
+    try std.testing.expectEqual(0, scope.insnCount());
+}

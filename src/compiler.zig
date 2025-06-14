@@ -70,7 +70,6 @@ pub const Compiler = struct {
     fn compileDefNode(cc: *Compiler, node: *const c.pm_def_node_t, out: ?*Op, _: bool) !*ir.Operand {
         const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const scope_node = try prism.pmNewScopeNode(@ptrCast(node));
-        std.debug.print("compiling scope node\n", .{});
         const method_scope = try cc.compileScopeNode(&scope_node, out, false);
 
         return try cc.pushDefineMethod(method_name, method_scope);
