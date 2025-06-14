@@ -27,7 +27,7 @@ pub const Scope = struct {
     }
 
     pub fn maxId(self: *Scope) u32 {
-        const list = [_]u32 { self.tmp_id, self.local_id, self.param_id, self.label_id }; 
+        const list = [_]u32{ self.tmp_id, self.local_id, self.param_id, self.label_id };
         var max: u32 = 0;
         for (list) |item| {
             if (item > max) {
@@ -101,11 +101,7 @@ pub const Scope = struct {
     }
 
     pub fn newDefinition(self: *Scope, opnd: *ir.Operand, bb: *BasicBlock, variant: usize) !*ir.Operand {
-        const new = try ir.Operand.initRedef(self.arena.allocator(),
-            self.nextOpndId(),
-            variant,
-            opnd,
-            bb);
+        const new = try ir.Operand.initRedef(self.arena.allocator(), self.nextOpndId(), variant, opnd, bb);
         return try self.addOpnd(new);
     }
 
@@ -153,7 +149,7 @@ pub const Scope = struct {
             .jumpunless => unreachable,
             .setlocal => unreachable,
             .leave => unreachable,
-            inline else => |payload| payload.out
+            inline else => |payload| payload.out,
         };
     }
 
@@ -203,7 +199,7 @@ pub const Scope = struct {
     }
 
     pub fn pushLeave(self: *Scope, in: *ir.Operand) !void {
-        try self.pushVoidInsn(.{ .leave = .{ .in= in } });
+        try self.pushVoidInsn(.{ .leave = .{ .in = in } });
     }
 
     pub fn pushLoadi(self: *Scope, out: ?*Op, val: u64) !*ir.Operand {
@@ -211,7 +207,7 @@ pub const Scope = struct {
         return try self.pushInsn(.{ .loadi = .{
             .out = outreg,
             .val = try self.newImmediate(val),
-        }});
+        } });
     }
 
     pub fn pushLoadNil(self: *Scope, out: ?*Op) !*ir.Operand {
@@ -250,8 +246,8 @@ pub const Scope = struct {
     pub fn init(alloc: std.mem.Allocator, id: u32, name: []const u8, parent: ?*Scope) !*Scope {
         const scope = try alloc.create(Scope);
 
-        scope.* = Scope {
-            .insns = ir.InstructionList { },
+        scope.* = Scope{
+            .insns = ir.InstructionList{},
             .id = id,
             .name = name,
             .parent = parent,
@@ -263,6 +259,26 @@ pub const Scope = struct {
         };
 
         return scope;
+    }
+
+    pub fn childScopes(self: *Scope, alloc: std.mem.Allocator) !std.ArrayList(*Scope) {
+        var children = std.ArrayList(*Scope).init(alloc);
+
+        var it = self.insns.first;
+        while (it) |insn| {
+            const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
+            switch (insn_node.data) {
+                .define_method => |method| {
+                    // The func field is a scope operand containing the child scope
+                    const child_scope = method.func.scope.value;
+                    try children.append(child_scope);
+                },
+                else => {},
+            }
+            it = insn.next;
+        }
+
+        return children;
     }
 
     pub fn deinit(self: *Scope) void {

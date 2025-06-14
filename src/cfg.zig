@@ -1566,6 +1566,11 @@ test "method definitions" {
     const blocks = cfg.blockList();
 
     try std.testing.expectEqual(1, blocks.len);
+
+    const children = try scope.childScopes(mem);
+    defer children.deinit();
+
+    try std.testing.expectEqual(1, children.items.len);
 }
 
 test "dominance frontiers" {
