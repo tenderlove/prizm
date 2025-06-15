@@ -165,7 +165,7 @@ const IRPrinter = struct {
 
         switch (op.*) {
             .immediate => |p| try result.writer().print("{d}", .{p.value}),
-            inline .local, .param => |p| {
+            inline .local => |p| {
                 try result.appendSlice(p.source_name);
             },
             .string => |p| try result.appendSlice(p.value),
@@ -215,7 +215,7 @@ const IRPrinter = struct {
     fn printOpnd(op: *const ir.Operand, out: anytype) !void {
         switch (op.*) {
             .immediate => |p| try out.print("{d}", .{p.value}),
-            inline .local, .param => |p| {
+            inline .local => |p| {
                 try out.print("{s}", .{
                     p.source_name,
                 });
@@ -238,20 +238,25 @@ const IRPrinter = struct {
     }
 
     fn printInsnParams(insn: ir.Instruction, out: anytype) !void {
-        var opiter = insn.opIter();
-        var first = true;
+        switch (insn) {
+            .getparam => try out.print("({d})", .{ insn.getparam.index }),
+            else => {
+                var opiter = insn.opIter();
+                var first = true;
 
-        while (opiter.next()) |op| {
-            if (first) {
-                try out.print("(", .{});
-            } else {
-                try out.print(", ", .{});
+                while (opiter.next()) |op| {
+                    if (first) {
+                        try out.print("(", .{});
+                    } else {
+                        try out.print(", ", .{});
+                    }
+                    first = false;
+                    try printOpnd(op, out);
+                }
+                if (!first) {
+                    try out.print(")", .{});
+                }
             }
-            first = false;
-            try printOpnd(op, out);
-        }
-        if (!first) {
-            try out.print(")", .{});
         }
     }
 
@@ -294,9 +299,8 @@ const IRPrinter = struct {
         try work.append(scope);
 
         try out.print("t*: temporary variables\n", .{});
-        try out.print("l*: local variables\n", .{});
+        try out.print("v*: named variables\n", .{});
         try out.print("L*: label\n", .{});
-        try out.print("p*: parameter\n", .{});
         try out.print("\n", .{});
 
         while (work.pop()) |work_scope| {
@@ -429,7 +433,7 @@ const CFGPrinter = struct {
 
         // Print uninitialized variables
         if (blk.entry) {
-            var uninitialized = try blk.uninitializedSet(scope, scope.allocator);
+            var uninitialized = try blk.uninitializedSet(scope.allocator);
             defer uninitialized.deinit(scope.allocator);
             if (uninitialized.count() > 0) {
                 try printSet("Uninitialized: ", scope, &uninitialized, ctx);
@@ -549,7 +553,7 @@ fn countDigits(num: usize) u32 {
 
 fn outVarWidth(opnd: *ir.Operand) usize {
     return switch (opnd.*) {
-        inline .local, .param => |v| v.source_name.len,
+        inline .local => |v| v.source_name.len,
         .redef => |v| outVarWidth(v.orig) + countDigits(v.variant),
         .prime => |v| outVarWidth(v.orig) + 1,
         .string => |v| v.value.len,

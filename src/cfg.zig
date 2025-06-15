@@ -992,7 +992,7 @@ pub const BasicBlock = struct {
         }
     }
 
-    pub fn uninitializedSet(self: *BasicBlock, scope: *Scope, mem: std.mem.Allocator) !BitMap {
+    pub fn uninitializedSet(self: *BasicBlock, mem: std.mem.Allocator) !BitMap {
         if (!self.entry) return error.ArgumentError;
 
         var uninit = try self.killed_set.clone(mem);
@@ -1000,15 +1000,6 @@ pub const BasicBlock = struct {
         uninit.setIntersection(self.liveout_set);
         uninit.setUnion(self.upward_exposed_set);
 
-        var biti = uninit.iterator(.{});
-        while (biti.next()) |opnd_id| {
-            const op = scope.getOperandById(opnd_id);
-            // Remove parameters from the uninitialized set. They should
-            // be initialized by the caller
-            if (op.isParam()) {
-                uninit.unset(opnd_id);
-            }
-        }
         return uninit;
     }
 };
@@ -1217,7 +1208,7 @@ test "no uninitialized in ternary" {
     const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
-    var uninitialized = try cfg.head.uninitializedSet(scope, allocator);
+    var uninitialized = try cfg.head.uninitializedSet(allocator);
     defer uninitialized.deinit(allocator);
 
     try std.testing.expectEqual(0, uninitialized.count());
@@ -1242,11 +1233,11 @@ test "if statement should have 2 children blocks" {
     const block = cfg.head;
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.jumpunless,
     }, block);
-    try std.testing.expectEqual(block.finish, block.start);
     try std.testing.expect(block.fallsThrough());
-    try std.testing.expectEqual(1, block.instructionCount());
+    try std.testing.expectEqual(2, block.instructionCount());
 
     var child = block.fall_through_dest.?;
     try expectInstructionList(&[_]ir.InstructionName{

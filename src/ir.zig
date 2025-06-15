@@ -10,7 +10,6 @@ pub const OperandType = enum {
     immediate,
     label,
     local,
-    param,
     prime,
     scope,
     string,
@@ -28,7 +27,6 @@ pub const Operand = union(OperandType) {
         name: usize,
     },
     local: struct { id: usize, name: usize, source_name: []const u8 },
-    param: struct { id: usize, name: usize, source_name: []const u8 },
     prime: struct { id: usize, prime_id: usize, orig: *Operand },
     scope: struct {
         id: usize,
@@ -60,12 +58,6 @@ pub const Operand = union(OperandType) {
     pub fn initLocal(alloc: std.mem.Allocator, id: usize, name: anytype, source_name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
         opnd.* = .{ .local = .{ .id = id, .name = name, .source_name = source_name } };
-        return opnd;
-    }
-
-    pub fn initParam(alloc: std.mem.Allocator, id: usize, name: anytype, source_name: anytype) !*Operand {
-        const opnd = try alloc.create(Operand);
-        opnd.* = .{ .param = .{ .id = id, .name = name, .source_name = source_name } };
         return opnd;
     }
 
@@ -112,7 +104,7 @@ pub const Operand = union(OperandType) {
 
     pub fn getVar(self: *Operand) *Operand {
         return switch (self.*) {
-            .param, .temp, .local => self,
+            .temp, .local => self,
             .redef => |v| getVar(v.orig),
             .prime => |v| getVar(v.orig),
             inline else => unreachable,
@@ -135,14 +127,7 @@ pub const Operand = union(OperandType) {
 
     pub fn isVariable(self: Operand) bool {
         return switch (self) {
-            .param, .temp, .local, .redef, .prime => true,
-            inline else => false,
-        };
-    }
-
-    pub fn isParam(self: Operand) bool {
-        return switch (self) {
-            .param => true,
+            .temp, .local, .redef, .prime => true,
             inline else => false,
         };
     }
@@ -182,7 +167,6 @@ pub const Operand = union(OperandType) {
             .immediate => "I",
             .label => "L",
             .local => "l",
-            .param => "p",
             .prime => "P",
             .string => "s",
             .scope => "S",
@@ -196,6 +180,7 @@ pub const InstructionName = enum {
     call,
     define_method,
     getself,
+    getparam,
     jump,
     jumpif,
     jumpunless,
@@ -244,6 +229,15 @@ pub const Instruction = union(InstructionName) {
     getself: struct {
         const Self = @This();
         out: *Operand,
+        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
+            unreachable;
+        }
+    },
+
+    getparam: struct {
+        const Self = @This();
+        out: *Operand,
+        index: usize,
         pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
             unreachable;
         }

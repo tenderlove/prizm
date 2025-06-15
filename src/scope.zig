@@ -18,7 +18,6 @@ pub const Scope = struct {
     insns: ir.InstructionList,
     parent: ?*Scope,
     locals: std.StringHashMapUnmanaged(*ir.Operand),
-    params: std.StringHashMapUnmanaged(*ir.Operand),
     operands: std.ArrayList(*ir.Operand),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
@@ -49,21 +48,6 @@ pub const Scope = struct {
         }
     }
 
-    pub fn registerParamName(self: *Scope, name: []const u8) !*ir.Operand {
-        const info = self.params.get(name);
-        if (info) |v| {
-            return v;
-        } else {
-            const lname = try self.newParam(name);
-            try self.params.put(self.allocator, name, lname);
-            return lname;
-        }
-    }
-
-    pub fn getParamName(self: *Scope, name: []const u8) ?*ir.Operand {
-        return self.params.get(name);
-    }
-
     fn addOpnd(self: *Scope, opnd: *ir.Operand) !*ir.Operand {
         try self.operands.append(opnd);
         return opnd;
@@ -89,12 +73,6 @@ pub const Scope = struct {
         const name = self.local_id;
         self.local_id += 1;
         return try self.addOpnd(try ir.Operand.initLocal(self.arena.allocator(), self.nextOpndId(), name, source_name));
-    }
-
-    fn newParam(self: *Scope, source_name: []const u8) !*ir.Operand {
-        const name = self.param_id;
-        self.param_id += 1;
-        return try self.addOpnd(try ir.Operand.initParam(self.arena.allocator(), self.nextOpndId(), name, source_name));
     }
 
     fn newScope(self: *Scope, scope: *Scope) !*ir.Operand {
@@ -182,6 +160,10 @@ pub const Scope = struct {
         return try self.pushInsn(.{ .getself = .{ .out = outreg } });
     }
 
+    pub fn pushGetParam(self: *Scope, out: *ir.Operand, index: usize) !*ir.Operand {
+        return try self.pushInsn(.{ .getparam = .{ .out = out, .index = index } });
+    }
+
     pub fn pushJump(self: *Scope, label: *ir.Operand) !void {
         try self.pushVoidInsn(.{ .jump = .{ .label = label } });
     }
@@ -252,7 +234,6 @@ pub const Scope = struct {
             .name = name,
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(*ir.Operand){},
-            .params = std.StringHashMapUnmanaged(*ir.Operand){},
             .operands = std.ArrayList(*ir.Operand).init(alloc),
             .allocator = alloc,
             .arena = std.heap.ArenaAllocator.init(alloc),
@@ -336,7 +317,6 @@ pub const Scope = struct {
             @as(*ir.InstructionListNode, @fieldParentPtr("node", insn)).data.deinit();
         }
         self.locals.deinit(self.allocator);
-        self.params.deinit(self.allocator);
         self.operands.deinit();
         self.arena.deinit();
         self.allocator.destroy(self);

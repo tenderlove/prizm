@@ -35,6 +35,7 @@ pub const Compiler = struct {
             c.PM_LOCAL_VARIABLE_OPERATOR_WRITE_NODE => try cc.compileLocalVariableOperatorWriteNode(@ptrCast(node), op, popped),
             c.PM_LOCAL_VARIABLE_WRITE_NODE => try cc.compileLocalVariableWriteNode(@ptrCast(node), op, popped),
             c.PM_RETURN_NODE => try cc.compileReturnNode(@ptrCast(node), op, popped),
+            c.PM_REQUIRED_PARAMETER_NODE => try cc.compileRequiredParameterNode(@ptrCast(node), op, popped),
             c.PM_SCOPE_NODE => return error.NotImplementedError,
             c.PM_STATEMENTS_NODE => try cc.compileStatementsNode(@ptrCast(node), op, popped),
             c.PM_WHILE_NODE => try cc.compileWhileNode(@ptrCast(node), op, popped),
@@ -138,6 +139,9 @@ pub const Compiler = struct {
         const scope = try Scope.init(cc.allocator, cc.scope_ids, scope_name, cc.scope);
         cc.scope_ids += 1;
 
+        scope.local_storage = locals.size;
+        cc.scope = scope;
+
         if (parameters_node) |params| {
             requireds_list = &params.*.requireds;
             optionals_list = &params.*.optionals;
@@ -147,24 +151,12 @@ pub const Compiler = struct {
             if (requireds_list) |listptr| {
                 scope.param_size = listptr.*.size;
                 const list = listptr.*.nodes[0..scope.param_size];
-                for (list) |param| {
-                    switch(c.PM_NODE_TYPE(param)) {
-                        c.PM_REQUIRED_PARAMETER_NODE => {
-                            const cast: *const c.pm_required_parameter_node_t = @ptrCast(param);
-                            _ = try scope.registerParamName(try cc.vm.getString(cc.stringFromId(cast.*.name)));
-                        },
-                        else => {
-                            std.debug.print("unknown parameter type {s}\n", .{c.pm_node_type_to_str(param.*.type)});
-                            return error.NotImplementedError;
-                        }
-                    }
+                for (list, 0..) |param, i| {
+                    const opnd = (try cc.compileNode(@ptrCast(param), null, popped)).?;
+                    _ = try scope.pushGetParam(opnd, i);
                 }
             }
         }
-
-        scope.local_storage = locals.size;
-
-        cc.scope = scope;
 
         const last_op = if (node.*.body) |body|
             (try cc.compileNode(@ptrCast(body), out, popped)).?
@@ -269,12 +261,7 @@ pub const Compiler = struct {
 
     fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t, _: ?*Op, _: bool) !*Op {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
-        const param = cc.scope.?.getParamName(lvar_name);
-        if (param) |paramreg| {
-            return paramreg;
-        } else {
-            return try cc.scope.?.getLocalName(lvar_name);
-        }
+        return try cc.scope.?.getLocalName(lvar_name);
     }
 
     fn compileLocalVariableOperatorWriteNode(cc: *Compiler, node: *const c.pm_local_variable_operator_write_node_t, _: ?*Op, _: bool) !*ir.Operand {
@@ -327,6 +314,11 @@ pub const Compiler = struct {
             try cc.pushLeave(nil);
             return nil;
         }
+    }
+
+    fn compileRequiredParameterNode(cc: *Compiler, node: *const c.pm_required_parameter_node, _: ?*Op, _: bool) !*ir.Operand {
+        const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        return try cc.scope.?.getLocalName(lvar_name);
     }
 
     fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t, out: ?*Op, popped: bool) !?*ir.Operand {
@@ -655,7 +647,7 @@ test "compile def method 2 params" {
 
     const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func.scope.value;
     const method_insns = method_scope.insns;
-    try std.testing.expectEqual(2, method_insns.len());
+    try std.testing.expectEqual(4, method_insns.len());
     try std.testing.expectEqual(2, method_scope.param_size);
     try std.testing.expectEqual(2, method_scope.local_storage);
 }
@@ -694,13 +686,14 @@ test "method returns param" {
     const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func.scope.value;
 
     try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.getparam,
         ir.Instruction.leave,
     }, method_scope.insns);
 
-    const inop = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?)).data.leave.in;
+    const inop = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?)).data.leave.in;
     const inop_type: ir.OperandType = inop.*;
-    try std.testing.expectEqual(ir.OperandType.param, inop_type);
-    try std.testing.expectEqual(0, inop.param.name);
+    try std.testing.expectEqual(ir.OperandType.local, inop_type);
+    try std.testing.expectEqual(0, inop.local.name);
 }
 
 test "always true ternary" {
@@ -773,6 +766,7 @@ test "local ternary" {
     const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.scope.value;
 
     try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.getparam,
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
         ir.Instruction.jump,
@@ -783,8 +777,8 @@ test "local ternary" {
     }, method_scope.insns);
 
     // Make sure the jump instruction is testing the first parameter
-    const test_reg = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?)).data.jumpunless.in;
-    try std.testing.expectEqual(0, test_reg.param.name);
+    const test_reg = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?)).data.jumpunless.in;
+    try std.testing.expectEqual(0, test_reg.local.name);
 }
 
 test "popped if body" {
@@ -800,10 +794,32 @@ test "popped if body" {
     const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.scope.value;
 
     try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.getparam,
         ir.Instruction.jumpunless,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
         ir.Instruction.putlabel,
+        ir.Instruction.leave,
+    }, method_scope.insns);
+}
+
+test "simple function" {
+    const mem = std.testing.allocator;
+
+    // Create a new VM
+    const machine = try vm.init(mem);
+    defer machine.deinit(mem);
+
+    const scope = try compileString(mem, machine, "def foo(x); x; end");
+    defer scope.deinit();
+
+    const scopes = try scope.childScopes(mem);
+    defer scopes.deinit();
+
+    const method_scope = scopes.items[0];
+
+    try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.getparam,
         ir.Instruction.leave,
     }, method_scope.insns);
 }
@@ -821,6 +837,7 @@ test "while loop" {
     const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.scope.value;
 
     try expectInstructionList(&[_] ir.InstructionName {
+        ir.Instruction.getparam,
         ir.Instruction.putlabel,
         ir.Instruction.jumpunless,
         ir.Instruction.getself,
