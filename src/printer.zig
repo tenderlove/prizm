@@ -422,19 +422,19 @@ const CFGPrinter = struct {
         try ctx.out.printBlockHeader(scope, blk);
 
         // Print upward exposed variables
-        try printSet("UE", scope, &blk.upward_exposed_set, ctx);
+        try printSet("UE      ", scope, &blk.upward_exposed_set, ctx);
 
         // Print killed variables
-        try printSet("Killed", scope, &blk.killed_set, ctx);
+        try printSet("Killed  ", scope, &blk.killed_set, ctx);
 
         // Print live out variables
-        try printSet("LiveOut", scope, &blk.liveout_set, ctx);
+        try printSet("LiveOut ", scope, &blk.liveout_set, ctx);
 
         // Print live in variables
-        try printSet("LiveIn", scope, &blk.livein_set, ctx);
+        try printSet("LiveIn  ", scope, &blk.livein_set, ctx);
 
-        try printBlockSet("DOM", &blk.dom, ctx);
-        try printBlockSet("DF", &blk.df, ctx);
+        try printBlockSet("DOM     ", &blk.dom, ctx);
+        try printBlockSet("DF      ", &blk.df, ctx);
 
         if (blk.idom) |idom| {
             try ctx.out.printListItem("IDOM: BB{d}", .{idom});
