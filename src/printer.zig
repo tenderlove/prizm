@@ -243,7 +243,7 @@ const IRPrinter = struct {
         switch (insn) {
             .getparam => try out.print("({d})", .{ insn.getparam.index }),
             .loadi => {
-                try out.print("({d})", .{ insn.loadi.val.value });
+                try out.print("({d})", .{ insn.loadi.val });
             },
             else => {
                 var opiter = insn.opIter();

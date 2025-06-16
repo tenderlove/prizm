@@ -28,10 +28,6 @@ pub const Variable = struct {
     data: VariableData,
 };
 
-pub const Immediate = struct {
-    value: u64,
-};
-
 pub const OperandType = enum {
     variable,
     label,
@@ -308,7 +304,7 @@ pub const Instruction = union(InstructionName) {
     loadi: struct {
         const Self = @This();
         out: *Operand,
-        val: Immediate,
+        val: u64,
         pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
             unreachable;
         }

@@ -544,7 +544,7 @@ test "pushing instruction adds value" {
     try std.testing.expectEqual(1, scope.insns.len());
 
     const insn = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?));
-    try std.testing.expectEqual(123, insn.data.loadi.val.value);
+    try std.testing.expectEqual(123, insn.data.loadi.val);
 }
 
 test "compile local get w/ nil return" {
@@ -712,7 +712,7 @@ test "always true ternary" {
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(7, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val.value);
+    try std.testing.expectEqual(7, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val);
 }
 
 test "always false ternary" {
@@ -731,7 +731,7 @@ test "always false ternary" {
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val.value);
+    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val);
 }
 
 test "always nil ternary" {
@@ -750,7 +750,7 @@ test "always nil ternary" {
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val.value);
+    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val);
 }
 
 test "local ternary" {

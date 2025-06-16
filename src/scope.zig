@@ -187,7 +187,7 @@ pub const Scope = struct {
         const outreg = if (out) |o| o else try self.newTemp();
         return try self.pushInsn(.{ .loadi = .{
             .out = outreg,
-            .val = self.newImmediate(val),
+            .val = val,
         } });
     }
 
