@@ -4,7 +4,7 @@ const vm = @import("vm.zig");
 const ir = @import("ir.zig");
 const cfg = @import("cfg.zig");
 const BasicBlock = cfg.BasicBlock;
-const Op = ir.Operand;
+const Var = ir.Variable;
 const Scope = @import("scope.zig").Scope;
 
 const c = @cImport({
@@ -22,7 +22,7 @@ pub const Compiler = struct {
         return compileScopeNode(cc, node, null, false);
     }
 
-    pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t, op: ?*Op, popped: bool) error{NotImplementedError, OutOfMemory}!?*ir.Operand {
+    pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t, op: ?*Var, popped: bool) error{NotImplementedError, OutOfMemory}!?*ir.Variable {
         // std.debug.print("--> compiling type {s} {} op: {any}\n", .{c.pm_node_type_to_str(node.*.type), popped, op});
         const opnd = switch (node.*.type) {
             c.PM_BEGIN_NODE => try cc.compileBeginNode(@ptrCast(node), op, popped),
@@ -48,7 +48,7 @@ pub const Compiler = struct {
         return opnd;
     }
 
-    fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t, out: ?*Op, popped: bool) !?*ir.Operand {
+    fn compileRecv(cc: *Compiler, node: ?*const c.pm_node_t, out: ?*Var, popped: bool) !?*ir.Variable {
         if (node) |n| {
             return try cc.compileNode(n, out, popped);
         } else {
@@ -56,7 +56,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileBeginNode(cc: *Compiler, node: *const c.pm_begin_node_t, out: ?*Op, popped: bool) !?*ir.Operand {
+    fn compileBeginNode(cc: *Compiler, node: *const c.pm_begin_node_t, out: ?*Var, popped: bool) !?*ir.Variable {
         if (node.*.ensure_clause) |_| {
             return error.NotImplementedError;
         }
@@ -68,7 +68,7 @@ pub const Compiler = struct {
         return if (node.*.statements) |stmt| try cc.compileNode(@ptrCast(stmt), out, popped) else try cc.pushLoadNil(out);
     }
 
-    fn compileDefNode(cc: *Compiler, node: *const c.pm_def_node_t, out: ?*Op, _: bool) !*ir.Operand {
+    fn compileDefNode(cc: *Compiler, node: *const c.pm_def_node_t, out: ?*Var, _: bool) !*ir.Variable {
         const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const scope_node = try prism.pmNewScopeNode(@ptrCast(node));
         const method_scope = try cc.compileScopeNode(&scope_node, out, false);
@@ -76,11 +76,11 @@ pub const Compiler = struct {
         return try cc.pushDefineMethod(method_name, method_scope);
     }
 
-    fn compileCallNode(cc: *Compiler, node: *const c.pm_call_node_t, out: ?*Op, _: bool) !*Op {
+    fn compileCallNode(cc: *Compiler, node: *const c.pm_call_node_t, out: ?*Var, _: bool) !*Var {
         const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const recv_op = try cc.compileRecv(node.*.receiver, null, false);
 
-        var params = std.ArrayList(*Op).init(cc.scope.?.arena.allocator());
+        var params = std.ArrayList(*Var).init(cc.scope.?.arena.allocator());
 
         if (node.*.arguments) |argnode| {
             const arg_size = argnode.*.arguments.size;
@@ -96,7 +96,7 @@ pub const Compiler = struct {
         return try cc.pushCall(out, recv_op.?, name, params);
     }
 
-    fn compileElseNode(cc: *Compiler, node: *const c.pm_else_node_t, op: ?*Op, popped: bool) !?*ir.Operand {
+    fn compileElseNode(cc: *Compiler, node: *const c.pm_else_node_t, op: ?*Var, popped: bool) !?*ir.Variable {
         if (node.*.statements) |stmt| {
             return cc.compileNode(@ptrCast(stmt), op, popped);
         } else {
@@ -104,7 +104,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileScopeNode(cc: *Compiler, node: *const prism.pm_scope_node_t, out: ?*Op, popped: bool) !*Scope {
+    fn compileScopeNode(cc: *Compiler, node: *const prism.pm_scope_node_t, out: ?*Var, popped: bool) !*Scope {
         const locals = node.locals;
         var optionals_list: ?*const c.pm_node_list_t = null;
         var requireds_list: ?*const c.pm_node_list_t = null;
@@ -170,7 +170,7 @@ pub const Compiler = struct {
         return scope;
     }
 
-    fn compileIfNode(cc: *Compiler, node: *const c.pm_if_node_t, out: ?*Op, popped: bool) !?*ir.Operand {
+    fn compileIfNode(cc: *Compiler, node: *const c.pm_if_node_t, out: ?*Var, popped: bool) !?*ir.Variable {
         const then_label = cc.newLabel();
         // const else_label = cc.newLabel();
         const end_label = cc.newLabel();
@@ -222,7 +222,7 @@ pub const Compiler = struct {
         jump_unless
     };
 
-    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, label: ir.Label, jump_type: JumpType, out: ?*Op, popped: bool) !PredicateType {
+    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, label: ir.Label, jump_type: JumpType, out: ?*Var, popped: bool) !PredicateType {
         while (true) {
             switch (node.*.type) {
                 c.PM_CALL_NODE, c.PM_LOCAL_VARIABLE_READ_NODE => {
@@ -247,7 +247,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t, out: ?*Op, popped: bool) !?*ir.Operand {
+    fn compileIntegerNode(cc: *Compiler, node: *const c.pm_integer_node_t, out: ?*Var, popped: bool) !?*ir.Variable {
         if (node.*.value.values == null) {
             if (popped) {
                 return null;
@@ -259,17 +259,17 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t, _: ?*Op, _: bool) !*Op {
+    fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t, _: ?*Var, _: bool) !*Var {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         return try cc.scope.?.getLocalName(lvar_name);
     }
 
-    fn compileLocalVariableOperatorWriteNode(cc: *Compiler, node: *const c.pm_local_variable_operator_write_node_t, _: ?*Op, _: bool) !*ir.Operand {
+    fn compileLocalVariableOperatorWriteNode(cc: *Compiler, node: *const c.pm_local_variable_operator_write_node_t, _: ?*Var, _: bool) !*ir.Variable {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const recv = try cc.scope.?.getLocalName(lvar_name);
 
         const op = cc.stringFromId(node.*.binary_operator);
-        var params = std.ArrayList(*ir.Operand).init(cc.allocator);
+        var params = std.ArrayList(*ir.Variable).init(cc.allocator);
         try params.append((try cc.compileNode(node.*.value, null, false)).?);
 
         if (op.len == 1) {
@@ -283,7 +283,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t, _: ?*Op, _: bool) !*ir.Operand {
+    fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t, _: ?*Var, _: bool) !*ir.Variable {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         const name = try cc.scope.?.getLocalName(lvar_name);
         const out = try cc.compileNode(node.*.value, name, false);
@@ -294,7 +294,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t, _: ?*Op, _: bool) !*ir.Operand {
+    fn compileReturnNode(cc: *Compiler, node: *const c.pm_return_node_t, _: ?*Var, _: bool) !*ir.Variable {
         const arguments = node.*.arguments;
 
         if (arguments) |arg| {
@@ -316,17 +316,17 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileRequiredParameterNode(cc: *Compiler, node: *const c.pm_required_parameter_node, _: ?*Op, _: bool) !*ir.Operand {
+    fn compileRequiredParameterNode(cc: *Compiler, node: *const c.pm_required_parameter_node, _: ?*Var, _: bool) !*ir.Variable {
         const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
         return try cc.scope.?.getLocalName(lvar_name);
     }
 
-    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t, out: ?*Op, popped: bool) !?*ir.Operand {
+    fn compileStatementsNode(cc: *Compiler, node: *const c.pm_statements_node_t, out: ?*Var, popped: bool) !?*ir.Variable {
         const body = &node.*.body;
         const list = body.*.nodes[0..body.*.size];
 
         if (list.len > 0) {
-            var reg: ?*ir.Operand = null;
+            var reg: ?*ir.Variable = null;
 
             for (list, 0..list.len) |item, i| {
                 const last_item_p = i == list.len - 1;
@@ -354,7 +354,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn compileWhileNode(cc: *Compiler, node: *const c.pm_while_node_t, out: ?*Op, popped: bool) !?*ir.Operand {
+    fn compileWhileNode(cc: *Compiler, node: *const c.pm_while_node_t, out: ?*Var, popped: bool) !?*ir.Variable {
         const loop_entry = cc.newLabel();
         try cc.pushLabel(loop_entry);
 
@@ -400,19 +400,19 @@ pub const Compiler = struct {
         return self.scope.?.newLabel();
     }
 
-    fn newTemp(self: *Compiler) !*ir.Operand {
+    fn newTemp(self: *Compiler) !*ir.Variable {
         return try self.scope.?.newTemp();
     }
 
-    fn pushDefineMethod(self: *Compiler, name: []const u8, scope: *Scope) !*ir.Operand {
+    fn pushDefineMethod(self: *Compiler, name: []const u8, scope: *Scope) !*ir.Variable {
         return try self.scope.?.pushDefineMethod(name, scope);
     }
 
-    fn pushCall(self: *Compiler, out: ?*ir.Operand, recv: *ir.Operand, name: []const u8, params: std.ArrayList(*ir.Operand)) !*ir.Operand {
+    fn pushCall(self: *Compiler, out: ?*ir.Variable, recv: *ir.Variable, name: []const u8, params: std.ArrayList(*ir.Variable)) !*ir.Variable {
         return try self.scope.?.pushCall(out, recv, name, params);
     }
 
-    fn pushGetself(self: *Compiler) !*ir.Operand {
+    fn pushGetself(self: *Compiler) !*ir.Variable {
         return try self.scope.?.pushGetself();
     }
 
@@ -420,11 +420,11 @@ pub const Compiler = struct {
         try self.scope.?.pushJump(label);
     }
 
-    fn pushJumpIf(self: *Compiler, in: *ir.Operand, label: ir.Label) !void {
+    fn pushJumpIf(self: *Compiler, in: *ir.Variable, label: ir.Label) !void {
         return try self.scope.?.pushJumpIf(in, label);
     }
 
-    fn pushJumpUnless(self: *Compiler, in: *ir.Operand, label: ir.Label) !void {
+    fn pushJumpUnless(self: *Compiler, in: *ir.Variable, label: ir.Label) !void {
         return try self.scope.?.pushJumpUnless(in, label);
     }
 
@@ -432,23 +432,23 @@ pub const Compiler = struct {
         try self.scope.?.pushLabel(label);
     }
 
-    fn pushLeave(self: *Compiler, in: *ir.Operand) !void {
+    fn pushLeave(self: *Compiler, in: *ir.Variable) !void {
         return try self.scope.?.pushLeave(in);
     }
 
-    fn pushLoadi(self: *Compiler, out: ?*Op, val: u64) !*ir.Operand {
+    fn pushLoadi(self: *Compiler, out: ?*Var, val: u64) !*ir.Variable {
         return try self.scope.?.pushLoadi(out, val);
     }
 
-    fn pushLoadNil(self: *Compiler, out: ?*Op) !*ir.Operand {
+    fn pushLoadNil(self: *Compiler, out: ?*Var) !*ir.Variable {
         return try self.scope.?.pushLoadNil(out);
     }
 
-    fn pushMov(self: *Compiler, a: *ir.Operand, b: *ir.Operand) !*ir.Operand {
+    fn pushMov(self: *Compiler, a: *ir.Variable, b: *ir.Variable) !*ir.Variable {
         return try self.scope.?.pushMov(a, b);
     }
 
-    fn pushSetLocal(self: *Compiler, name: *ir.Operand, val: *ir.Operand) !void {
+    fn pushSetLocal(self: *Compiler, name: *ir.Variable, val: *ir.Variable) !void {
         return try self.scope.?.pushSetLocal(name, val);
     }
 

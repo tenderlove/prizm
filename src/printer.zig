@@ -159,7 +159,7 @@ const IRPrinter = struct {
         return result.toOwnedSlice();
     }
 
-    fn formatOpnd(alloc: std.mem.Allocator, op: *const ir.Operand) ![]u8 {
+    fn formatOpnd(alloc: std.mem.Allocator, op: *const ir.Variable) ![]u8 {
         var result = std.ArrayList(u8).init(alloc);
         defer result.deinit();
 
@@ -207,7 +207,7 @@ const IRPrinter = struct {
         }
     }
 
-    fn printOpnd(op: *const ir.Operand, out: anytype) !void {
+    fn printOpnd(op: *const ir.Variable, out: anytype) !void {
         switch (op.data) {
             .local => |p| try out.print("{s}", .{p.source_name}),
             .redef => |r| {
@@ -383,7 +383,7 @@ const CFGPrinter = struct {
                 }
                 first = false;
 
-                const op = scope.operands.items[opnd_id];
+                const op = scope.variables.items[opnd_id];
                 const opnd_str = try IRPrinter.formatOpnd(ctx.allocator, op);
                 defer ctx.allocator.free(opnd_str);
                 try buffer.appendSlice(opnd_str);
@@ -560,7 +560,7 @@ fn countDigits(num: usize) u32 {
     }
 }
 
-fn outVarWidth(opnd: *ir.Operand) usize {
+fn outVarWidth(opnd: *ir.Variable) usize {
     return switch (opnd.data) {
         .local => |l| l.source_name.len,
         .redef => |r| outVarWidth(r.orig) + countDigits(r.variant),

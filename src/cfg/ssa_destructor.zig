@@ -3,7 +3,7 @@ const cfg_zig = @import("../cfg.zig");
 const ir = @import("../ir.zig");
 const CFG = cfg_zig.CFG;
 const BasicBlock = cfg_zig.BasicBlock;
-const Op = ir.Operand;
+const Var = ir.Variable;
 const vm = @import("../vm.zig");
 const cmp = @import("../compiler.zig");
 const bitmatrix = @import("../utils/bitmatrix.zig");
@@ -19,8 +19,8 @@ pub const SSADestructor = struct {
     const ParallelCopy = struct {
         source_block: *BasicBlock,
         dest_block: *BasicBlock,
-        output: *Op,
-        input: *Op,
+        output: *Var,
+        input: *Var,
 
         fn cmpDest(_: void, a: ParallelCopy, b: ParallelCopy) bool {
             return a.dest_block.name < b.dest_block.name;
@@ -149,7 +149,7 @@ pub const SSADestructor = struct {
     pub fn renameAllVariables(self: *SSADestructor, cfg: *CFG) !void {
         // We need to map primes to new temp variables, so lets allocate
         // an array here then allocate new temps as we need them.
-        const prime_map: []*Op = try self.mem.alloc(*Op, cfg.scope.primes);
+        const prime_map: []*Var = try self.mem.alloc(*Var, cfg.scope.primes);
         defer self.mem.free(prime_map);
 
         for (0..cfg.scope.primes) |i| {
@@ -297,7 +297,7 @@ pub const SSADestructor = struct {
         }
     }
 
-    fn removePrimesAndAliases(block: *BasicBlock, prime_map: []*Op) void {
+    fn removePrimesAndAliases(block: *BasicBlock, prime_map: []*Var) void {
         var iter = block.instructionIter();
         while (iter.next()) |insn_node| {
             var insn = &insn_node.data;

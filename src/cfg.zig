@@ -1,7 +1,6 @@
 const std = @import("std");
 const ir = @import("ir.zig");
-const Operand = ir.Operand;
-const Op = ir.Operand;
+const Var = ir.Variable;
 const prism = @import("prism.zig");
 const vm = @import("vm.zig");
 const compiler = @import("compiler.zig");
@@ -53,7 +52,7 @@ pub const CFG = struct {
     }
 
     pub fn opndCount(self: @This()) usize {
-        return self.scope.opndCount();
+        return self.scope.varCount();
     }
 
     const DepthFirstIterator = struct {
@@ -277,7 +276,7 @@ pub const CFG = struct {
     pub fn analyze(self: *CFG) !void {
         for (self.blocks) |block| {
             assert(block.reachable);
-            try block.resetSets(self.scope.nextOpndId(), self.arena.allocator());
+            try block.resetSets(self.scope.nextVarId(), self.arena.allocator());
         }
 
         try self.fillVarSets();
@@ -295,7 +294,7 @@ pub const CFG = struct {
         return self.blocks.len;
     }
 
-    pub fn makeMov(self: *CFG, out: *Op, in: *Op) !*ir.InstructionListNode {
+    pub fn makeMov(self: *CFG, out: *Var, in: *Var) !*ir.InstructionListNode {
         return try self.scope.makeMov(out, in);
     }
 
@@ -370,7 +369,7 @@ pub const CFG = struct {
             // Get all blocks that define this variable
             const blocks = block_set.getColumn(operand_num);
 
-            const opnd = self.scope.getOperandById(operand_num);
+            const opnd = self.scope.getVariableById(operand_num);
 
             // Add each block to our worklist
             var biter = blocks.iterator(.{});
@@ -404,16 +403,16 @@ pub const CFG = struct {
 
     const Renamer = struct {
         counters: []u64,
-        stacks: []std.ArrayList(*Operand),
+        stacks: []std.ArrayList(*Var),
         seen: std.AutoHashMap(usize, usize),
 
         pub fn init(mem: std.mem.Allocator, global_count: usize) !Renamer {
             const counters: []u64 = try mem.alloc(u64, global_count);
             @memset(counters, 0);
-            var stacks: []std.ArrayList(*Operand) = try mem.alloc(std.ArrayList(*Operand), global_count);
+            var stacks: []std.ArrayList(*Var) = try mem.alloc(std.ArrayList(*Var), global_count);
 
             for (0..global_count) |i| {
-                stacks[i] = std.ArrayList(*Operand).init(mem);
+                stacks[i] = std.ArrayList(*Var).init(mem);
             }
 
             return .{
@@ -453,7 +452,7 @@ pub const CFG = struct {
 
         pub fn rename(self: *Renamer, cfg: *CFG, bb: *BasicBlock) !void {
             var iter = bb.instructionIter();
-            var pushed = std.ArrayList(*Operand).init(cfg.mem);
+            var pushed = std.ArrayList(*Var).init(cfg.mem);
             defer pushed.deinit();
 
             while (iter.next()) |insn| {
@@ -510,7 +509,7 @@ pub const CFG = struct {
             }
         }
 
-        fn stackPop(self: *Renamer, variable: *Operand) void {
+        fn stackPop(self: *Renamer, variable: *Var) void {
             if (self.seen.get(variable.id)) |idx| {
                 _ = self.stacks[idx].pop();
             } else {
@@ -518,7 +517,7 @@ pub const CFG = struct {
             }
         }
 
-        fn stackTop(self: *Renamer, variable: *const Operand) ?*Operand {
+        fn stackTop(self: *Renamer, variable: *const Var) ?*Var {
             if (self.seen.get(variable.id)) |idx| {
                 const stack = self.stacks[idx];
                 return stack.items[stack.items.len - 1];
@@ -527,7 +526,7 @@ pub const CFG = struct {
             }
         }
 
-        fn newName(self: *Renamer, variable: *Operand, bb: *BasicBlock, scope: *Scope) !*Operand {
+        fn newName(self: *Renamer, variable: *Var, bb: *BasicBlock, scope: *Scope) !*Var {
             const idx = try self.getStackIndex(variable);
             const i = self.counters[idx];
             self.counters[idx] = i + 1;
@@ -536,7 +535,7 @@ pub const CFG = struct {
             return new_opnd;
         }
 
-        fn getStackIndex(self: *Renamer, variable: *const Operand) !usize {
+        fn getStackIndex(self: *Renamer, variable: *const Var) !usize {
             if (self.seen.get(variable.id)) |idx| {
                 return idx;
             } else {
@@ -772,7 +771,7 @@ pub const BasicBlock = struct {
         return newlo;
     }
 
-    pub fn insertParallelCopy(self: *BasicBlock, scope: *Scope, node: *ir.InstructionListNode, dest: *Op, src: *Op, group: usize) !*ir.InstructionListNode {
+    pub fn insertParallelCopy(self: *BasicBlock, scope: *Scope, node: *ir.InstructionListNode, dest: *Var, src: *Var, group: usize) !*ir.InstructionListNode {
         const ret = try scope.insertParallelCopy(node, dest, src, self, group);
 
         if (node == self.finish) {
@@ -786,7 +785,7 @@ pub const BasicBlock = struct {
         return ret;
     }
 
-    pub fn appendParallelCopy(self: *BasicBlock, scope: *Scope, dest: *Op, src: *Op, group: usize) !*ir.InstructionListNode {
+    pub fn appendParallelCopy(self: *BasicBlock, scope: *Scope, dest: *Var, src: *Var, group: usize) !*ir.InstructionListNode {
         var node = self.finish;
 
         if (self.finish.data.isJump()) {
@@ -912,7 +911,7 @@ pub const BasicBlock = struct {
         };
     }
 
-    pub fn hasPhiFor(self: *BasicBlock, opnd: *ir.Operand) bool {
+    pub fn hasPhiFor(self: *BasicBlock, opnd: *Var) bool {
         var iter = self.instructionIter();
         while (iter.next()) |insn| {
             switch (insn.data) {
@@ -928,7 +927,7 @@ pub const BasicBlock = struct {
         return false;
     }
 
-    pub fn addPhi(self: *BasicBlock, scope: *Scope, opnd: *ir.Operand) !void {
+    pub fn addPhi(self: *BasicBlock, scope: *Scope, opnd: *Var) !void {
         var iter = self.instructionIter();
         while (iter.next()) |insn| {
             switch (insn.data) {
