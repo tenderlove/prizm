@@ -77,7 +77,7 @@ pub const SSADestructor = struct {
 
                             try predecessor_copies.append(.{
                                 .source_block = bb,
-                                .dest_block = cfg.blocks[param.data.variable.data.redef.defblock.name],
+                                .dest_block = cfg.blocks[param.data.redef.defblock.name],
                                 .output = prime_in,
                                 .input = param
                             });
@@ -281,7 +281,7 @@ pub const SSADestructor = struct {
         for (self.copy_groups.items) |pcopy| {
             const src = pcopy.data.pmov.in;
             const dst = pcopy.data.pmov.out;
-            matrix.set(src.data.variable.id, dst.data.variable.id);
+            matrix.set(src.id, dst.id);
             if (pcopy.data.pmov.group != current_group) {
                 try self.checkForCycles(cfg, matrix);
                 try self.serializeCopyGroup(cfg, start_of_group, current_group);
@@ -304,24 +304,24 @@ pub const SSADestructor = struct {
 
             if (insn.getOut()) |out| {
                 if (out.isPrime()) {
-                    const tmp = prime_map[out.data.variable.data.prime.prime_id];
+                    const tmp = prime_map[out.data.prime.prime_id];
                     tmp.setDefinitionBlock(out.getDefinitionBlock());
                     insn.setOut(tmp);
                 }
 
                 if (out.isRedef()) {
-                    insn.setOut(out.data.variable.data.redef.orig);
+                    insn.setOut(out.data.redef.orig);
                 }
             }
 
             var itr = insn.opIter();
             while (itr.next()) |op| {
                 if (op.isPrime()) {
-                    insn.replaceOpnd(op, prime_map[op.data.variable.data.prime.prime_id]);
+                    insn.replaceOpnd(op, prime_map[op.data.prime.prime_id]);
                 }
 
                 if (op.isRedef()) {
-                    insn.replaceOpnd(op, op.data.variable.data.redef.orig);
+                    insn.replaceOpnd(op, op.data.redef.orig);
                 }
             }
         }
@@ -418,7 +418,7 @@ fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
             const isolation_insn = i.data;
             try std.testing.expectEqual(ir.InstructionName.pmov, @as(ir.InstructionName, isolation_insn));
             // The input of the isolation copy should be the pre-primed phi input (the SSA name)
-            try std.testing.expectEqual(isolation_insn.pmov.out.data.variable.data.prime.orig, isolation_insn.pmov.in);
+            try std.testing.expectEqual(isolation_insn.pmov.out.data.prime.orig, isolation_insn.pmov.in);
             // The output of this isolation copy should be one of the inputs of the phi
             const phiinsn = phis[count];
             const found = for (phiinsn.phi.params.items) |input| {
@@ -470,7 +470,7 @@ fn expectIsolatedPhiOutput(phi: ir.Instruction, isolation_insn: ir.Instruction) 
     // The output of the phi should be the input of the isolation copy
     try std.testing.expectEqual(phi.getOut(), isolation_insn.pmov.in);
     // The output of the isolation copy should be the pre-primed phi output (the SSA name)
-    try std.testing.expectEqual(isolation_insn.pmov.in.data.variable.data.prime.orig, isolation_insn.pmov.out);
+    try std.testing.expectEqual(isolation_insn.pmov.in.data.prime.orig, isolation_insn.pmov.out);
     try std.testing.expect(isolation_insn.pmov.out.isVariable());
 }
 
