@@ -310,10 +310,10 @@ pub const CFG = struct {
             var iter = block.instructionIter();
             while (iter.next()) |insn| {
                 if (insn.data.outVar()) |v| {
-                    if (seen_opnd.isSet(v.getID())) {
+                    if (seen_opnd.isSet(v.data.variable.id)) {
                         return false;
                     }
-                    seen_opnd.set(v.getID());
+                    seen_opnd.set(v.data.variable.id);
                 }
             }
         }
@@ -468,7 +468,7 @@ pub const CFG = struct {
                         // Rename operands
                         var itr = insn.data.opIter();
                         while (itr.next()) |op| {
-                            if (cfg.globals.isSet(op.getID())) {
+                            if (op.isVariable() and cfg.globals.isSet(op.data.variable.id)) {
                                 insn.data.replaceOpnd(op, self.stackTop(op).?);
                                 should_append = true;
                             }
@@ -476,7 +476,7 @@ pub const CFG = struct {
 
                         // Rename output variable
                         if (insn.data.getOut()) |out| {
-                            if (cfg.globals.isSet(out.getID())) {
+                            if (cfg.globals.isSet(out.data.variable.id)) {
                                 try pushed.append(out);
                                 const newname = try self.newName(out, bb, cfg.scope);
                                 insn.data.setOut(newname);
@@ -511,7 +511,7 @@ pub const CFG = struct {
         }
 
         fn stackPop(self: *Renamer, variable: *Operand) void {
-            if (self.seen.get(variable.getID())) |idx| {
+            if (self.seen.get(variable.data.variable.id)) |idx| {
                 _ = self.stacks[idx].pop();
             } else {
                 unreachable;
@@ -519,7 +519,7 @@ pub const CFG = struct {
         }
 
         fn stackTop(self: *Renamer, variable: *const Operand) ?*Operand {
-            if (self.seen.get(variable.getID())) |idx| {
+            if (self.seen.get(variable.data.variable.id)) |idx| {
                 const stack = self.stacks[idx];
                 return stack.items[stack.items.len - 1];
             } else {
@@ -537,11 +537,11 @@ pub const CFG = struct {
         }
 
         fn getStackIndex(self: *Renamer, variable: *const Operand) !usize {
-            if (self.seen.get(variable.getID())) |idx| {
+            if (self.seen.get(variable.data.variable.id)) |idx| {
                 return idx;
             } else {
                 const idx = self.seen.count();
-                try self.seen.put(variable.getID(), idx);
+                try self.seen.put(variable.data.variable.id, idx);
                 return idx;
             }
         }
@@ -883,14 +883,14 @@ pub const BasicBlock = struct {
                 // (in other words it hasn't been defined in this BB), then add
                 // the operand to the "upward exposed" set.  This means the operand
                 // _must_ have been defined in a block that dominates this block.
-                if (op.isVariable() and !self.killed_set.isSet(op.getID())) {
-                    self.upward_exposed_set.set(op.getID());
+                if (op.isVariable() and !self.killed_set.isSet(op.data.variable.id)) {
+                    self.upward_exposed_set.set(op.data.variable.id);
                 }
             }
 
             if (insn.data.outVar()) |v| {
                 if (v.isVariable()) {
-                    self.killed_set.set(v.getID());
+                    self.killed_set.set(v.data.variable.id);
                 }
             }
         }
@@ -1424,7 +1424,7 @@ test "live out passes through if statement" {
 
     while (try iter.next()) |bb| {
         if (bb.fall_through_dest) |_| {
-            try std.testing.expect(bb.liveout_set.isSet(opnd.id));
+            try std.testing.expect(bb.liveout_set.isSet(opnd.data.variable.id));
         }
     }
 }

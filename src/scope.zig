@@ -76,11 +76,11 @@ pub const Scope = struct {
     }
 
     fn newScope(self: *Scope, scope: *Scope) !*ir.Operand {
-        return try self.addOpnd(try ir.Operand.initScope(self.arena.allocator(), self.nextOpndId(), scope));
+        return try self.addOpnd(try ir.Operand.initScope(self.arena.allocator(), scope));
     }
 
     fn newString(self: *Scope, name: []const u8) !*ir.Operand {
-        return try self.addOpnd(try ir.Operand.initString(self.arena.allocator(), self.nextOpndId(), name));
+        return try self.addOpnd(try ir.Operand.initString(self.arena.allocator(), name));
     }
 
     pub fn newDefinition(self: *Scope, opnd: *ir.Operand, bb: *BasicBlock, variant: usize) !*ir.Operand {
@@ -101,13 +101,13 @@ pub const Scope = struct {
     }
 
     fn newImmediate(self: *Scope, value: u64) !*ir.Operand {
-        return try self.addOpnd(try ir.Operand.initImmediate(self.arena.allocator(), self.nextOpndId(), value));
+        return try self.addOpnd(try ir.Operand.initImmediate(self.arena.allocator(), value));
     }
 
     pub fn newLabel(self: *Scope) !*ir.Operand {
         const name = self.label_id;
         self.label_id += 1;
-        return try self.addOpnd(try ir.Operand.initLabel(self.arena.allocator(), self.nextOpndId(), name));
+        return try self.addOpnd(try ir.Operand.initLabel(self.arena.allocator(), name));
     }
 
     fn makeInsn(self: *Scope, insn: ir.Instruction) !*ir.InstructionListNode {

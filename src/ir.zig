@@ -13,7 +13,7 @@ pub const VariableType = enum {
     prime,
 };
 
-pub const Variable = union(VariableType) {
+pub const VariableData = union(VariableType) {
     local: struct { name: usize, source_name: []const u8 },
     temp: struct {
         name: usize,
@@ -21,6 +21,11 @@ pub const Variable = union(VariableType) {
     },
     redef: struct { variant: usize, orig: *Operand, defblock: *BasicBlock },
     prime: struct { prime_id: usize, orig: *Operand },
+};
+
+pub const Variable = struct {
+    id: usize,
+    data: VariableData,
 };
 
 pub const OperandType = enum {
@@ -48,54 +53,53 @@ pub const OperandData = union(OperandType) {
 };
 
 pub const Operand = struct {
-    id: usize,
     data: OperandData,
 
-    pub fn initImmediate(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
+    pub fn initImmediate(alloc: std.mem.Allocator, value: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .id = id, .data = .{ .immediate = .{ .value = value } } };
+        opnd.* = .{ .data = .{ .immediate = .{ .value = value } } };
         return opnd;
     }
 
-    pub fn initLabel(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
+    pub fn initLabel(alloc: std.mem.Allocator, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .id = id, .data = .{ .label = .{ .name = name } } };
+        opnd.* = .{ .data = .{ .label = .{ .name = name } } };
         return opnd;
     }
 
     pub fn initLocal(alloc: std.mem.Allocator, id: usize, name: anytype, source_name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .id = id, .data = .{ .variable = .{ .local = .{ .name = name, .source_name = source_name } } } };
+        opnd.* = .{ .data = .{ .variable = .{ .id = id, .data = .{ .local = .{ .name = name, .source_name = source_name } } } } };
         return opnd;
     }
 
-    pub fn initScope(alloc: std.mem.Allocator, id: usize, scope: anytype) !*Operand {
+    pub fn initScope(alloc: std.mem.Allocator, scope: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .id = id, .data = .{ .scope = .{ .value = scope } } };
+        opnd.* = .{ .data = .{ .scope = .{ .value = scope } } };
         return opnd;
     }
 
     pub fn initRedef(alloc: std.mem.Allocator, id: usize, variant: usize, orig: *Operand, defblock: *BasicBlock) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .id = id, .data = .{ .variable = .{ .redef = .{ .variant = variant, .orig = orig, .defblock = defblock } } } };
+        opnd.* = .{ .data = .{ .variable = .{ .id = id, .data = .{ .redef = .{ .variant = variant, .orig = orig, .defblock = defblock } } } } };
         return opnd;
     }
 
     pub fn initPrime(alloc: std.mem.Allocator, id: usize, primeid: usize, orig: *Operand) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .id = id, .data = .{ .variable = .{ .prime = .{ .prime_id = primeid, .orig = orig } } } };
+        opnd.* = .{ .data = .{ .variable = .{ .id = id, .data = .{ .prime = .{ .prime_id = primeid, .orig = orig } } } } };
         return opnd;
     }
 
-    pub fn initString(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
+    pub fn initString(alloc: std.mem.Allocator, value: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .id = id, .data = .{ .string = .{ .value = value } } };
+        opnd.* = .{ .data = .{ .string = .{ .value = value } } };
         return opnd;
     }
 
     pub fn initTemp(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .id = id, .data = .{ .variable = .{ .temp = .{ .name = name } } } };
+        opnd.* = .{ .data = .{ .variable = .{ .id = id, .data = .{ .temp = .{ .name = name } } } } };
         return opnd;
     }
 
@@ -104,7 +108,7 @@ pub const Operand = struct {
             .immediate => unreachable,
             .string => unreachable,
             .scope => unreachable,
-            .variable => |v| switch (v) {
+            .variable => |v| switch (v.data) {
                 .redef => unreachable,
                 .prime => unreachable,
                 inline else => |payload| payload.name,
@@ -115,7 +119,7 @@ pub const Operand = struct {
 
     pub fn getVar(self: *Operand) *Operand {
         return switch (self.data) {
-            .variable => |v| switch (v) {
+            .variable => |v| switch (v.data) {
                 .temp, .local => self,
                 .redef => |r| getVar(r.orig),
                 .prime => |p| getVar(p.orig),
@@ -125,12 +129,15 @@ pub const Operand = struct {
     }
 
     pub fn getID(self: Operand) usize {
-        return self.id;
+        return switch (self.data) {
+            .variable => |v| v.id,
+            else => unreachable,
+        };
     }
 
     pub fn isTemp(self: Operand) bool {
         return switch (self.data) {
-            .variable => |v| switch (v) {
+            .variable => |v| switch (v.data) {
                 .temp => true,
                 else => false,
             },
@@ -147,7 +154,7 @@ pub const Operand = struct {
 
     pub fn isPrime(self: Operand) bool {
         return switch (self.data) {
-            .variable => |v| switch (v) {
+            .variable => |v| switch (v.data) {
                 .prime => true,
                 else => false,
             },
@@ -157,7 +164,7 @@ pub const Operand = struct {
 
     pub fn isRedef(self: Operand) bool {
         return switch (self.data) {
-            .variable => |v| switch (v) {
+            .variable => |v| switch (v.data) {
                 .redef => true,
                 else => false,
             },
@@ -167,7 +174,7 @@ pub const Operand = struct {
 
     pub fn getDefinitionBlock(self: Operand) *BasicBlock {
         return switch(self.data) {
-            .variable => |v| switch (v) {
+            .variable => |v| switch (v.data) {
                 .redef => |r| r.defblock,
                 .temp => |t| t.defblock.?,
                 .prime => |p| p.orig.getDefinitionBlock(),
@@ -179,7 +186,7 @@ pub const Operand = struct {
 
     pub fn setDefinitionBlock(self: *Operand, block: *BasicBlock) void {
         switch(self.data) {
-            .variable => |*v| switch (v.*) {
+            .variable => |*v| switch (v.data) {
                 .redef => |*r| r.defblock = block,
                 .temp => |*t| t.defblock = block,
                 else => {},
@@ -194,7 +201,7 @@ pub const Operand = struct {
             .label => "L",
             .string => "s",
             .scope => "S",
-            .variable => |v| switch (v) {
+            .variable => |v| switch (v.data) {
                 .local => "l",
                 .prime => "P",
                 .temp => "t",
@@ -597,12 +604,10 @@ pub const InstructionListNode = struct {
 
 test "can iterate on ops" {
     var out = Operand{
-        .id = 0,
-        .data = .{ .variable = .{ .temp = .{ .name = 0 } } },
+        .data = .{ .variable = .{ .id = 0, .data = .{ .temp = .{ .name = 0 } } } },
     };
     var in = Operand{
-        .id = 1,
-        .data = .{ .variable = .{ .temp = .{ .name = 1 } } },
+        .data = .{ .variable = .{ .id = 1, .data = .{ .temp = .{ .name = 1 } } } },
     };
     var insn = Instruction{
         .mov = .{
@@ -611,36 +616,31 @@ test "can iterate on ops" {
         },
     };
     var itr = insn.opIter();
-    var list = [_]usize{0};
-    var i: u32 = 0;
+    var count: u32 = 0;
     while (itr.next()) |op| {
-        list[i] = op.id;
-        i += 1;
+        if (op.isVariable()) {
+            try std.testing.expectEqual(1, op.getID());
+        }
+        count += 1;
     }
-    try std.testing.expectEqual(1, i);
-    try std.testing.expectEqual(1, list[0]);
+    try std.testing.expectEqual(1, count);
 }
 
 test "can iterate on ops with list" {
     var out = Operand{
-        .id = 0,
-        .data = .{ .variable = .{ .temp = .{ .name = 0 } } },
+        .data = .{ .variable = .{ .id = 0, .data = .{ .temp = .{ .name = 0 } } } },
     };
     var recv = Operand{
-        .id = 1,
-        .data = .{ .variable = .{ .temp = .{ .name = 1 } } },
+        .data = .{ .variable = .{ .id = 1, .data = .{ .temp = .{ .name = 1 } } } },
     };
     var name = Operand{
-        .id = 2,
         .data = .{ .string = .{ .value = "test_method" } },
     };
     const param1 = Operand{
-        .id = 3,
-        .data = .{ .variable = .{ .temp = .{ .name = 3 } } },
+        .data = .{ .variable = .{ .id = 3, .data = .{ .temp = .{ .name = 3 } } } },
     };
     const param2 = Operand{
-        .id = 4,
-        .data = .{ .variable = .{ .temp = .{ .name = 4 } } },
+        .data = .{ .variable = .{ .id = 4, .data = .{ .temp = .{ .name = 4 } } } },
     };
 
     var params = std.ArrayList(*Operand).init(std.testing.allocator);
@@ -658,15 +658,16 @@ test "can iterate on ops with list" {
         },
     };
     var itr = insn.opIter();
-    var list = [_]usize{ 0, 0, 0, 0 };
-    var i: u32 = 0;
+    const expected_ids = [_]usize{ 1, 3, 4 }; // recv, param1, param2 variable IDs (name is string)
+    var var_count: u32 = 0;
+    var total_count: u32 = 0;
     while (itr.next()) |op| {
-        list[i] = op.id;
-        i += 1;
+        if (op.isVariable()) {
+            try std.testing.expectEqual(expected_ids[var_count], op.getID());
+            var_count += 1;
+        }
+        total_count += 1;
     }
-    try std.testing.expectEqual(4, i);
-    try std.testing.expectEqual(1, list[0]);
-    try std.testing.expectEqual(2, list[1]);
-    try std.testing.expectEqual(3, list[2]);
-    try std.testing.expectEqual(4, list[3]);
+    try std.testing.expectEqual(4, total_count);
+    try std.testing.expectEqual(3, var_count);
 }
