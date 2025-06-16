@@ -1225,7 +1225,7 @@ test "if statement should have 2 children blocks" {
     defer scope.deinit();
 
     // Get the scope for the method
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.data.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func;
 
     const cfg = try buildCFG(allocator, method_scope);
     defer cfg.deinit();
@@ -1338,7 +1338,7 @@ test "upward exposed bits get set" {
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func.data.scope.value;
+    const method_scope = insn.data.define_method.func;
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
@@ -1381,7 +1381,7 @@ test "complex loop with if" {
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func.data.scope.value;
+    const method_scope = insn.data.define_method.func;
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
@@ -1412,7 +1412,7 @@ test "live out passes through if statement" {
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func.data.scope.value;
+    const method_scope = insn.data.define_method.func;
 
     const opnd = try method_scope.getLocalName("x");
 
@@ -1451,7 +1451,7 @@ test "jumps targets get predecessors" {
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func.data.scope.value;
+    const method_scope = insn.data.define_method.func;
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
@@ -1500,7 +1500,7 @@ test "blocks have dominators" {
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func.data.scope.value;
+    const method_scope = insn.data.define_method.func;
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();

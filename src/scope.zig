@@ -77,10 +77,6 @@ pub const Scope = struct {
         return try self.addOpnd(try ir.Operand.initLocal(self.arena.allocator(), self.nextOpndId(), name, source_name));
     }
 
-    fn newScope(self: *Scope, scope: *Scope) !*ir.Operand {
-        return try ir.Operand.initScope(self.arena.allocator(), scope);
-    }
-
     fn newString(self: *Scope, name: []const u8) !*ir.Operand {
         return try ir.Operand.initString(self.arena.allocator(), name);
     }
@@ -140,7 +136,7 @@ pub const Scope = struct {
         return try self.pushInsn(.{ .define_method = .{
             .out = outreg,
             .name = try self.newString(name),
-            .func = try self.newScope(scope),
+            .func = scope,
         } });
     }
 
@@ -250,7 +246,7 @@ pub const Scope = struct {
             switch (insn_node.data) {
                 .define_method => |method| {
                     // The func field is a scope operand containing the child scope
-                    const child_scope = method.func.data.scope.value;
+                    const child_scope = method.func;
                     try children.append(child_scope);
                 },
                 else => {},

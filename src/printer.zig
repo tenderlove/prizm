@@ -165,7 +165,6 @@ const IRPrinter = struct {
 
         switch (op.data) {
             .string => |p| try result.appendSlice(p.value),
-            .scope => |payload| try result.writer().print("{s}{d}", .{ op.shortName(), payload.value.id }),
             .variable => |v| switch (v.data) {
                 .local => |p| try result.appendSlice(p.source_name),
                 .redef => |r| {
@@ -214,7 +213,6 @@ const IRPrinter = struct {
     fn printOpnd(op: *const ir.Operand, out: anytype) !void {
         switch (op.data) {
             .string => |p| try out.print("{s}", .{p.value}),
-            .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.id }),
             .variable => |v| switch (v.data) {
                 .local => |p| try out.print("{s}", .{p.source_name}),
                 .redef => |r| {
@@ -235,6 +233,9 @@ const IRPrinter = struct {
 
     fn printInsnParams(insn: ir.Instruction, out: anytype) !void {
         switch (insn) {
+            .define_method => |i| {
+                try out.print("({s})", .{ i.name.data.string.value });
+            },
             .getparam => |i| try out.print("({d})", .{ i.index }),
             .putlabel => |i| try out.print("L{d}", .{ i.name.id }),
             .loadi => |i| try out.print("({d})", .{ i.val }),
@@ -341,7 +342,7 @@ const IRPrinter = struct {
                         try out.print("{s}{d}:\n", .{ insn.name.shortName(), insn.name.id });
                     },
                     .define_method => |insn| {
-                        try work.append(insn.func.data.scope.value);
+                        try work.append(insn.func);
                         try printInsn(unwrapped_node.data, digits, widest_insn + 1, out);
                         try out.print("\n", .{});
                     },
@@ -460,7 +461,7 @@ const CFGPrinter = struct {
         var iter = blk.instructionIter();
         while (iter.next()) |insn| {
             if (ir.InstructionName.define_method == @as(ir.InstructionName, insn.data)) {
-                try ctx.work.append(insn.data.define_method.func.data.scope.value);
+                try ctx.work.append(insn.data.define_method.func);
             }
             try IRPrinter.printInsn(insn.data, ctx.var_width, ctx.insn_width, ctx.out);
             try ctx.out.printLineBreak();
@@ -568,7 +569,6 @@ fn countDigits(num: usize) u32 {
 fn outVarWidth(opnd: *ir.Operand) usize {
     return switch (opnd.data) {
         .string => |v| v.value.len,
-        .scope => |v| countDigits(v.value.id) + 1,
         .variable => |v| switch (v.data) {
             .local => |l| l.source_name.len,
             .redef => |r| outVarWidth(r.orig) + countDigits(r.variant),

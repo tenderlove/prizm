@@ -38,15 +38,11 @@ pub const Label = struct {
 
 pub const OperandType = enum {
     variable,
-    scope,
     string,
 };
 
 pub const OperandData = union(OperandType) {
     variable: Variable,
-    scope: struct {
-        value: *Scope,
-    },
     string: struct {
         value: []const u8,
     },
@@ -64,12 +60,6 @@ pub const Operand = struct {
     pub fn initLocal(alloc: std.mem.Allocator, id: usize, name: anytype, source_name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
         opnd.* = .{ .data = .{ .variable = .{ .id = id, .data = .{ .local = .{ .name = name, .source_name = source_name } } } } };
-        return opnd;
-    }
-
-    pub fn initScope(alloc: std.mem.Allocator, scope: anytype) !*Operand {
-        const opnd = try alloc.create(Operand);
-        opnd.* = .{ .data = .{ .scope = .{ .value = scope } } };
         return opnd;
     }
 
@@ -100,7 +90,6 @@ pub const Operand = struct {
     pub fn number(self: Operand) usize {
         return switch (self.data) {
             .string => unreachable,
-            .scope => unreachable,
             .variable => |v| switch (v.data) {
                 .redef => unreachable,
                 .prime => unreachable,
@@ -190,7 +179,6 @@ pub const Operand = struct {
     pub fn shortName(self: Operand) []const u8 {
         return switch (self.data) {
             .string => "s",
-            .scope => "S",
             .variable => |v| switch (v.data) {
                 .local => "l",
                 .prime => "P",
@@ -244,10 +232,9 @@ pub const Instruction = union(InstructionName) {
         const Self = @This();
         out: *Operand,
         name: *Operand,
-        func: *Operand,
+        func: *Scope,
         pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
             if (old == self.name) self.name = new;
-            if (old == self.func) self.func = new;
         }
     },
 
@@ -580,7 +567,7 @@ pub const Instruction = union(InstructionName) {
         switch (self) {
             .call => |x| x.params.deinit(),
             .phi => |x| x.params.deinit(),
-            .define_method => |x| x.func.data.scope.value.deinit(),
+            .define_method => |x| x.func.deinit(),
             else => {},
         }
     }
