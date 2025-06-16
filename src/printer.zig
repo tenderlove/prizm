@@ -165,27 +165,30 @@ const IRPrinter = struct {
 
         switch (op.*) {
             .immediate => |p| try result.writer().print("{d}", .{p.value}),
-            inline .local => |p| {
-                try result.appendSlice(p.source_name);
-            },
             .string => |p| try result.appendSlice(p.value),
             .scope => |payload| try result.writer().print("{s}{d}", .{ op.shortName(), payload.value.id }),
-            .redef => |r| {
-                const orig_str = try formatOpnd(alloc, r.orig);
-                defer alloc.free(orig_str);
-                try result.appendSlice(orig_str);
-                const subscript = try formatIntAsSubscript(alloc, r.variant);
-                defer alloc.free(subscript);
-                try result.appendSlice(subscript);
-            },
-            .prime => |r| {
-                const orig_str = try formatOpnd(alloc, r.orig.redef.orig);
-                defer alloc.free(orig_str);
-                try result.appendSlice(orig_str);
-                try result.appendSlice("′");
-                const subscript = try formatIntAsSubscript(alloc, r.orig.redef.variant);
-                defer alloc.free(subscript);
-                try result.appendSlice(subscript);
+            .variable => |v| switch (v) {
+                .local => |p| try result.appendSlice(p.source_name),
+                .redef => |r| {
+                    const orig_str = try formatOpnd(alloc, r.orig);
+                    defer alloc.free(orig_str);
+                    try result.appendSlice(orig_str);
+                    const subscript = try formatIntAsSubscript(alloc, r.variant);
+                    defer alloc.free(subscript);
+                    try result.appendSlice(subscript);
+                },
+                .prime => |r| {
+                    const orig_str = try formatOpnd(alloc, r.orig.variable.redef.orig);
+                    defer alloc.free(orig_str);
+                    try result.appendSlice(orig_str);
+                    try result.appendSlice("′");
+                    const subscript = try formatIntAsSubscript(alloc, r.orig.variable.redef.variant);
+                    defer alloc.free(subscript);
+                    try result.appendSlice(subscript);
+                },
+                else => {
+                    try result.writer().print("{s}{d}", .{ op.shortName(), op.number() });
+                },
             },
             else => {
                 try result.writer().print("{s}{d}", .{ op.shortName(), op.number() });
@@ -215,21 +218,22 @@ const IRPrinter = struct {
     fn printOpnd(op: *const ir.Operand, out: anytype) !void {
         switch (op.*) {
             .immediate => |p| try out.print("{d}", .{p.value}),
-            inline .local => |p| {
-                try out.print("{s}", .{
-                    p.source_name,
-                });
-            },
             .string => |p| try out.print("{s}", .{p.value}),
             .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.id }),
-            .redef => |r| {
-                try printOpnd(r.orig, out);
-                try printIntAsSubscript(r.variant, out);
-            },
-            .prime => |r| {
-                try printOpnd(r.orig.redef.orig, out);
-                try out.print("′", .{});
-                try printIntAsSubscript(r.orig.redef.variant, out);
+            .variable => |v| switch (v) {
+                .local => |p| try out.print("{s}", .{p.source_name}),
+                .redef => |r| {
+                    try printOpnd(r.orig, out);
+                    try printIntAsSubscript(r.variant, out);
+                },
+                .prime => |r| {
+                    try printOpnd(r.orig.variable.redef.orig, out);
+                    try out.print("′", .{});
+                    try printIntAsSubscript(r.orig.variable.redef.variant, out);
+                },
+                else => {
+                    try out.print("{s}{d}", .{ op.shortName(), op.number() });
+                },
             },
             else => {
                 try out.print("{s}{d}", .{ op.shortName(), op.number() });
@@ -553,13 +557,16 @@ fn countDigits(num: usize) u32 {
 
 fn outVarWidth(opnd: *ir.Operand) usize {
     return switch (opnd.*) {
-        inline .local => |v| v.source_name.len,
-        .redef => |v| outVarWidth(v.orig) + countDigits(v.variant),
-        .prime => |v| outVarWidth(v.orig) + 1,
         .string => |v| v.value.len,
-        .scope => |v| countDigits(v.id) + 1,
+        .scope => |v| countDigits(v.value.id) + 1,
         .immediate => |v| countDigits(v.value),
-        inline else => |v| countDigits(v.name) + 1,
+        .variable => |v| switch (v) {
+            .local => |l| l.source_name.len,
+            .redef => |r| outVarWidth(r.orig) + countDigits(r.variant),
+            .prime => |p| outVarWidth(p.orig) + 1,
+            .temp => |t| countDigits(t.name) + 1,
+        },
+        inline else => |data| countDigits(data.name) + 1,
     };
 }
 

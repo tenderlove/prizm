@@ -1424,7 +1424,7 @@ test "live out passes through if statement" {
 
     while (try iter.next()) |bb| {
         if (bb.fall_through_dest) |_| {
-            try std.testing.expect(bb.liveout_set.isSet(opnd.local.id));
+            try std.testing.expect(bb.liveout_set.isSet(opnd.variable.local.id));
         }
     }
 }

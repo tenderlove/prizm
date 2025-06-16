@@ -6,42 +6,50 @@ const BasicBlock = cfg.BasicBlock;
 
 pub const InstructionList = std.DoublyLinkedList;
 
-pub const OperandType = enum {
-    immediate,
-    label,
+pub const VariableType = enum {
     local,
-    prime,
-    scope,
-    string,
     temp,
     redef,
+    prime,
 };
 
-pub const Operand = union(OperandType) {
-    immediate: struct {
-        id: usize,
-        value: u64,
-    },
-    label: struct {
-        id: usize,
-        name: usize,
-    },
-    local: struct { id: usize, name: usize, source_name: []const u8 },
-    prime: struct { id: usize, prime_id: usize, orig: *Operand },
-    scope: struct {
-        id: usize,
-        value: *Scope,
-    },
-    string: struct {
-        id: usize,
-        value: []const u8,
-    },
+pub const Variable = union(VariableType) {
+    local: struct { name: usize, source_name: []const u8 },
     temp: struct {
-        id: usize,
         name: usize,
         defblock: ?*BasicBlock = null,
     },
-    redef: struct { id: usize, variant: usize, orig: *Operand, defblock: *BasicBlock },
+    redef: struct { variant: usize, orig: *Operand, defblock: *BasicBlock },
+    prime: struct { prime_id: usize, orig: *Operand },
+};
+
+pub const OperandType = enum {
+    variable,
+    immediate,
+    label,
+    scope,
+    string,
+};
+
+pub const OperandData = union(OperandType) {
+    variable: Variable,
+    immediate: struct {
+        value: u64,
+    },
+    label: struct {
+        name: usize,
+    },
+    scope: struct {
+        value: *Scope,
+    },
+    string: struct {
+        value: []const u8,
+    },
+};
+
+pub const Operand = struct {
+    id: usize,
+    data: OperandData,
 
     pub fn initImmediate(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
@@ -57,7 +65,7 @@ pub const Operand = union(OperandType) {
 
     pub fn initLocal(alloc: std.mem.Allocator, id: usize, name: anytype, source_name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .local = .{ .id = id, .name = name, .source_name = source_name } };
+        opnd.* = .{ .variable = .{ .local = .{ .id = id, .name = name, .source_name = source_name } } };
         return opnd;
     }
 
@@ -69,13 +77,13 @@ pub const Operand = union(OperandType) {
 
     pub fn initRedef(alloc: std.mem.Allocator, id: usize, variant: usize, orig: *Operand, defblock: *BasicBlock) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .redef = .{ .id = id, .variant = variant, .orig = orig, .defblock = defblock } };
+        opnd.* = .{ .variable = .{ .redef = .{ .id = id, .variant = variant, .orig = orig, .defblock = defblock } } };
         return opnd;
     }
 
     pub fn initPrime(alloc: std.mem.Allocator, id: usize, primeid: usize, orig: *Operand) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .prime = .{ .id = id, .prime_id = primeid, .orig = orig } };
+        opnd.* = .{ .variable = .{ .prime = .{ .id = id, .prime_id = primeid, .orig = orig } } };
         return opnd;
     }
 
@@ -87,7 +95,7 @@ pub const Operand = union(OperandType) {
 
     pub fn initTemp(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .temp = .{ .id = id, .name = name } };
+        opnd.* = .{ .variable = .{ .temp = .{ .id = id, .name = name } } };
         return opnd;
     }
 
@@ -96,68 +104,91 @@ pub const Operand = union(OperandType) {
             .immediate => unreachable,
             .string => unreachable,
             .scope => unreachable,
-            .redef => unreachable,
-            .prime => unreachable,
+            .variable => |v| switch (v) {
+                .redef => unreachable,
+                .prime => unreachable,
+                inline else => |payload| payload.name,
+            },
             inline else => |payload| payload.name,
         };
     }
 
     pub fn getVar(self: *Operand) *Operand {
         return switch (self.*) {
-            .temp, .local => self,
-            .redef => |v| getVar(v.orig),
-            .prime => |v| getVar(v.orig),
+            .variable => |v| switch (v) {
+                .temp, .local => self,
+                .redef => |r| getVar(r.orig),
+                .prime => |p| getVar(p.orig),
+            },
             inline else => unreachable,
         };
     }
 
     pub fn getID(self: Operand) usize {
         return switch (self) {
+            .variable => |v| switch (v) {
+                inline else => |payload| payload.id,
+            },
             inline else => |payload| payload.id,
         };
     }
 
     pub fn isTemp(self: Operand) bool {
         return switch (self) {
-            .temp,
-            => true,
-            inline else => false,
+            .variable => |v| switch (v) {
+                .temp => true,
+                else => false,
+            },
+            else => false,
         };
     }
 
     pub fn isVariable(self: Operand) bool {
         return switch (self) {
-            .temp, .local, .redef, .prime => true,
-            inline else => false,
+            .variable => true,
+            else => false,
         };
     }
 
     pub fn isPrime(self: Operand) bool {
         return switch (self) {
-            .prime => true,
-            inline else => false,
+            .variable => |v| switch (v) {
+                .prime => true,
+                else => false,
+            },
+            else => false,
         };
     }
 
     pub fn isRedef(self: Operand) bool {
         return switch (self) {
-            .redef => true,
+            .variable => |v| switch (v) {
+                .redef => true,
+                else => false,
+            },
             else => false,
         };
     }
 
     pub fn getDefinitionBlock(self: Operand) *BasicBlock {
         return switch(self) {
-            .redef => |v| v.defblock,
-            .temp => |v| v.defblock.?,
-            .prime => |v| v.orig.getDefinitionBlock(),
-            else => { unreachable; }
+            .variable => |v| switch (v) {
+                .redef => |r| r.defblock,
+                .temp => |t| t.defblock.?,
+                .prime => |p| p.orig.getDefinitionBlock(),
+                else => unreachable,
+            },
+            else => unreachable,
         };
     }
 
     pub fn setDefinitionBlock(self: *Operand, block: *BasicBlock) void {
         switch(self.*) {
-            inline .redef, .temp => |*v| v.defblock = block,
+            .variable => |*v| switch (v.*) {
+                .redef => |*r| r.defblock = block,
+                .temp => |*t| t.defblock = block,
+                else => {},
+            },
             else => {}
         }
     }
@@ -166,12 +197,14 @@ pub const Operand = union(OperandType) {
         return switch (self) {
             .immediate => "I",
             .label => "L",
-            .local => "l",
-            .prime => "P",
             .string => "s",
             .scope => "S",
-            .temp => "t",
-            .redef => "r",
+            .variable => |v| switch (v) {
+                .local => "l",
+                .prime => "P",
+                .temp => "t",
+                .redef => "r",
+            },
         };
     }
 };
@@ -569,10 +602,10 @@ pub const InstructionListNode = struct {
 
 test "can iterate on ops" {
     var out = Operand{
-        .temp = .{ .id = 0, .name = 0 },
+        .variable = .{ .temp = .{ .id = 0, .name = 0 } },
     };
     var in = Operand{
-        .temp = .{ .id = 1, .name = 1 },
+        .variable = .{ .temp = .{ .id = 1, .name = 1 } },
     };
     var insn = Instruction{
         .mov = .{
@@ -584,7 +617,7 @@ test "can iterate on ops" {
     var list = [_]usize{0};
     var i: u32 = 0;
     while (itr.next()) |op| {
-        list[i] = op.temp.id;
+        list[i] = op.variable.temp.id;
         i += 1;
     }
     try std.testing.expectEqual(1, i);
@@ -593,19 +626,19 @@ test "can iterate on ops" {
 
 test "can iterate on ops with list" {
     var out = Operand{
-        .temp = .{ .id = 0, .name = 0 },
+        .variable = .{ .temp = .{ .id = 0, .name = 0 } },
     };
     var recv = Operand{
-        .temp = .{ .id = 1, .name = 1 },
+        .variable = .{ .temp = .{ .id = 1, .name = 1 } },
     };
     var name = Operand{
-        .temp = .{ .id = 2, .name = 2 },
+        .string = .{ .id = 2, .value = "test_method" },
     };
     const param1 = Operand{
-        .temp = .{ .id = 3, .name = 3 },
+        .variable = .{ .temp = .{ .id = 3, .name = 3 } },
     };
     const param2 = Operand{
-        .temp = .{ .id = 4, .name = 4 },
+        .variable = .{ .temp = .{ .id = 4, .name = 4 } },
     };
 
     var params = std.ArrayList(*Operand).init(std.testing.allocator);
@@ -626,7 +659,12 @@ test "can iterate on ops with list" {
     var list = [_]usize{ 0, 0, 0, 0 };
     var i: u32 = 0;
     while (itr.next()) |op| {
-        list[i] = op.temp.id;
+        const id = switch (op.*) {
+            .variable => |v| v.temp.id,
+            .string => |s| s.id,
+            else => unreachable,
+        };
+        list[i] = id;
         i += 1;
     }
     try std.testing.expectEqual(4, i);

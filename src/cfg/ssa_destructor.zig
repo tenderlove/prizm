@@ -77,7 +77,7 @@ pub const SSADestructor = struct {
 
                             try predecessor_copies.append(.{
                                 .source_block = bb,
-                                .dest_block = cfg.blocks[param.redef.defblock.name],
+                                .dest_block = cfg.blocks[param.variable.redef.defblock.name],
                                 .output = prime_in,
                                 .input = param
                             });
@@ -304,24 +304,24 @@ pub const SSADestructor = struct {
 
             if (insn.getOut()) |out| {
                 if (out.isPrime()) {
-                    const tmp = prime_map[out.prime.prime_id];
+                    const tmp = prime_map[out.variable.prime.prime_id];
                     tmp.setDefinitionBlock(out.getDefinitionBlock());
                     insn.setOut(tmp);
                 }
 
                 if (out.isRedef()) {
-                    insn.setOut(out.redef.orig);
+                    insn.setOut(out.variable.redef.orig);
                 }
             }
 
             var itr = insn.opIter();
             while (itr.next()) |op| {
                 if (op.isPrime()) {
-                    insn.replaceOpnd(op, prime_map[op.prime.prime_id]);
+                    insn.replaceOpnd(op, prime_map[op.variable.prime.prime_id]);
                 }
 
                 if (op.isRedef()) {
-                    insn.replaceOpnd(op, op.redef.orig);
+                    insn.replaceOpnd(op, op.variable.redef.orig);
                 }
             }
         }
@@ -418,7 +418,7 @@ fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
             const isolation_insn = i.data;
             try std.testing.expectEqual(ir.InstructionName.pmov, @as(ir.InstructionName, isolation_insn));
             // The input of the isolation copy should be the pre-primed phi input (the SSA name)
-            try std.testing.expectEqual(isolation_insn.pmov.out.prime.orig, isolation_insn.pmov.in);
+            try std.testing.expectEqual(isolation_insn.pmov.out.variable.prime.orig, isolation_insn.pmov.in);
             // The output of this isolation copy should be one of the inputs of the phi
             const phiinsn = phis[count];
             const found = for (phiinsn.phi.params.items) |input| {
@@ -470,8 +470,8 @@ fn expectIsolatedPhiOutput(phi: ir.Instruction, isolation_insn: ir.Instruction) 
     // The output of the phi should be the input of the isolation copy
     try std.testing.expectEqual(phi.getOut(), isolation_insn.pmov.in);
     // The output of the isolation copy should be the pre-primed phi output (the SSA name)
-    try std.testing.expectEqual(isolation_insn.pmov.in.prime.orig, isolation_insn.pmov.out);
-    try std.testing.expectEqual(ir.OperandType.redef, @as(ir.OperandType, isolation_insn.pmov.out.*));
+    try std.testing.expectEqual(isolation_insn.pmov.in.variable.prime.orig, isolation_insn.pmov.out);
+    try std.testing.expect(isolation_insn.pmov.out.isVariable());
 }
 
 test "inserting phi copies actually copies the right thing" {
@@ -569,14 +569,14 @@ test "destructor fixes all variables" {
             if (iter == block.finishInsn()) break;
 
             if (insn.data.outVar()) |ov| {
-                try std.testing.expect(ir.OperandType.redef != @as(ir.OperandType, ov.*));
-                try std.testing.expect(ir.OperandType.prime != @as(ir.OperandType, ov.*));
+                try std.testing.expect(!ov.isRedef());
+                try std.testing.expect(!ov.isPrime());
             }
 
             var opitr = insn.data.opIter();
             while (opitr.next()) |op| {
-                try std.testing.expect(ir.OperandType.redef != @as(ir.OperandType, op.*));
-                try std.testing.expect(ir.OperandType.prime != @as(ir.OperandType, op.*));
+                try std.testing.expect(!op.isRedef());
+                try std.testing.expect(!op.isPrime());
             }
 
             if (insn.node.next) |n| {
