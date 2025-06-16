@@ -4,6 +4,7 @@ const cfg = @import("cfg.zig");
 const Op = ir.Operand;
 const BasicBlock = cfg.BasicBlock;
 const BitMap = std.DynamicBitSetUnmanaged;
+const assert = @import("std").debug.assert;
 
 pub const Scope = struct {
     tmp_id: u32 = 0,
@@ -49,6 +50,7 @@ pub const Scope = struct {
     }
 
     fn addOpnd(self: *Scope, opnd: *ir.Operand) !*ir.Operand {
+        assert(opnd.isVariable());
         try self.operands.append(opnd);
         return opnd;
     }
@@ -76,11 +78,11 @@ pub const Scope = struct {
     }
 
     fn newScope(self: *Scope, scope: *Scope) !*ir.Operand {
-        return try self.addOpnd(try ir.Operand.initScope(self.arena.allocator(), scope));
+        return try ir.Operand.initScope(self.arena.allocator(), scope);
     }
 
     fn newString(self: *Scope, name: []const u8) !*ir.Operand {
-        return try self.addOpnd(try ir.Operand.initString(self.arena.allocator(), name));
+        return try ir.Operand.initString(self.arena.allocator(), name);
     }
 
     pub fn newDefinition(self: *Scope, opnd: *ir.Operand, bb: *BasicBlock, variant: usize) !*ir.Operand {
@@ -89,25 +91,22 @@ pub const Scope = struct {
     }
 
     pub fn newPrime(self: *Scope, op: *Op) !*Op {
-        const new = try Op.initPrime(self.arena.allocator(), self.nextOpndId(), self.primes, op);
-        self.primes += 1;
-        return try self.addOpnd(new);
+        defer self.primes += 1;
+        return try self.addOpnd(try Op.initPrime(self.arena.allocator(), self.nextOpndId(), self.primes, op));
     }
 
     pub fn newTemp(self: *Scope) !*ir.Operand {
-        const name = self.tmp_id;
-        self.tmp_id += 1;
-        return try self.addOpnd(try ir.Operand.initTemp(self.arena.allocator(), self.nextOpndId(), name));
+        defer self.tmp_id += 1;
+        return try self.addOpnd(try ir.Operand.initTemp(self.arena.allocator(), self.nextOpndId(), self.tmp_id));
     }
 
     fn newImmediate(self: *Scope, value: u64) !*ir.Operand {
-        return try self.addOpnd(try ir.Operand.initImmediate(self.arena.allocator(), value));
+        return try ir.Operand.initImmediate(self.arena.allocator(), value);
     }
 
     pub fn newLabel(self: *Scope) !*ir.Operand {
-        const name = self.label_id;
-        self.label_id += 1;
-        return try self.addOpnd(try ir.Operand.initLabel(self.arena.allocator(), name));
+        defer self.label_id += 1;
+        return try ir.Operand.initLabel(self.arena.allocator(), self.label_id);
     }
 
     fn makeInsn(self: *Scope, insn: ir.Instruction) !*ir.InstructionListNode {
