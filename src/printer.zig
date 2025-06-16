@@ -164,7 +164,6 @@ const IRPrinter = struct {
         defer result.deinit();
 
         switch (op.data) {
-            .string => |p| try result.appendSlice(p.value),
             .variable => |v| switch (v.data) {
                 .local => |p| try result.appendSlice(p.source_name),
                 .redef => |r| {
@@ -212,7 +211,6 @@ const IRPrinter = struct {
 
     fn printOpnd(op: *const ir.Operand, out: anytype) !void {
         switch (op.data) {
-            .string => |p| try out.print("{s}", .{p.value}),
             .variable => |v| switch (v.data) {
                 .local => |p| try out.print("{s}", .{p.source_name}),
                 .redef => |r| {
@@ -234,7 +232,7 @@ const IRPrinter = struct {
     fn printInsnParams(insn: ir.Instruction, out: anytype) !void {
         switch (insn) {
             .define_method => |i| {
-                try out.print("({s})", .{ i.name.data.string.value });
+                try out.print("({s})", .{ i.name });
             },
             .getparam => |i| try out.print("({d})", .{ i.index }),
             .putlabel => |i| try out.print("L{d}", .{ i.name.id }),
@@ -567,14 +565,11 @@ fn countDigits(num: usize) u32 {
 }
 
 fn outVarWidth(opnd: *ir.Operand) usize {
-    return switch (opnd.data) {
-        .string => |v| v.value.len,
-        .variable => |v| switch (v.data) {
-            .local => |l| l.source_name.len,
-            .redef => |r| outVarWidth(r.orig) + countDigits(r.variant),
-            .prime => |p| outVarWidth(p.orig) + 1,
-            .temp => |t| countDigits(t.name) + 1,
-        },
+    return switch (opnd.data.variable.data) {
+        .local => |l| l.source_name.len,
+        .redef => |r| outVarWidth(r.orig) + countDigits(r.variant),
+        .prime => |p| outVarWidth(p.orig) + 1,
+        .temp => |t| countDigits(t.name) + 1,
     };
 }
 

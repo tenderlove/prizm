@@ -38,14 +38,10 @@ pub const Label = struct {
 
 pub const OperandType = enum {
     variable,
-    string,
 };
 
 pub const OperandData = union(OperandType) {
     variable: Variable,
-    string: struct {
-        value: []const u8,
-    },
 };
 
 pub const Operand = struct {
@@ -75,11 +71,6 @@ pub const Operand = struct {
         return opnd;
     }
 
-    pub fn initString(alloc: std.mem.Allocator, value: anytype) !*Operand {
-        const opnd = try alloc.create(Operand);
-        opnd.* = .{ .data = .{ .string = .{ .value = value } } };
-        return opnd;
-    }
 
     pub fn initTemp(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
@@ -89,7 +80,6 @@ pub const Operand = struct {
 
     pub fn number(self: Operand) usize {
         return switch (self.data) {
-            .string => unreachable,
             .variable => |v| switch (v.data) {
                 .redef => unreachable,
                 .prime => unreachable,
@@ -105,86 +95,61 @@ pub const Operand = struct {
                 .redef => |r| getVar(r.orig),
                 .prime => |p| getVar(p.orig),
             },
-            inline else => unreachable,
         };
     }
 
     pub fn getID(self: Operand) usize {
-        return switch (self.data) {
-            .variable => |v| v.id,
-            else => unreachable,
-        };
+        return self.data.variable.id;
     }
 
     pub fn isTemp(self: Operand) bool {
-        return switch (self.data) {
-            .variable => |v| switch (v.data) {
-                .temp => true,
-                else => false,
-            },
+        return switch (self.data.variable.data) {
+            .temp => true,
             else => false,
         };
     }
 
-    pub fn isVariable(self: Operand) bool {
-        return switch (self.data) {
-            .variable => true,
-            else => false,
-        };
+    pub fn isVariable(_: Operand) bool {
+        return true;
     }
 
     pub fn isPrime(self: Operand) bool {
-        return switch (self.data) {
-            .variable => |v| switch (v.data) {
-                .prime => true,
-                else => false,
-            },
+        return switch (self.data.variable.data) {
+            .prime => true,
             else => false,
         };
     }
 
     pub fn isRedef(self: Operand) bool {
-        return switch (self.data) {
-            .variable => |v| switch (v.data) {
-                .redef => true,
-                else => false,
-            },
+        return switch (self.data.variable.data) {
+            .redef => true,
             else => false,
         };
     }
 
     pub fn getDefinitionBlock(self: Operand) *BasicBlock {
-        return switch(self.data) {
-            .variable => |v| switch (v.data) {
-                .redef => |r| r.defblock,
-                .temp => |t| t.defblock.?,
-                .prime => |p| p.orig.getDefinitionBlock(),
-                else => unreachable,
-            },
+        return switch(self.data.variable.data) {
+            .redef => |r| r.defblock,
+            .temp => |t| t.defblock.?,
+            .prime => |p| p.orig.getDefinitionBlock(),
             else => unreachable,
         };
     }
 
     pub fn setDefinitionBlock(self: *Operand, block: *BasicBlock) void {
-        switch(self.data) {
-            .variable => |*v| switch (v.data) {
-                .redef => |*r| r.defblock = block,
-                .temp => |*t| t.defblock = block,
-                else => {},
-            },
-            else => {}
+        switch(self.data.variable.data) {
+            .redef => |*r| r.defblock = block,
+            .temp => |*t| t.defblock = block,
+            else => {},
         }
     }
 
     pub fn shortName(self: Operand) []const u8 {
-        return switch (self.data) {
-            .string => "s",
-            .variable => |v| switch (v.data) {
-                .local => "l",
-                .prime => "P",
-                .temp => "t",
-                .redef => "r",
-            },
+        return switch (self.data.variable.data) {
+            .local => "l",
+            .prime => "P",
+            .temp => "t",
+            .redef => "r",
         };
     }
 };
@@ -213,7 +178,7 @@ pub const Instruction = union(InstructionName) {
 
         out: *Operand,
         recv: *Operand,
-        name: *Operand,
+        name: []const u8,
         params: std.ArrayList(*Operand),
 
         pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
@@ -231,10 +196,10 @@ pub const Instruction = union(InstructionName) {
     define_method: struct {
         const Self = @This();
         out: *Operand,
-        name: *Operand,
+        name: []const u8,
         func: *Scope,
-        pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
-            if (old == self.name) self.name = new;
+        pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
+            unreachable;
         }
     },
 
@@ -400,7 +365,7 @@ pub const Instruction = union(InstructionName) {
         var mask: u64 = 0;
 
         inline for (std.meta.fields(T), 0..) |field, field_index| {
-            if (!std.mem.eql(u8, field.name, "out")) {
+            if (field.type == (*Operand) and !std.mem.eql(u8, field.name, "out")) {
                 mask |= (1 << field_index);
             }
         }
@@ -445,11 +410,11 @@ pub const Instruction = union(InstructionName) {
         }
 
         pub fn next(self: *OpIter) ?*const Operand {
-            if (self.item_fields > 0) {
-                while ((self.item_fields & 0x1) != 0x1) {
+            if (self.item_fields > 0 or self.array_fields > 0) {
+                while ((self.item_fields & 0x1) != 0x1 and (self.array_fields & 0x1) != 0x1) {
                     self.advance();
                 }
-                if (self.item_fields & 0x1 == 0x1 and self.array_fields & 0x1 == 0x1) {
+                if (self.array_fields & 0x1 == 0x1) {
                     const item_idx = self.item_index;
                     const ary_idx = self.array_index;
                     const list = self.insn.nth_union_list(item_idx).?;
@@ -460,7 +425,7 @@ pub const Instruction = union(InstructionName) {
                     } else {
                         return list.items[ary_idx];
                     }
-                } else {
+                } else if (self.item_fields & 0x1 == 0x1) {
                     const idx = self.item_index;
                     self.advance();
                     return self.insn.nth_union_field(idx);
@@ -610,9 +575,6 @@ test "can iterate on ops with list" {
     var recv = Operand{
         .data = .{ .variable = .{ .id = 1, .data = .{ .temp = .{ .name = 1 } } } },
     };
-    var name = Operand{
-        .data = .{ .string = .{ .value = "test_method" } },
-    };
     const param1 = Operand{
         .data = .{ .variable = .{ .id = 3, .data = .{ .temp = .{ .name = 3 } } } },
     };
@@ -630,12 +592,12 @@ test "can iterate on ops with list" {
         .call = .{
             .out = &out,
             .recv = &recv,
-            .name = &name,
+            .name = "test_method",
             .params = params,
         },
     };
     var itr = insn.opIter();
-    const expected_ids = [_]usize{ 1, 3, 4 }; // recv, param1, param2 variable IDs (name is string)
+    const expected_ids = [_]usize{ 1, 3, 4 }; // recv, param1, param2 variable IDs (name is now []const u8)
     var var_count: u32 = 0;
     var total_count: u32 = 0;
     while (itr.next()) |op| {
@@ -645,6 +607,6 @@ test "can iterate on ops with list" {
         }
         total_count += 1;
     }
-    try std.testing.expectEqual(4, total_count);
+    try std.testing.expectEqual(3, total_count); // Now 3 instead of 4 since name is not an operand
     try std.testing.expectEqual(3, var_count);
 }

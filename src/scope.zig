@@ -77,9 +77,6 @@ pub const Scope = struct {
         return try self.addOpnd(try ir.Operand.initLocal(self.arena.allocator(), self.nextOpndId(), name, source_name));
     }
 
-    fn newString(self: *Scope, name: []const u8) !*ir.Operand {
-        return try ir.Operand.initString(self.arena.allocator(), name);
-    }
 
     pub fn newDefinition(self: *Scope, opnd: *ir.Operand, bb: *BasicBlock, variant: usize) !*ir.Operand {
         const new = try ir.Operand.initRedef(self.arena.allocator(), self.nextOpndId(), variant, opnd, bb);
@@ -135,7 +132,7 @@ pub const Scope = struct {
         const outreg = try self.newTemp();
         return try self.pushInsn(.{ .define_method = .{
             .out = outreg,
-            .name = try self.newString(name),
+            .name = name,
             .func = scope,
         } });
     }
@@ -145,7 +142,7 @@ pub const Scope = struct {
         return try self.pushInsn(.{ .call = .{
             .out = outreg,
             .recv = recv,
-            .name = try self.newString(name),
+            .name = name,
             .params = params,
         } });
     }
