@@ -251,7 +251,7 @@ pub const Scope = struct {
             switch (insn_node.data) {
                 .define_method => |method| {
                     // The func field is a scope operand containing the child scope
-                    const child_scope = method.func.scope.value;
+                    const child_scope = method.func.data.scope.value;
                     try children.append(child_scope);
                 },
                 else => {},

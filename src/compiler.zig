@@ -544,7 +544,7 @@ test "pushing instruction adds value" {
     try std.testing.expectEqual(1, scope.insns.len());
 
     const insn = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?));
-    try std.testing.expectEqual(123, insn.data.loadi.val.immediate.value);
+    try std.testing.expectEqual(123, insn.data.loadi.val.data.immediate.value);
 }
 
 test "compile local get w/ nil return" {
@@ -608,7 +608,7 @@ test "compile def method" {
     const insn = scope.insns.first;
     try expectInstructionType(ir.Instruction.define_method, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func.data.scope.value;
     const method_insns = method_scope.insns;
     try std.testing.expectEqual(2, method_insns.len());
     try std.testing.expectEqual(0, method_scope.param_size);
@@ -645,7 +645,7 @@ test "compile def method 2 params" {
     const insn = scope.insns.first;
     try expectInstructionType(ir.Instruction.define_method, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func.data.scope.value;
     const method_insns = method_scope.insns;
     try std.testing.expectEqual(4, method_insns.len());
     try std.testing.expectEqual(2, method_scope.param_size);
@@ -665,7 +665,7 @@ test "compile def method 2 params 3 locals" {
     const insn = scope.insns.first;
     try expectInstructionType(ir.Instruction.define_method, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func.data.scope.value;
     try std.testing.expectEqual(2, method_scope.param_size);
     try std.testing.expectEqual(5, method_scope.local_storage);
 }
@@ -683,7 +683,7 @@ test "method returns param" {
     const insn = scope.insns.first;
     try expectInstructionType(ir.Instruction.define_method, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func.data.scope.value;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.getparam,
@@ -691,9 +691,9 @@ test "method returns param" {
     }, method_scope.insns);
 
     const inop = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?)).data.leave.in;
-    const inop_type: ir.OperandType = inop.*;
+    const inop_type: ir.OperandType = inop.data;
     try std.testing.expectEqual(ir.OperandType.variable, inop_type);
-    try std.testing.expectEqual(0, inop.variable.local.name);
+    try std.testing.expectEqual(0, inop.data.variable.local.name);
 }
 
 test "always true ternary" {
@@ -712,7 +712,7 @@ test "always true ternary" {
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(7, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val.immediate.value);
+    try std.testing.expectEqual(7, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val.data.immediate.value);
 }
 
 test "always false ternary" {
@@ -731,7 +731,7 @@ test "always false ternary" {
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val.immediate.value);
+    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val.data.immediate.value);
 }
 
 test "always nil ternary" {
@@ -750,7 +750,7 @@ test "always nil ternary" {
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val.immediate.value);
+    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val.data.immediate.value);
 }
 
 test "local ternary" {
@@ -763,7 +763,7 @@ test "local ternary" {
     const scope = try compileString(allocator, machine, "def foo(x); x ? 7 : 8; end");
     defer scope.deinit();
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.data.scope.value;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.getparam,
@@ -778,7 +778,7 @@ test "local ternary" {
 
     // Make sure the jump instruction is testing the first parameter
     const test_reg = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?)).data.jumpunless.in;
-    try std.testing.expectEqual(0, test_reg.variable.local.name);
+    try std.testing.expectEqual(0, test_reg.data.variable.local.name);
 }
 
 test "popped if body" {
@@ -791,7 +791,7 @@ test "popped if body" {
     const scope = try compileString(allocator, machine, "def foo(x); x ? 7 : 8; x; end");
     defer scope.deinit();
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.data.scope.value;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.getparam,
@@ -834,7 +834,7 @@ test "while loop" {
     const scope = try compileString(allocator, machine, "def foo(x); while x; puts x; end; end");
     defer scope.deinit();
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.data.scope.value;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.getparam,
@@ -859,7 +859,7 @@ test "empty while loop" {
     const scope = try compileString(allocator, machine, "def foo; while true; end; end");
     defer scope.deinit();
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.data.scope.value;
 
     try expectInstructionList(&[_] ir.InstructionName {
         ir.Instruction.putlabel,

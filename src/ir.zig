@@ -53,54 +53,54 @@ pub const Operand = struct {
 
     pub fn initImmediate(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .immediate = .{ .id = id, .value = value } };
+        opnd.* = .{ .id = id, .data = .{ .immediate = .{ .value = value } } };
         return opnd;
     }
 
     pub fn initLabel(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .label = .{ .id = id, .name = name } };
+        opnd.* = .{ .id = id, .data = .{ .label = .{ .name = name } } };
         return opnd;
     }
 
     pub fn initLocal(alloc: std.mem.Allocator, id: usize, name: anytype, source_name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .variable = .{ .local = .{ .id = id, .name = name, .source_name = source_name } } };
+        opnd.* = .{ .id = id, .data = .{ .variable = .{ .local = .{ .name = name, .source_name = source_name } } } };
         return opnd;
     }
 
     pub fn initScope(alloc: std.mem.Allocator, id: usize, scope: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .scope = .{ .id = id, .value = scope } };
+        opnd.* = .{ .id = id, .data = .{ .scope = .{ .value = scope } } };
         return opnd;
     }
 
     pub fn initRedef(alloc: std.mem.Allocator, id: usize, variant: usize, orig: *Operand, defblock: *BasicBlock) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .variable = .{ .redef = .{ .id = id, .variant = variant, .orig = orig, .defblock = defblock } } };
+        opnd.* = .{ .id = id, .data = .{ .variable = .{ .redef = .{ .variant = variant, .orig = orig, .defblock = defblock } } } };
         return opnd;
     }
 
     pub fn initPrime(alloc: std.mem.Allocator, id: usize, primeid: usize, orig: *Operand) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .variable = .{ .prime = .{ .id = id, .prime_id = primeid, .orig = orig } } };
+        opnd.* = .{ .id = id, .data = .{ .variable = .{ .prime = .{ .prime_id = primeid, .orig = orig } } } };
         return opnd;
     }
 
     pub fn initString(alloc: std.mem.Allocator, id: usize, value: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .string = .{ .id = id, .value = value } };
+        opnd.* = .{ .id = id, .data = .{ .string = .{ .value = value } } };
         return opnd;
     }
 
     pub fn initTemp(alloc: std.mem.Allocator, id: usize, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
-        opnd.* = .{ .variable = .{ .temp = .{ .id = id, .name = name } } };
+        opnd.* = .{ .id = id, .data = .{ .variable = .{ .temp = .{ .name = name } } } };
         return opnd;
     }
 
     pub fn number(self: Operand) usize {
-        return switch (self) {
+        return switch (self.data) {
             .immediate => unreachable,
             .string => unreachable,
             .scope => unreachable,
@@ -114,7 +114,7 @@ pub const Operand = struct {
     }
 
     pub fn getVar(self: *Operand) *Operand {
-        return switch (self.*) {
+        return switch (self.data) {
             .variable => |v| switch (v) {
                 .temp, .local => self,
                 .redef => |r| getVar(r.orig),
@@ -125,16 +125,11 @@ pub const Operand = struct {
     }
 
     pub fn getID(self: Operand) usize {
-        return switch (self) {
-            .variable => |v| switch (v) {
-                inline else => |payload| payload.id,
-            },
-            inline else => |payload| payload.id,
-        };
+        return self.id;
     }
 
     pub fn isTemp(self: Operand) bool {
-        return switch (self) {
+        return switch (self.data) {
             .variable => |v| switch (v) {
                 .temp => true,
                 else => false,
@@ -144,14 +139,14 @@ pub const Operand = struct {
     }
 
     pub fn isVariable(self: Operand) bool {
-        return switch (self) {
+        return switch (self.data) {
             .variable => true,
             else => false,
         };
     }
 
     pub fn isPrime(self: Operand) bool {
-        return switch (self) {
+        return switch (self.data) {
             .variable => |v| switch (v) {
                 .prime => true,
                 else => false,
@@ -161,7 +156,7 @@ pub const Operand = struct {
     }
 
     pub fn isRedef(self: Operand) bool {
-        return switch (self) {
+        return switch (self.data) {
             .variable => |v| switch (v) {
                 .redef => true,
                 else => false,
@@ -171,7 +166,7 @@ pub const Operand = struct {
     }
 
     pub fn getDefinitionBlock(self: Operand) *BasicBlock {
-        return switch(self) {
+        return switch(self.data) {
             .variable => |v| switch (v) {
                 .redef => |r| r.defblock,
                 .temp => |t| t.defblock.?,
@@ -183,7 +178,7 @@ pub const Operand = struct {
     }
 
     pub fn setDefinitionBlock(self: *Operand, block: *BasicBlock) void {
-        switch(self.*) {
+        switch(self.data) {
             .variable => |*v| switch (v.*) {
                 .redef => |*r| r.defblock = block,
                 .temp => |*t| t.defblock = block,
@@ -194,7 +189,7 @@ pub const Operand = struct {
     }
 
     pub fn shortName(self: Operand) []const u8 {
-        return switch (self) {
+        return switch (self.data) {
             .immediate => "I",
             .label => "L",
             .string => "s",
@@ -588,7 +583,7 @@ pub const Instruction = union(InstructionName) {
         switch (self) {
             .call => |x| x.params.deinit(),
             .phi => |x| x.params.deinit(),
-            .define_method => |x| x.func.scope.value.deinit(),
+            .define_method => |x| x.func.data.scope.value.deinit(),
             else => {},
         }
     }
@@ -602,10 +597,12 @@ pub const InstructionListNode = struct {
 
 test "can iterate on ops" {
     var out = Operand{
-        .variable = .{ .temp = .{ .id = 0, .name = 0 } },
+        .id = 0,
+        .data = .{ .variable = .{ .temp = .{ .name = 0 } } },
     };
     var in = Operand{
-        .variable = .{ .temp = .{ .id = 1, .name = 1 } },
+        .id = 1,
+        .data = .{ .variable = .{ .temp = .{ .name = 1 } } },
     };
     var insn = Instruction{
         .mov = .{
@@ -617,7 +614,7 @@ test "can iterate on ops" {
     var list = [_]usize{0};
     var i: u32 = 0;
     while (itr.next()) |op| {
-        list[i] = op.variable.temp.id;
+        list[i] = op.id;
         i += 1;
     }
     try std.testing.expectEqual(1, i);
@@ -626,19 +623,24 @@ test "can iterate on ops" {
 
 test "can iterate on ops with list" {
     var out = Operand{
-        .variable = .{ .temp = .{ .id = 0, .name = 0 } },
+        .id = 0,
+        .data = .{ .variable = .{ .temp = .{ .name = 0 } } },
     };
     var recv = Operand{
-        .variable = .{ .temp = .{ .id = 1, .name = 1 } },
+        .id = 1,
+        .data = .{ .variable = .{ .temp = .{ .name = 1 } } },
     };
     var name = Operand{
-        .string = .{ .id = 2, .value = "test_method" },
+        .id = 2,
+        .data = .{ .string = .{ .value = "test_method" } },
     };
     const param1 = Operand{
-        .variable = .{ .temp = .{ .id = 3, .name = 3 } },
+        .id = 3,
+        .data = .{ .variable = .{ .temp = .{ .name = 3 } } },
     };
     const param2 = Operand{
-        .variable = .{ .temp = .{ .id = 4, .name = 4 } },
+        .id = 4,
+        .data = .{ .variable = .{ .temp = .{ .name = 4 } } },
     };
 
     var params = std.ArrayList(*Operand).init(std.testing.allocator);
@@ -659,12 +661,7 @@ test "can iterate on ops with list" {
     var list = [_]usize{ 0, 0, 0, 0 };
     var i: u32 = 0;
     while (itr.next()) |op| {
-        const id = switch (op.*) {
-            .variable => |v| v.temp.id,
-            .string => |s| s.id,
-            else => unreachable,
-        };
-        list[i] = id;
+        list[i] = op.id;
         i += 1;
     }
     try std.testing.expectEqual(4, i);

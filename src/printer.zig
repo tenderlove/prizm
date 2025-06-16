@@ -163,7 +163,7 @@ const IRPrinter = struct {
         var result = std.ArrayList(u8).init(alloc);
         defer result.deinit();
 
-        switch (op.*) {
+        switch (op.data) {
             .immediate => |p| try result.writer().print("{d}", .{p.value}),
             .string => |p| try result.appendSlice(p.value),
             .scope => |payload| try result.writer().print("{s}{d}", .{ op.shortName(), payload.value.id }),
@@ -178,11 +178,11 @@ const IRPrinter = struct {
                     try result.appendSlice(subscript);
                 },
                 .prime => |r| {
-                    const orig_str = try formatOpnd(alloc, r.orig.variable.redef.orig);
+                    const orig_str = try formatOpnd(alloc, r.orig.data.variable.redef.orig);
                     defer alloc.free(orig_str);
                     try result.appendSlice(orig_str);
                     try result.appendSlice("′");
-                    const subscript = try formatIntAsSubscript(alloc, r.orig.variable.redef.variant);
+                    const subscript = try formatIntAsSubscript(alloc, r.orig.data.variable.redef.variant);
                     defer alloc.free(subscript);
                     try result.appendSlice(subscript);
                 },
@@ -216,7 +216,7 @@ const IRPrinter = struct {
     }
 
     fn printOpnd(op: *const ir.Operand, out: anytype) !void {
-        switch (op.*) {
+        switch (op.data) {
             .immediate => |p| try out.print("{d}", .{p.value}),
             .string => |p| try out.print("{s}", .{p.value}),
             .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.id }),
@@ -227,9 +227,9 @@ const IRPrinter = struct {
                     try printIntAsSubscript(r.variant, out);
                 },
                 .prime => |r| {
-                    try printOpnd(r.orig.variable.redef.orig, out);
+                    try printOpnd(r.orig.data.variable.redef.orig, out);
                     try out.print("′", .{});
-                    try printIntAsSubscript(r.orig.variable.redef.variant, out);
+                    try printIntAsSubscript(r.orig.data.variable.redef.variant, out);
                 },
                 else => {
                     try out.print("{s}{d}", .{ op.shortName(), op.number() });
@@ -328,10 +328,10 @@ const IRPrinter = struct {
 
                 switch (unwrapped_node.data) {
                     .putlabel => |insn| {
-                        try out.print("{s}{d}:\n", .{ insn.name.shortName(), insn.name.label.name });
+                        try out.print("{s}{d}:\n", .{ insn.name.shortName(), insn.name.data.label.name });
                     },
                     .define_method => |insn| {
-                        try work.append(insn.func.scope.value);
+                        try work.append(insn.func.data.scope.value);
                         try printInsn(unwrapped_node.data, digits, widest_insn + 1, out);
                         try out.print("\n", .{});
                     },
@@ -450,7 +450,7 @@ const CFGPrinter = struct {
         var iter = blk.instructionIter();
         while (iter.next()) |insn| {
             if (ir.InstructionName.define_method == @as(ir.InstructionName, insn.data)) {
-                try ctx.work.append(insn.data.define_method.func.scope.value);
+                try ctx.work.append(insn.data.define_method.func.data.scope.value);
             }
             try IRPrinter.printInsn(insn.data, ctx.var_width, ctx.insn_width, ctx.out);
             try ctx.out.printLineBreak();
@@ -556,7 +556,7 @@ fn countDigits(num: usize) u32 {
 }
 
 fn outVarWidth(opnd: *ir.Operand) usize {
-    return switch (opnd.*) {
+    return switch (opnd.data) {
         .string => |v| v.value.len,
         .scope => |v| countDigits(v.value.id) + 1,
         .immediate => |v| countDigits(v.value),
@@ -566,7 +566,7 @@ fn outVarWidth(opnd: *ir.Operand) usize {
             .prime => |p| outVarWidth(p.orig) + 1,
             .temp => |t| countDigits(t.name) + 1,
         },
-        inline else => |data| countDigits(data.name) + 1,
+        .label => |data| countDigits(data.name) + 1,
     };
 }
 

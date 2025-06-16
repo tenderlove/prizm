@@ -1092,7 +1092,7 @@ const CFGBuilder = struct {
             // If this block has a label at the top, register it so that
             // we can link other blocks to this one
             if (current_block.hasLabeledEntry()) {
-                const label_name = current_block.start.data.putlabel.name.label.name;
+                const label_name = current_block.start.data.putlabel.name.data.label.name;
                 label_to_block_lut[label_name] = current_block;
             }
 
@@ -1107,7 +1107,7 @@ const CFGBuilder = struct {
 
         for (wants_label.items) |want_label| {
             const dest_label = want_label.jumpTarget();
-            const target = label_to_block_lut[dest_label.label.name].?;
+            const target = label_to_block_lut[dest_label.data.label.name].?;
             want_label.setJumpDest(target);
             try target.addPredecessor(want_label);
         }
@@ -1225,7 +1225,7 @@ test "if statement should have 2 children blocks" {
     defer scope.deinit();
 
     // Get the scope for the method
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.scope.value;
+    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func.data.scope.value;
 
     const cfg = try buildCFG(allocator, method_scope);
     defer cfg.deinit();
@@ -1338,7 +1338,7 @@ test "upward exposed bits get set" {
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func.scope.value;
+    const method_scope = insn.data.define_method.func.data.scope.value;
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
@@ -1381,7 +1381,7 @@ test "complex loop with if" {
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func.scope.value;
+    const method_scope = insn.data.define_method.func.data.scope.value;
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
@@ -1412,7 +1412,7 @@ test "live out passes through if statement" {
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func.scope.value;
+    const method_scope = insn.data.define_method.func.data.scope.value;
 
     const opnd = try method_scope.getLocalName("x");
 
@@ -1424,7 +1424,7 @@ test "live out passes through if statement" {
 
     while (try iter.next()) |bb| {
         if (bb.fall_through_dest) |_| {
-            try std.testing.expect(bb.liveout_set.isSet(opnd.variable.local.id));
+            try std.testing.expect(bb.liveout_set.isSet(opnd.id));
         }
     }
 }
@@ -1451,7 +1451,7 @@ test "jumps targets get predecessors" {
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func.scope.value;
+    const method_scope = insn.data.define_method.func.data.scope.value;
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
@@ -1500,7 +1500,7 @@ test "blocks have dominators" {
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func.scope.value;
+    const method_scope = insn.data.define_method.func.data.scope.value;
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
