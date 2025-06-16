@@ -10,7 +10,7 @@ pub const Scope = struct {
     tmp_id: u32 = 0,
     local_id: u32 = 0,
     param_id: u32 = 0,
-    label_id: u32 = 0,
+    label_id: usize = 0,
     param_size: usize = 0,
     local_storage: usize = 0,
     primes: usize = 0,
@@ -104,9 +104,9 @@ pub const Scope = struct {
         return ir.Immediate{ .value = value };
     }
 
-    pub fn newLabel(self: *Scope) !*ir.Operand {
+    pub fn newLabel(self: *Scope) ir.Label {
         defer self.label_id += 1;
-        return try ir.Operand.initLabel(self.arena.allocator(), self.label_id);
+        return .{ .id = self.label_id };
     }
 
     fn makeInsn(self: *Scope, insn: ir.Instruction) !*ir.InstructionListNode {
@@ -163,19 +163,19 @@ pub const Scope = struct {
         return try self.pushInsn(.{ .getparam = .{ .out = out, .index = index } });
     }
 
-    pub fn pushJump(self: *Scope, label: *ir.Operand) !void {
+    pub fn pushJump(self: *Scope, label: ir.Label) !void {
         try self.pushVoidInsn(.{ .jump = .{ .label = label } });
     }
 
-    pub fn pushJumpIf(self: *Scope, in: *ir.Operand, label: *ir.Operand) !void {
+    pub fn pushJumpIf(self: *Scope, in: *ir.Operand, label: ir.Label) !void {
         try self.pushVoidInsn(.{ .jumpif = .{ .in = in, .label = label } });
     }
 
-    pub fn pushJumpUnless(self: *Scope, in: *ir.Operand, label: *ir.Operand) !void {
+    pub fn pushJumpUnless(self: *Scope, in: *ir.Operand, label: ir.Label) !void {
         try self.pushVoidInsn(.{ .jumpunless = .{ .in = in, .label = label } });
     }
 
-    pub fn pushLabel(self: *Scope, name: *ir.Operand) !void {
+    pub fn pushLabel(self: *Scope, name: ir.Label) !void {
         try self.pushVoidInsn(.{ .putlabel = .{ .name = name } });
     }
 

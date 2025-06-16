@@ -189,9 +189,6 @@ const IRPrinter = struct {
                     try result.writer().print("{s}{d}", .{ op.shortName(), op.number() });
                 },
             },
-            else => {
-                try result.writer().print("{s}{d}", .{ op.shortName(), op.number() });
-            },
         }
 
         return result.toOwnedSlice();
@@ -233,17 +230,24 @@ const IRPrinter = struct {
                     try out.print("{s}{d}", .{ op.shortName(), op.number() });
                 },
             },
-            else => {
-                try out.print("{s}{d}", .{ op.shortName(), op.number() });
-            },
         }
     }
 
     fn printInsnParams(insn: ir.Instruction, out: anytype) !void {
         switch (insn) {
-            .getparam => try out.print("({d})", .{ insn.getparam.index }),
-            .loadi => {
-                try out.print("({d})", .{ insn.loadi.val });
+            .getparam => |i| try out.print("({d})", .{ i.index }),
+            .putlabel => |i| try out.print("L{d}", .{ i.name.id }),
+            .loadi => |i| try out.print("({d})", .{ i.val }),
+            .jump => |i| try out.print("(L{d})", .{ i.label.id }),
+            .jumpif => |i| {
+                try out.print("(", .{});
+                try printOpnd(i.in, out);
+                try out.print(", L{d})", .{ i.label.id });
+            },
+            .jumpunless => |i| {
+                try out.print("(", .{});
+                try printOpnd(i.in, out);
+                try out.print(", L{d})", .{ i.label.id });
             },
             else => {
                 var opiter = insn.opIter();
@@ -273,29 +277,34 @@ const IRPrinter = struct {
     }
 
     fn printInsn(insn: ir.Instruction, digits: usize, insn_name_width: usize, out: anytype) !void {
-        if (insn.outVar()) |n| {
-            const width = outVarWidth(n);
-            const padding = digits - width;
-            try out.print("  ", .{});
-            try printOpnd(n, out);
-            try out.print("{[x]s: <[width]}", .{ .x = "", .width = padding });
-            if (insn.isPMov()) {
-                try out.print("<-", .{});
-                try printIntAsSubscript(insn.pmov.group, out);
-                try out.print(" ", .{});
-            } else {
-                try out.print("<- ", .{});
-            }
-        } else {
-            try out.print("  ", .{});
-            try out.print("{[value]s: <[width]}   ", .{
-                .value = "",
-                .width = digits,
-            });
-        }
+        switch (insn) {
+            .putlabel => |i| try out.print("L{d}:", .{ i.name.id }),
+            else => {
+                if (insn.outVar()) |n| {
+                    const width = outVarWidth(n);
+                    const padding = digits - width;
+                    try out.print("  ", .{});
+                    try printOpnd(n, out);
+                    try out.print("{[x]s: <[width]}", .{ .x = "", .width = padding });
+                    if (insn.isPMov()) {
+                        try out.print("<-", .{});
+                        try printIntAsSubscript(insn.pmov.group, out);
+                        try out.print(" ", .{});
+                    } else {
+                        try out.print("<- ", .{});
+                    }
+                } else {
+                    try out.print("  ", .{});
+                    try out.print("{[value]s: <[width]}   ", .{
+                        .value = "",
+                        .width = digits,
+                    });
+                }
 
-        try printInsnName(insn, insn_name_width, out);
-        try printInsnParams(insn, out);
+                try printInsnName(insn, insn_name_width, out);
+                try printInsnParams(insn, out);
+            }
+        }
     }
 
     pub fn printIR(alloc: std.mem.Allocator, scope: *Scope, out: anytype) !void {
@@ -329,7 +338,7 @@ const IRPrinter = struct {
 
                 switch (unwrapped_node.data) {
                     .putlabel => |insn| {
-                        try out.print("{s}{d}:\n", .{ insn.name.shortName(), insn.name.data.label.name });
+                        try out.print("{s}{d}:\n", .{ insn.name.shortName(), insn.name.id });
                     },
                     .define_method => |insn| {
                         try work.append(insn.func.data.scope.value);
@@ -566,7 +575,6 @@ fn outVarWidth(opnd: *ir.Operand) usize {
             .prime => |p| outVarWidth(p.orig) + 1,
             .temp => |t| countDigits(t.name) + 1,
         },
-        .label => |data| countDigits(data.name) + 1,
     };
 }
 

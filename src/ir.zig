@@ -28,18 +28,22 @@ pub const Variable = struct {
     data: VariableData,
 };
 
+pub const Label = struct {
+    id: usize,
+
+    pub fn shortName(_: Label) []const u8 {
+        return "L";
+    }
+};
+
 pub const OperandType = enum {
     variable,
-    label,
     scope,
     string,
 };
 
 pub const OperandData = union(OperandType) {
     variable: Variable,
-    label: struct {
-        name: usize,
-    },
     scope: struct {
         value: *Scope,
     },
@@ -50,7 +54,6 @@ pub const OperandData = union(OperandType) {
 
 pub const Operand = struct {
     data: OperandData,
-
 
     pub fn initLabel(alloc: std.mem.Allocator, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
@@ -103,7 +106,6 @@ pub const Operand = struct {
                 .prime => unreachable,
                 inline else => |payload| payload.name,
             },
-            inline else => |payload| payload.name,
         };
     }
 
@@ -187,7 +189,6 @@ pub const Operand = struct {
 
     pub fn shortName(self: Operand) []const u8 {
         return switch (self.data) {
-            .label => "L",
             .string => "s",
             .scope => "S",
             .variable => |v| switch (v.data) {
@@ -269,7 +270,7 @@ pub const Instruction = union(InstructionName) {
 
     jump: struct {
         const Self = @This();
-        label: *Operand,
+        label: Label,
         pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
             unreachable;
         }
@@ -278,7 +279,7 @@ pub const Instruction = union(InstructionName) {
     jumpif: struct {
         const Self = @This();
         in: *Operand,
-        label: *Operand,
+        label: Label,
         pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
             if (self.in == old) self.in = new;
         }
@@ -287,7 +288,7 @@ pub const Instruction = union(InstructionName) {
     jumpunless: struct {
         const Self = @This();
         in: *Operand,
-        label: *Operand,
+        label: Label,
         pub fn replaceOpnd(self: *Self, old: *const Operand, new: *Operand) void {
             if (self.in == old) self.in = new;
         }
@@ -353,7 +354,7 @@ pub const Instruction = union(InstructionName) {
 
     putlabel: struct {
         const Self = @This();
-        name: *Operand,
+        name: Label,
         pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
             unreachable;
         }
@@ -543,7 +544,7 @@ pub const Instruction = union(InstructionName) {
         };
     }
 
-    pub fn jumpTarget(self: Instruction) *Operand {
+    pub fn jumpTarget(self: Instruction) Label {
         return switch (self) {
             .jump => |payload| payload.label,
             .jumpif => |payload| payload.label,

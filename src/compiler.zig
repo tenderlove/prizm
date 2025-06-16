@@ -171,9 +171,9 @@ pub const Compiler = struct {
     }
 
     fn compileIfNode(cc: *Compiler, node: *const c.pm_if_node_t, out: ?*Op, popped: bool) !?*ir.Operand {
-        const then_label = try cc.newLabel();
+        const then_label = cc.newLabel();
         // const else_label = cc.newLabel();
-        const end_label = try cc.newLabel();
+        const end_label = cc.newLabel();
 
         // If predicate is false, jump to then label
         const predicate = try cc.compilePredicate(node.*.predicate, then_label, JumpType.jump_unless, null, false);
@@ -222,7 +222,7 @@ pub const Compiler = struct {
         jump_unless
     };
 
-    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, label: *ir.Operand, jump_type: JumpType, out: ?*Op, popped: bool) !PredicateType {
+    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, label: ir.Label, jump_type: JumpType, out: ?*Op, popped: bool) !PredicateType {
         while (true) {
             switch (node.*.type) {
                 c.PM_CALL_NODE, c.PM_LOCAL_VARIABLE_READ_NODE => {
@@ -355,7 +355,7 @@ pub const Compiler = struct {
     }
 
     fn compileWhileNode(cc: *Compiler, node: *const c.pm_while_node_t, out: ?*Op, popped: bool) !?*ir.Operand {
-        const loop_entry = try cc.newLabel();
+        const loop_entry = cc.newLabel();
         try cc.pushLabel(loop_entry);
 
         if ((node.*.base.flags & c.PM_LOOP_FLAGS_BEGIN_MODIFIER) == c.PM_LOOP_FLAGS_BEGIN_MODIFIER) {
@@ -368,7 +368,7 @@ pub const Compiler = struct {
             return ret;
         }
 
-        const loop_end = try cc.newLabel();
+        const loop_end = cc.newLabel();
 
         // If predicate is false, jump to then label
         const predicate = try cc.compilePredicate(node.*.predicate, loop_end, JumpType.jump_unless, null, false);
@@ -396,8 +396,8 @@ pub const Compiler = struct {
         allocator.destroy(self);
     }
 
-    fn newLabel(self: *Compiler) !*ir.Operand {
-        return try self.scope.?.newLabel();
+    fn newLabel(self: *Compiler) ir.Label {
+        return self.scope.?.newLabel();
     }
 
     fn newTemp(self: *Compiler) !*ir.Operand {
@@ -416,19 +416,19 @@ pub const Compiler = struct {
         return try self.scope.?.pushGetself();
     }
 
-    fn pushJump(self: *Compiler, label: *ir.Operand) !void {
+    fn pushJump(self: *Compiler, label: ir.Label) !void {
         try self.scope.?.pushJump(label);
     }
 
-    fn pushJumpIf(self: *Compiler, in: *ir.Operand, label: *ir.Operand) !void {
+    fn pushJumpIf(self: *Compiler, in: *ir.Operand, label: ir.Label) !void {
         return try self.scope.?.pushJumpIf(in, label);
     }
 
-    fn pushJumpUnless(self: *Compiler, in: *ir.Operand, label: *ir.Operand) !void {
+    fn pushJumpUnless(self: *Compiler, in: *ir.Operand, label: ir.Label) !void {
         return try self.scope.?.pushJumpUnless(in, label);
     }
 
-    fn pushLabel(self: *Compiler, label: *ir.Operand) !void {
+    fn pushLabel(self: *Compiler, label: ir.Label) !void {
         try self.scope.?.pushLabel(label);
     }
 

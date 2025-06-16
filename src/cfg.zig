@@ -968,7 +968,7 @@ pub const BasicBlock = struct {
         return count;
     }
 
-    fn jumpTarget(self: *BasicBlock) *ir.Operand {
+    fn jumpTarget(self: *BasicBlock) ir.Label {
         return self.finish.data.jumpTarget();
     }
 
@@ -1092,7 +1092,7 @@ const CFGBuilder = struct {
             // If this block has a label at the top, register it so that
             // we can link other blocks to this one
             if (current_block.hasLabeledEntry()) {
-                const label_name = current_block.start.data.putlabel.name.data.label.name;
+                const label_name = current_block.start.data.putlabel.name.id;
                 label_to_block_lut[label_name] = current_block;
             }
 
@@ -1107,7 +1107,7 @@ const CFGBuilder = struct {
 
         for (wants_label.items) |want_label| {
             const dest_label = want_label.jumpTarget();
-            const target = label_to_block_lut[dest_label.data.label.name].?;
+            const target = label_to_block_lut[dest_label.id].?;
             want_label.setJumpDest(target);
             try target.addPredecessor(want_label);
         }
