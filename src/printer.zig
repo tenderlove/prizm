@@ -164,7 +164,6 @@ const IRPrinter = struct {
         defer result.deinit();
 
         switch (op.data) {
-            .immediate => |p| try result.writer().print("{d}", .{p.value}),
             .string => |p| try result.appendSlice(p.value),
             .scope => |payload| try result.writer().print("{s}{d}", .{ op.shortName(), payload.value.id }),
             .variable => |v| switch (v.data) {
@@ -217,7 +216,6 @@ const IRPrinter = struct {
 
     fn printOpnd(op: *const ir.Operand, out: anytype) !void {
         switch (op.data) {
-            .immediate => |p| try out.print("{d}", .{p.value}),
             .string => |p| try out.print("{s}", .{p.value}),
             .scope => |payload| try out.print("{s}{d}", .{ op.shortName(), payload.value.id }),
             .variable => |v| switch (v.data) {
@@ -244,6 +242,9 @@ const IRPrinter = struct {
     fn printInsnParams(insn: ir.Instruction, out: anytype) !void {
         switch (insn) {
             .getparam => try out.print("({d})", .{ insn.getparam.index }),
+            .loadi => {
+                try out.print("({d})", .{ insn.loadi.val.value });
+            },
             else => {
                 var opiter = insn.opIter();
                 var first = true;
@@ -559,7 +560,6 @@ fn outVarWidth(opnd: *ir.Operand) usize {
     return switch (opnd.data) {
         .string => |v| v.value.len,
         .scope => |v| countDigits(v.value.id) + 1,
-        .immediate => |v| countDigits(v.value),
         .variable => |v| switch (v.data) {
             .local => |l| l.source_name.len,
             .redef => |r| outVarWidth(r.orig) + countDigits(r.variant),

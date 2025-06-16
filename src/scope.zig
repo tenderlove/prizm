@@ -100,8 +100,8 @@ pub const Scope = struct {
         return try self.addOpnd(try ir.Operand.initTemp(self.arena.allocator(), self.nextOpndId(), self.tmp_id));
     }
 
-    fn newImmediate(self: *Scope, value: u64) !*ir.Operand {
-        return try ir.Operand.initImmediate(self.arena.allocator(), value);
+    fn newImmediate(_: *Scope, value: u64) ir.Immediate {
+        return ir.Immediate{ .value = value };
     }
 
     pub fn newLabel(self: *Scope) !*ir.Operand {
@@ -187,7 +187,7 @@ pub const Scope = struct {
         const outreg = if (out) |o| o else try self.newTemp();
         return try self.pushInsn(.{ .loadi = .{
             .out = outreg,
-            .val = try self.newImmediate(val),
+            .val = self.newImmediate(val),
         } });
     }
 

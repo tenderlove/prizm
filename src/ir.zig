@@ -28,9 +28,12 @@ pub const Variable = struct {
     data: VariableData,
 };
 
+pub const Immediate = struct {
+    value: u64,
+};
+
 pub const OperandType = enum {
     variable,
-    immediate,
     label,
     scope,
     string,
@@ -38,9 +41,6 @@ pub const OperandType = enum {
 
 pub const OperandData = union(OperandType) {
     variable: Variable,
-    immediate: struct {
-        value: u64,
-    },
     label: struct {
         name: usize,
     },
@@ -55,11 +55,6 @@ pub const OperandData = union(OperandType) {
 pub const Operand = struct {
     data: OperandData,
 
-    pub fn initImmediate(alloc: std.mem.Allocator, value: anytype) !*Operand {
-        const opnd = try alloc.create(Operand);
-        opnd.* = .{ .data = .{ .immediate = .{ .value = value } } };
-        return opnd;
-    }
 
     pub fn initLabel(alloc: std.mem.Allocator, name: anytype) !*Operand {
         const opnd = try alloc.create(Operand);
@@ -105,7 +100,6 @@ pub const Operand = struct {
 
     pub fn number(self: Operand) usize {
         return switch (self.data) {
-            .immediate => unreachable,
             .string => unreachable,
             .scope => unreachable,
             .variable => |v| switch (v.data) {
@@ -197,7 +191,6 @@ pub const Operand = struct {
 
     pub fn shortName(self: Operand) []const u8 {
         return switch (self.data) {
-            .immediate => "I",
             .label => "L",
             .string => "s",
             .scope => "S",
@@ -315,7 +308,7 @@ pub const Instruction = union(InstructionName) {
     loadi: struct {
         const Self = @This();
         out: *Operand,
-        val: *Operand,
+        val: Immediate,
         pub fn replaceOpnd(_: *Self, _: *const Operand, _: *Operand) void {
             unreachable;
         }
