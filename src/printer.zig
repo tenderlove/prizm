@@ -29,7 +29,7 @@ const DotOutputStrategy = struct {
     }
 
     pub fn printSet(self: *const DotOutputStrategy, name: []const u8, string: []const u8) !void {
-        try self.print("{s}: {s}\\l", .{name, string});
+        try self.print("{s}: {s}\\l", .{ name, string });
     }
 
     pub fn printBlockSeparator(_: *const @This()) !void {}
@@ -90,7 +90,7 @@ const AsciiOutputStrategy = struct {
 
     pub fn printSet(self: *const @This(), name: []const u8, string: []const u8) !void {
         // Remove the colon and space from the name for table display
-        try self.print("| {s} | {s} |\n", .{name, string});
+        try self.print("| {s} | {s} |\n", .{ name, string });
     }
 
     pub fn printListItem(self: *const @This(), comptime format: []const u8, args: anytype) !void {
@@ -228,21 +228,21 @@ const IRPrinter = struct {
     fn printInsnParams(insn: ir.Instruction, out: anytype) !void {
         switch (insn) {
             .define_method => |i| {
-                try out.print("({s})", .{ i.name });
+                try out.print("({s})", .{i.name});
             },
-            .getparam => |i| try out.print("({d})", .{ i.index }),
-            .putlabel => |i| try out.print("L{d}", .{ i.name.id }),
-            .loadi => |i| try out.print("({d})", .{ i.val }),
-            .jump => |i| try out.print("(L{d})", .{ i.label.id }),
+            .getparam => |i| try out.print("({d})", .{i.index}),
+            .putlabel => |i| try out.print("L{d}", .{i.name.id}),
+            .loadi => |i| try out.print("({d})", .{i.val}),
+            .jump => |i| try out.print("(L{d})", .{i.label.id}),
             .jumpif => |i| {
                 try out.print("(", .{});
                 try printOpnd(i.in, out);
-                try out.print(", L{d})", .{ i.label.id });
+                try out.print(", L{d})", .{i.label.id});
             },
             .jumpunless => |i| {
                 try out.print("(", .{});
                 try printOpnd(i.in, out);
-                try out.print(", L{d})", .{ i.label.id });
+                try out.print(", L{d})", .{i.label.id});
             },
             else => {
                 var opiter = insn.opIter();
@@ -260,7 +260,7 @@ const IRPrinter = struct {
                 if (!first) {
                     try out.print(")", .{});
                 }
-            }
+            },
         }
     }
 
@@ -273,7 +273,7 @@ const IRPrinter = struct {
 
     fn printInsn(insn: ir.Instruction, digits: usize, insn_name_width: usize, out: anytype) !void {
         switch (insn) {
-            .putlabel => |i| try out.print("L{d}:", .{ i.name.id }),
+            .putlabel => |i| try out.print("L{d}:", .{i.name.id}),
             else => {
                 if (insn.outVar()) |n| {
                     const width = outVarWidth(n);
@@ -298,7 +298,7 @@ const IRPrinter = struct {
 
                 try printInsnName(insn, insn_name_width, out);
                 try printInsnParams(insn, out);
-            }
+            },
         }
     }
 
@@ -515,7 +515,43 @@ const CFGPrinter = struct {
                 try ctx.out.printBlockSeparator();
             }
             try out.printClusterFooter(work_scope);
+
+            // Add mermaid diagram for ASCII output only
+            if (@TypeOf(out.*) == AsciiOutputStrategy) {
+                try printMermaidDiagram(cfg, out);
+            }
         }
+    }
+
+    fn printMermaidDiagram(cfg: *CFG, out: anytype) !void {
+        try out.print("\n## Control Flow Graph\n\n", .{});
+        try out.print("```mermaid\n", .{});
+        try out.print("flowchart TD\n", .{});
+
+        // Print all reachable blocks
+        for (cfg.blocks) |bb| {
+            if (!bb.reachable) continue;
+
+            // Create node with block name
+            try out.print("    BB{d}[\"BB{d}\"]\n", .{ bb.name, bb.name });
+        }
+
+        // Print connections between blocks
+        for (cfg.blocks) |bb| {
+            if (!bb.reachable) continue;
+
+            // Fall through connection
+            if (bb.fall_through_dest) |dest| {
+                try out.print("    BB{d} -->|\"fall through\"| BB{d}\n", .{ bb.name, dest.name });
+            }
+
+            // Jump connection
+            if (bb.jump_dest) |dest| {
+                try out.print("    BB{d} -->|\"jump\"| BB{d}\n", .{ bb.name, dest.name });
+            }
+        }
+
+        try out.print("```\n", .{});
     }
 
     pub fn printAsciiCFG(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, out: anytype) !void {
