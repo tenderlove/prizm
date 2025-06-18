@@ -18,8 +18,8 @@ pub const Scope = struct {
     name: []const u8,
     insns: ir.InstructionList,
     parent: ?*Scope,
-    locals: std.StringHashMapUnmanaged(*ir.Variable),
-    variables: std.ArrayList(*ir.Variable),
+    locals: std.StringHashMapUnmanaged(*Var),
+    variables: std.ArrayList(*Var),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
 
@@ -38,7 +38,7 @@ pub const Scope = struct {
         return max;
     }
 
-    pub fn getLocalName(self: *Scope, name: []const u8) !*ir.Variable {
+    pub fn getLocalName(self: *Scope, name: []const u8) !*Var {
         const info = self.locals.get(name);
         if (info) |v| {
             return v;
@@ -49,7 +49,7 @@ pub const Scope = struct {
         }
     }
 
-    fn addVar(self: *Scope, var_: *ir.Variable) !*ir.Variable {
+    fn addVar(self: *Scope, var_: *Var) !*Var {
         try self.variables.append(var_);
         return var_;
     }
@@ -66,17 +66,17 @@ pub const Scope = struct {
         return self.insns.len();
     }
 
-    pub fn getVariableById(self: Scope, id: usize) *ir.Variable {
+    pub fn getVariableById(self: Scope, id: usize) *Var {
         return self.variables.items[id];
     }
 
-    fn newLocal(self: *Scope, source_name: []const u8) !*ir.Variable {
+    fn newLocal(self: *Scope, source_name: []const u8) !*Var {
         defer self.local_id += 1;
-        return try self.addVar(try ir.Variable.initLocal(self.arena.allocator(), self.nextVarId(), self.local_id, source_name));
+        return try self.addVar(try Var.initLocal(self.arena.allocator(), self.nextVarId(), self.local_id, source_name));
     }
 
-    pub fn newDefinition(self: *Scope, opnd: *ir.Variable, bb: *BasicBlock, variant: usize) !*ir.Variable {
-        const new = try ir.Variable.initRedef(self.arena.allocator(), self.nextVarId(), variant, opnd, bb);
+    pub fn newDefinition(self: *Scope, opnd: *Var, bb: *BasicBlock, variant: usize) !*Var {
+        const new = try Var.initRedef(self.arena.allocator(), self.nextVarId(), variant, opnd, bb);
         return try self.addVar(new);
     }
 
@@ -85,9 +85,9 @@ pub const Scope = struct {
         return try self.addVar(try Var.initPrime(self.arena.allocator(), self.nextVarId(), self.primes, op));
     }
 
-    pub fn newTemp(self: *Scope) !*ir.Variable {
+    pub fn newTemp(self: *Scope) !*Var {
         defer self.tmp_id += 1;
-        return try self.addVar(try ir.Variable.initTemp(self.arena.allocator(), self.nextVarId(), self.tmp_id));
+        return try self.addVar(try Var.initTemp(self.arena.allocator(), self.nextVarId(), self.tmp_id));
     }
 
     fn newImmediate(_: *Scope, value: u64) ir.Immediate {
@@ -109,7 +109,7 @@ pub const Scope = struct {
         self.insns.append(&(try self.makeInsn(insn)).node);
     }
 
-    fn pushInsn(self: *Scope, insn: ir.Instruction) !*ir.Variable {
+    fn pushInsn(self: *Scope, insn: ir.Instruction) !*Var {
         const node = try self.arena.allocator().create(ir.InstructionListNode);
         node.*.data = insn;
         self.insns.append(&node.node);
@@ -125,7 +125,7 @@ pub const Scope = struct {
         };
     }
 
-    pub fn pushDefineMethod(self: *Scope, name: []const u8, scope: *Scope) !*ir.Variable {
+    pub fn pushDefineMethod(self: *Scope, name: []const u8, scope: *Scope) !*Var {
         const outreg = try self.newTemp();
         return try self.pushInsn(.{ .define_method = .{
             .out = outreg,
@@ -134,7 +134,7 @@ pub const Scope = struct {
         } });
     }
 
-    pub fn pushCall(self: *Scope, out: ?*ir.Variable, recv: *ir.Variable, name: []const u8, params: std.ArrayList(*ir.Variable)) !*ir.Variable {
+    pub fn pushCall(self: *Scope, out: ?*Var, recv: *Var, name: []const u8, params: std.ArrayList(*Var)) !*Var {
         const outreg = if (out) |o| o else try self.newTemp();
         return try self.pushInsn(.{ .call = .{
             .out = outreg,
@@ -144,12 +144,12 @@ pub const Scope = struct {
         } });
     }
 
-    pub fn pushGetself(self: *Scope) !*ir.Variable {
+    pub fn pushGetself(self: *Scope) !*Var {
         const outreg = try self.newTemp();
         return try self.pushInsn(.{ .getself = .{ .out = outreg } });
     }
 
-    pub fn pushGetParam(self: *Scope, out: *ir.Variable, index: usize) !*ir.Variable {
+    pub fn pushGetParam(self: *Scope, out: *Var, index: usize) !*Var {
         return try self.pushInsn(.{ .getparam = .{ .out = out, .index = index } });
     }
 
@@ -157,11 +157,11 @@ pub const Scope = struct {
         try self.pushVoidInsn(.{ .jump = .{ .label = label } });
     }
 
-    pub fn pushJumpIf(self: *Scope, in: *ir.Variable, label: ir.Label) !void {
+    pub fn pushJumpIf(self: *Scope, in: *Var, label: ir.Label) !void {
         try self.pushVoidInsn(.{ .jumpif = .{ .in = in, .label = label } });
     }
 
-    pub fn pushJumpUnless(self: *Scope, in: *ir.Variable, label: ir.Label) !void {
+    pub fn pushJumpUnless(self: *Scope, in: *Var, label: ir.Label) !void {
         try self.pushVoidInsn(.{ .jumpunless = .{ .in = in, .label = label } });
     }
 
@@ -169,11 +169,11 @@ pub const Scope = struct {
         try self.pushVoidInsn(.{ .putlabel = .{ .name = name } });
     }
 
-    pub fn pushLeave(self: *Scope, in: *ir.Variable) !void {
+    pub fn pushLeave(self: *Scope, in: *Var) !void {
         try self.pushVoidInsn(.{ .leave = .{ .in = in } });
     }
 
-    pub fn pushLoadi(self: *Scope, out: ?*Var, val: u64) !*ir.Variable {
+    pub fn pushLoadi(self: *Scope, out: ?*Var, val: u64) !*Var {
         const outreg = if (out) |o| o else try self.newTemp();
         return try self.pushInsn(.{ .loadi = .{
             .out = outreg,
@@ -181,23 +181,23 @@ pub const Scope = struct {
         } });
     }
 
-    pub fn pushLoadNil(self: *Scope, out: ?*Var) !*ir.Variable {
+    pub fn pushLoadNil(self: *Scope, out: ?*Var) !*Var {
         const outreg = if (out) |o| o else try self.newTemp();
         return try self.pushInsn(.{ .loadnil = .{ .out = outreg } });
     }
 
-    pub fn pushMov(self: *Scope, out: *ir.Variable, in: *ir.Variable) !*ir.Variable {
+    pub fn pushMov(self: *Scope, out: *Var, in: *Var) !*Var {
         try self.pushVoidInsn(.{ .mov = .{ .out = out, .in = in } });
         return out;
     }
 
-    pub fn makeMov(self: *Scope, out: *ir.Variable, in: *ir.Variable) !*ir.InstructionListNode {
+    pub fn makeMov(self: *Scope, out: *Var, in: *Var) !*ir.InstructionListNode {
         return try self.makeInsn(.{ .mov = .{ .out = out, .in = in } });
     }
 
-    pub fn insertPhi(self: *Scope, node: *ir.InstructionListNode, op: *ir.Variable) !*ir.InstructionListNode {
+    pub fn insertPhi(self: *Scope, node: *ir.InstructionListNode, op: *Var) !*ir.InstructionListNode {
         const new_node = try self.arena.allocator().create(ir.InstructionListNode);
-        const params = std.ArrayList(*ir.Variable).init(self.arena.allocator());
+        const params = std.ArrayList(*Var).init(self.arena.allocator());
         new_node.*.data = .{ .phi = .{ .out = op, .params = params } };
         self.insns.insertAfter(&node.node, &new_node.node);
         return new_node;
@@ -210,7 +210,7 @@ pub const Scope = struct {
         return new_node;
     }
 
-    pub fn pushSetLocal(self: *Scope, name: *ir.Variable, val: *ir.Variable) !void {
+    pub fn pushSetLocal(self: *Scope, name: *Var, val: *Var) !void {
         return try self.pushVoidInsn(.{ .setlocal = .{ .name = name, .val = val } });
     }
 
@@ -222,8 +222,8 @@ pub const Scope = struct {
             .id = id,
             .name = name,
             .parent = parent,
-            .locals = std.StringHashMapUnmanaged(*ir.Variable){},
-            .variables = std.ArrayList(*ir.Variable).init(alloc),
+            .locals = std.StringHashMapUnmanaged(*Var){},
+            .variables = std.ArrayList(*Var).init(alloc),
             .allocator = alloc,
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
