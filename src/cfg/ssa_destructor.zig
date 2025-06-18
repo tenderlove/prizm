@@ -471,7 +471,7 @@ fn expectIsolatedPhiOutput(phi: ir.Instruction, isolation_insn: ir.Instruction) 
     try std.testing.expectEqual(phi.getOut(), isolation_insn.pmov.in);
     // The output of the isolation copy should be the pre-primed phi output (the SSA name)
     try std.testing.expectEqual(isolation_insn.pmov.in.data.prime.orig, isolation_insn.pmov.out);
-    try std.testing.expect(isolation_insn.pmov.out.isVariable());
+    try std.testing.expect(isolation_insn.pmov.out.isRedef());
 }
 
 test "inserting phi copies actually copies the right thing" {

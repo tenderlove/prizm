@@ -467,7 +467,7 @@ pub const CFG = struct {
                         // Rename operands
                         var itr = insn.data.opIter();
                         while (itr.next()) |op| {
-                            if (op.isVariable() and cfg.globals.isSet(op.id)) {
+                            if (cfg.globals.isSet(op.id)) {
                                 insn.data.replaceOpnd(op, self.stackTop(op).?);
                                 should_append = true;
                             }
@@ -882,15 +882,13 @@ pub const BasicBlock = struct {
                 // (in other words it hasn't been defined in this BB), then add
                 // the operand to the "upward exposed" set.  This means the operand
                 // _must_ have been defined in a block that dominates this block.
-                if (op.isVariable() and !self.killed_set.isSet(op.id)) {
+                if (!self.killed_set.isSet(op.id)) {
                     self.upward_exposed_set.set(op.id);
                 }
             }
 
             if (insn.data.outVar()) |v| {
-                if (v.isVariable()) {
-                    self.killed_set.set(v.id);
-                }
+                self.killed_set.set(v.id);
             }
         }
     }

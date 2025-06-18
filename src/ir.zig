@@ -87,10 +87,6 @@ pub const Variable = struct {
         };
     }
 
-    pub fn isVariable(_: Variable) bool {
-        return true;
-    }
-
     pub fn isPrime(self: Variable) bool {
         return switch (self.data) {
             .prime => true,
@@ -540,9 +536,7 @@ test "can iterate on ops" {
     var itr = insn.opIter();
     var count: u32 = 0;
     while (itr.next()) |op| {
-        if (op.isVariable()) {
-            try std.testing.expectEqual(1, op.getID());
-        }
+        try std.testing.expectEqual(1, op.getID());
         count += 1;
     }
     try std.testing.expectEqual(1, count);
@@ -585,10 +579,8 @@ test "can iterate on ops with list" {
     var var_count: u32 = 0;
     var total_count: u32 = 0;
     while (itr.next()) |op| {
-        if (op.isVariable()) {
-            try std.testing.expectEqual(expected_ids[var_count], op.getID());
-            var_count += 1;
-        }
+        try std.testing.expectEqual(expected_ids[var_count], op.getID());
+        var_count += 1;
         total_count += 1;
     }
     try std.testing.expectEqual(3, total_count); // Now 3 instead of 4 since name is not an operand

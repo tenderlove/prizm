@@ -143,6 +143,29 @@ test "UnionFind path compression" {
     try std.testing.expectEqual(root, uf.parent[5]);
 }
 
+test "parents are a unique set" {
+    const allocator = std.testing.allocator;
+
+    var uf = try UnionFind.init(allocator, 7);
+    defer uf.deinit();
+
+    // Create a chain: 0 -> 1 -> 2
+    uf.unite(0, 1);
+    uf.unite(1, 2);
+
+    // Create a chain: 3 -> 4 -> 5
+    uf.unite(3, 4);
+    uf.unite(4, 5);
+
+    var map: u64 = 0;
+
+    for (uf.parent) |p| {
+        map |= (@as(u64, 1) << @as(u6, @intCast(p)));
+    }
+
+    try std.testing.expectEqual(@as(u32, 3), @popCount(map));
+}
+
 test "UnionFind multiple disjoint sets" {
     const allocator = std.testing.allocator;
     
