@@ -8,25 +8,6 @@ const assert = @import("std").debug.assert;
 const UnionFind = @import("union_find.zig").UnionFind;
 const IRPrinter = @import("printer.zig").IRPrinter;
 
-// Live range representing a group of variables that can share a register
-const LiveRange = struct {
-    variables: BitMap,  // All variables in this live range
-    
-    pub fn init(allocator: std.mem.Allocator, var_count: usize) !LiveRange {
-        return LiveRange{
-            .variables = try BitMap.initEmpty(allocator, var_count),
-        };
-    }
-    
-    pub fn deinit(self: *LiveRange, mem: std.mem.Allocator) void {
-        self.variables.deinit(mem);
-    }
-    
-    pub fn addVariable(self: *LiveRange, variable_id: usize) void {
-        self.variables.set(variable_id);
-    }
-};
-
 pub const RegisterAllocator = struct {
     allocator: std.mem.Allocator,
     cfg: *CFG,

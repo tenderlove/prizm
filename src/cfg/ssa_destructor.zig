@@ -474,6 +474,17 @@ fn expectIsolatedPhiOutput(phi: ir.Instruction, isolation_insn: ir.Instruction) 
     try std.testing.expect(isolation_insn.pmov.out.isRedef());
 }
 
+fn destructSSA(cfg: *CFG) !void {
+    try cfg.analyze();
+    try cfg.placePhis();
+    try cfg.rename();
+    try cfg.isolatePhi();
+    try cfg.insertPhiCopies();
+    try cfg.serializeCopyGroups();
+    try cfg.removeRenamedVariables();
+    try cfg.removePhi();
+}
+
 test "inserting phi copies actually copies the right thing" {
     const allocator = std.testing.allocator;
 
@@ -556,9 +567,7 @@ test "destructor fixes all variables" {
     const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    try cfg.compileUntil(.renamed);
-
-    try cfg.destructSSA();
+    try destructSSA(cfg);
 
     // After SSA destruction, we shouldn't have any prime operands, or renamed operands
     for (cfg.blocks) |block| {
@@ -675,9 +684,7 @@ test "destruction removes all parallel copies" {
     const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    try cfg.compileUntil(.renamed);
-
-    try cfg.destructSSA();
+    try destructSSA(cfg);
 
     // After SSA destruction, we shouldn't have any prime operands, or renamed operands
     for (cfg.blocks) |block| {
@@ -722,9 +729,7 @@ test "destruction maintains block endings" {
     const cfg = try CFG.build(allocator, scope);
     defer cfg.deinit();
 
-    try cfg.compileUntil(.renamed);
-
-    try cfg.destructSSA();
+    try destructSSA(cfg);
 
     // After SSA destruction, we shouldn't have any prime operands, or renamed operands
     for (cfg.blocks) |block| {

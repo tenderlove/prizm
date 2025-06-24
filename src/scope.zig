@@ -28,17 +28,6 @@ pub const Scope = struct {
         return self.name;
     }
 
-    pub fn maxId(self: *Scope) u32 {
-        const list = [_]u32{ self.tmp_id, self.local_id, self.param_id, self.label_id };
-        var max: u32 = 0;
-        for (list) |item| {
-            if (item > max) {
-                max = item;
-            }
-        }
-        return max;
-    }
-
     pub fn getLocalName(self: *Scope, name: []const u8) !*Var {
         const info = self.locals.get(name);
         if (info) |v| {
@@ -94,10 +83,6 @@ pub const Scope = struct {
     pub fn newTemp(self: *Scope) !*Var {
         defer self.tmp_id += 1;
         return try self.addVar(try Var.initTemp(self.arena.allocator(), self.nextVarId(), self.tmp_id));
-    }
-
-    fn newImmediate(_: *Scope, value: u64) ir.Immediate {
-        return ir.Immediate{ .value = value };
     }
 
     pub fn newLabel(self: *Scope) ir.Label {

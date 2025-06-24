@@ -563,27 +563,27 @@ pub const CFG = struct {
         self.state = .registers_allocated;
     }
 
-    fn isolatePhi(self: *CFG) !void {
+    pub fn isolatePhi(self: *CFG) !void {
         try self.ssa_destructor.isolatePhi(self);
         self.state = .phi_isolated;
     }
 
-    fn insertPhiCopies(self: *CFG) !void {
+    pub fn insertPhiCopies(self: *CFG) !void {
         try self.ssa_destructor.insertPhiCopies(self);
         self.state = .phi_copies_inserted;
     }
 
-    fn serializeCopyGroups(self: *CFG) !void {
+    pub fn serializeCopyGroups(self: *CFG) !void {
         try self.ssa_destructor.serializeCopyGroups(self);
         self.state = .copy_groups_serialized;
     }
 
-    fn removeRenamedVariables(self: *CFG) !void {
+    pub fn removeRenamedVariables(self: *CFG) !void {
         try self.ssa_destructor.renameAllVariables(self);
         self.state = .renamed_variables_removed;
     }
 
-    fn removePhi(self: *CFG) !void {
+    pub fn removePhi(self: *CFG) !void {
         try self.ssa_destructor.eliminatePhi(self);
         self.state = .phi_removed;
     }
