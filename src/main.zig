@@ -9,6 +9,7 @@ const Scope = @import("scope.zig").Scope;
 const Allocator = std.mem.Allocator;
 const yazap = @import("yazap");
 const printer = @import("printer.zig");
+const RegisterAllocator = @import("register_allocator.zig").RegisterAllocator;
 const App = yazap.App;
 const Arg = yazap.Arg;
 
@@ -37,11 +38,15 @@ pub fn main() !void {
     try cfgcmd.addArg(Arg.singleValueOption("format", 'f', "Output format (dot or ascii)"));
     try prizm.addSubcommand(cfgcmd);
 
+    var regcmd = app.createCommand("regalloc", "test register allocator");
+    try regcmd.addArg(Arg.positional("FILE", null, null));
+    try prizm.addSubcommand(regcmd);
+
     const matches = try app.parseProcess();
 
     if (matches.subcommandMatches("run")) |runcmd_matches| {
         if (runcmd_matches.getSingleValue("FILE")) |path| {
-            std.log.info("run file {s}", .{ path });
+            std.log.info("run file {s}", .{path});
 
             // Read the file in
             const file = try std.fs.cwd().openFile(path, .{});
@@ -78,7 +83,7 @@ pub fn main() !void {
 
     if (matches.subcommandMatches("ir")) |runcmd_matches| {
         if (runcmd_matches.getSingleValue("FILE")) |path| {
-            std.log.info("print IR for {s}", .{ path });
+            std.log.info("print IR for {s}", .{path});
 
             // Create a new VM
             const machine = try vm.init(allocator);
@@ -89,13 +94,12 @@ pub fn main() !void {
             try printer.printIR(allocator, scope, std.io.getStdOut().writer().any());
 
             return;
-
         }
     }
 
     if (matches.subcommandMatches("cfg")) |runcmd_matches| {
         if (runcmd_matches.getSingleValue("FILE")) |path| {
-            std.log.info("print CFG for {s}", .{ path });
+            std.log.info("print CFG for {s}", .{path});
 
             // Create a new VM
             const machine = try vm.init(allocator);
@@ -132,6 +136,34 @@ pub fn main() !void {
             }
 
             try printer.printCFGWithFormat(allocator, scope, step, format, std.io.getStdOut().writer().any());
+
+            return;
+        }
+    }
+
+    if (matches.subcommandMatches("regalloc")) |runcmd_matches| {
+        if (runcmd_matches.getSingleValue("FILE")) |path| {
+            std.log.info("register allocation for {s}", .{path});
+
+            // Create a new VM
+            const machine = try vm.init(allocator);
+            defer machine.deinit(allocator);
+
+            const scope = try compileFile(allocator, path, machine);
+
+            // Build CFG and compile to renamed state (ready for register allocation)
+            const cfg = try CFG.build(allocator, scope);
+            defer cfg.deinit();
+
+            try cfg.compileUntil(.renamed);
+
+            std.debug.print("CFG compiled to 'renamed' state with {d} variables\n", .{cfg.opndCount()});
+
+            // Create and run register allocator
+            var ra = try RegisterAllocator.init(allocator, cfg);
+            defer ra.deinit();
+
+            try ra.allocate();
 
             return;
         }

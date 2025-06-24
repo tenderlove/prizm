@@ -138,7 +138,7 @@ const AsciiOutputStrategy = struct {
     }
 };
 
-const IRPrinter = struct {
+pub const IRPrinter = struct {
     fn formatIntAsSubscript(alloc: std.mem.Allocator, num: usize) ![]u8 {
         var result = std.ArrayList(u8).init(alloc);
         defer result.deinit();
@@ -182,9 +182,16 @@ const IRPrinter = struct {
                 defer alloc.free(subscript);
                 try result.appendSlice(subscript);
             },
-            else => {
-                try result.writer().print("{s}{d}", .{ op.shortName(), op.number() });
+            .temp => |t| {
+                const temp_str = try std.fmt.allocPrint(alloc, "t{d}", .{t.name});
+                defer alloc.free(temp_str);
+                try result.appendSlice(temp_str);
             },
+            .live_range => |t| {
+                const temp_str = try std.fmt.allocPrint(alloc, "LR{d}", .{t.name});
+                defer alloc.free(temp_str);
+                try result.appendSlice(temp_str);
+            }
         }
 
         return result.toOwnedSlice();
@@ -207,7 +214,7 @@ const IRPrinter = struct {
         }
     }
 
-    fn printOpnd(op: *const ir.Variable, out: anytype) !void {
+    pub fn printOpnd(op: *const ir.Variable, out: anytype) !void {
         switch (op.data) {
             .local => |p| try out.print("{s}", .{p.source_name}),
             .redef => |r| {
@@ -219,9 +226,12 @@ const IRPrinter = struct {
                 try out.print("′", .{});
                 try printIntAsSubscript(r.orig.data.redef.variant, out);
             },
-            else => {
-                try out.print("{s}{d}", .{ op.shortName(), op.number() });
+            .temp => |t| {
+                try out.print("t{d}", .{t.name});
             },
+            .live_range => |t| {
+                try out.print("LR{d}", .{t.name});
+            }
         }
     }
 
@@ -333,7 +343,7 @@ const IRPrinter = struct {
 
                 switch (unwrapped_node.data) {
                     .putlabel => |insn| {
-                        try out.print("{s}{d}:\n", .{ insn.name.shortName(), insn.name.id });
+                        try out.print("L{d}:\n", .{ insn.name.id });
                     },
                     .define_method => |insn| {
                         try work.append(insn.func);
@@ -494,7 +504,7 @@ const CFGPrinter = struct {
             try out.printClusterHeader(work_scope);
             try cfg.compileUntil(steps);
             // std.debug.print("opnd count {d}\n", .{ work_scope.opndCount() });
-            // try cfg.analyze();
+            try cfg.analyze();
             // try cfg.placePhis();
             // try cfg.rename();
             // std.debug.print("opnd count {d}\n", .{ work_scope.opndCount() });
@@ -602,6 +612,7 @@ fn outVarWidth(opnd: *ir.Variable) usize {
         .redef => |r| outVarWidth(r.orig) + countDigits(r.variant),
         .prime => |p| outVarWidth(p.orig) + 1,
         .temp => |t| countDigits(t.name) + 1,
+        .live_range => |t| countDigits(t.name) + 2,
     };
 }
 

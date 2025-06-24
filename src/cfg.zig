@@ -11,6 +11,7 @@ const BitMap = std.DynamicBitSetUnmanaged;
 const bitmatrix = @import("utils/bitmatrix.zig");
 const BitMatrix = bitmatrix.BitMatrix;
 const SSADestructor = @import("cfg/ssa_destructor.zig").SSADestructor;
+const RegisterAllocator = @import("register_allocator.zig").RegisterAllocator;
 
 pub const CFG = struct {
     pub const State = enum {
@@ -18,6 +19,7 @@ pub const CFG = struct {
         analyzed,
         phi_placed,
         renamed,
+        registers_allocated,
         phi_isolated,
         phi_copies_inserted,
         copy_groups_serialized,
@@ -554,6 +556,13 @@ pub const CFG = struct {
         self.state = .renamed;
     }
 
+    fn allocateRegisters(self: *CFG) !void {
+        var ra = try RegisterAllocator.init(self.mem, self);
+        defer ra.deinit();
+        try ra.allocate();
+        self.state = .registers_allocated;
+    }
+
     fn isolatePhi(self: *CFG) !void {
         try self.ssa_destructor.isolatePhi(self);
         self.state = .phi_isolated;
@@ -643,6 +652,9 @@ pub const CFG = struct {
                 try self.rename();
             },
             .renamed => {
+                try self.allocateRegisters();
+            },
+            .registers_allocated => {
                 try self.isolatePhi();
             },
             .phi_isolated => {

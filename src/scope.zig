@@ -11,6 +11,7 @@ pub const Scope = struct {
     local_id: u32 = 0,
     param_id: u32 = 0,
     label_id: usize = 0,
+    lr_id: usize = 0,
     param_size: usize = 0,
     local_storage: usize = 0,
     primes: usize = 0,
@@ -83,6 +84,11 @@ pub const Scope = struct {
     pub fn newPrime(self: *Scope, op: *Var) !*Var {
         defer self.primes += 1;
         return try self.addVar(try Var.initPrime(self.arena.allocator(), self.nextVarId(), self.primes, op));
+    }
+
+    pub fn newLiveRange(self: *Scope, varcount: usize) !*Var {
+        defer self.lr_id += 1;
+        return try self.addVar(try Var.initLiveRange(self.arena.allocator(), self.nextVarId(), self.lr_id, varcount));
     }
 
     pub fn newTemp(self: *Scope) !*Var {

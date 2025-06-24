@@ -3,6 +3,7 @@ const cmp = @import("compiler.zig");
 const cfg = @import("cfg.zig");
 const Scope = @import("scope.zig").Scope;
 const BasicBlock = cfg.BasicBlock;
+const BitMap = std.DynamicBitSetUnmanaged;
 
 pub const InstructionList = std.DoublyLinkedList;
 
@@ -11,6 +12,7 @@ pub const VariableType = enum {
     temp,
     redef,
     prime,
+    live_range,
 };
 
 pub const VariableData = union(VariableType) {
@@ -21,14 +23,14 @@ pub const VariableData = union(VariableType) {
     },
     redef: struct { variant: usize, orig: *Variable, defblock: *BasicBlock },
     prime: struct { prime_id: usize, orig: *Variable },
+    live_range: struct {
+        name: usize,
+        variables: BitMap,  // All variables in this live range
+    },
 };
 
 pub const Label = struct {
     id: usize,
-
-    pub fn shortName(_: Label) []const u8 {
-        return "L";
-    }
 };
 
 pub const Variable = struct {
@@ -60,6 +62,12 @@ pub const Variable = struct {
         return opnd;
     }
 
+    pub fn initLiveRange(alloc: std.mem.Allocator, id: usize, lrid: usize, varcount: usize) !*Variable {
+        const opnd = try alloc.create(Variable);
+        opnd.* = .{ .id = id, .data = .{ .live_range = .{ .name = lrid, .variables = try BitMap.initEmpty(alloc, varcount) } } };
+        return opnd;
+    }
+
     pub fn number(self: Variable) usize {
         return switch (self.data) {
             .redef => unreachable,
@@ -68,11 +76,19 @@ pub const Variable = struct {
         };
     }
 
+    pub fn addVariable(self: *Variable, id: usize) void {
+        return switch (self.data) {
+            .live_range => |*lr| lr.variables.set(id),
+            else => unreachable,
+        };
+    }
+
     pub fn getVar(self: *Variable) *Variable {
         return switch (self.data) {
             .temp, .local => self,
             .redef => |r| getVar(r.orig),
             .prime => |p| getVar(p.orig),
+            .live_range => unreachable,
         };
     }
 
@@ -116,15 +132,6 @@ pub const Variable = struct {
             .temp => |*t| t.defblock = block,
             else => {},
         }
-    }
-
-    pub fn shortName(self: Variable) []const u8 {
-        return switch (self.data) {
-            .local => "l",
-            .prime => "P",
-            .temp => "t",
-            .redef => "r",
-        };
     }
 };
 
