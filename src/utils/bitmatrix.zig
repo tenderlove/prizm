@@ -56,6 +56,52 @@ pub const BitMatrix = struct {
     }
 };
 
+pub const SymmetricMatrix = struct {
+    const Self = @This();
+
+    matrix: *BitMatrix,
+
+    pub fn init(allocator: std.mem.Allocator, rows: usize, cols: usize) !*Self {
+        const self = try allocator.create(Self);
+        self.matrix = try BitMatrix.init(allocator, rows, cols);
+        return self;
+    }
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        self.matrix.deinit(allocator);
+        allocator.destroy(self);
+    }
+
+    fn normalizeCoords(row: usize, col: usize) struct { usize, usize } {
+        return if (row <= col) .{ row, col } else .{ col, row };
+    }
+
+    pub fn set(self: *Self, row: usize, col: usize) void {
+        const coords = normalizeCoords(row, col);
+        self.matrix.set(coords[0], coords[1]);
+    }
+
+    pub fn unset(self: *Self, row: usize, col: usize) void {
+        const coords = normalizeCoords(row, col);
+        self.matrix.unset(coords[0], coords[1]);
+    }
+
+    pub fn isSet(self: *Self, row: usize, col: usize) bool {
+        const coords = normalizeCoords(row, col);
+        return self.matrix.isSet(coords[0], coords[1]);
+    }
+};
+
+test "set both directions" {
+    const alloc = std.testing.allocator;
+
+    const matrix = try SymmetricMatrix.init(alloc, 8, 8);
+    defer matrix.deinit(alloc);
+
+    matrix.set(2, 3);
+    try std.testing.expect(matrix.isSet(3, 2));
+}
+
 test "popcount" {
     const alloc = std.testing.allocator;
 
@@ -214,12 +260,12 @@ test "bit iterator many planes" {
     matrix.set(15, 15);
 
     const list = [_][2]u16{
-        [_]u16{0, 0},
-        [_]u16{1, 8},
-        [_]u16{2, 2},
-        [_]u16{3, 10},
-        [_]u16{4, 7},
-        [_]u16{15, 15},
+        [_]u16{ 0, 0 },
+        [_]u16{ 1, 8 },
+        [_]u16{ 2, 2 },
+        [_]u16{ 3, 10 },
+        [_]u16{ 4, 7 },
+        [_]u16{ 15, 15 },
     };
 
     var points: usize = 0;
@@ -259,7 +305,7 @@ test "last bit on first of many planes" {
     matrix.set(0, matrix.columns - 1);
 
     const list = [_][2]usize{
-        [_]usize{0, matrix.columns - 1},
+        [_]usize{ 0, matrix.columns - 1 },
     };
 
     var points: usize = 0;
