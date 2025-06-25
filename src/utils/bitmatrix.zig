@@ -90,6 +90,22 @@ pub const SymmetricMatrix = struct {
         const coords = normalizeCoords(row, col);
         return self.matrix.isSet(coords[0], coords[1]);
     }
+
+    pub fn clear(self: *Self) void {
+        self.matrix.clear();
+    }
+
+    pub fn count(self: *Self) usize {
+        return self.matrix.count();
+    }
+
+    pub fn getColumn(self: *Self, col: usize) BitMap {
+        return self.matrix.getColumn(col);
+    }
+
+    pub fn getRow(self: *Self, row: usize) BitMap {
+        return self.matrix.getColumn(row); // Same as getColumn due to symmetry
+    }
 };
 
 test "set both directions" {
