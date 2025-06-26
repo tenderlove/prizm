@@ -262,7 +262,7 @@ pub const Scope = struct {
 
         // Walk through all live basic blocks and mark their instructions as alive
         for (live_blocks) |block| {
-            var iter = block.instructionIter();
+            var iter = block.instructionIter(.{});
             while (iter.next()) |insn| {
                 alive_numbers.set(insn.number);
             }

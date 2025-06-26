@@ -308,7 +308,7 @@ pub const CFG = struct {
         for (self.blocks) |block| {
             assert(block.reachable);
 
-            var iter = block.instructionIter();
+            var iter = block.instructionIter(.{});
             while (iter.next()) |insn| {
                 if (insn.data.outVar()) |v| {
                     if (seen_opnd.isSet(v.id)) {
@@ -434,7 +434,7 @@ pub const CFG = struct {
         }
 
         pub fn fillPhiParams(self: *Renamer, _: *BasicBlock, variable_source_bb: *BasicBlock) !void {
-            var iter = variable_source_bb.instructionIter();
+            var iter = variable_source_bb.instructionIter(.{});
             while (iter.next()) |insn| {
                 switch (insn.data) {
                     .putlabel => {}, // Skip putlabel
@@ -453,7 +453,7 @@ pub const CFG = struct {
         }
 
         pub fn rename(self: *Renamer, cfg: *CFG, bb: *BasicBlock) !void {
-            var iter = bb.instructionIter();
+            var iter = bb.instructionIter(.{});
             var pushed = std.ArrayList(*Var).init(cfg.mem);
             defer pushed.deinit();
 
@@ -857,34 +857,62 @@ pub const BasicBlock = struct {
         }
     }
 
-    const InstructionIter = struct {
-        current: ?*std.DoublyLinkedList.Node,
-        finish: *std.DoublyLinkedList.Node,
-        done: bool,
+    pub const IteratorOptions = struct {
+        direction: Direction = .forward,
 
-        pub fn next(self: *InstructionIter) ?*ir.InstructionListNode {
-            if (self.done) return null;
-
-            if (self.current) |node| {
-                if (node == self.finish) {
-                    self.done = true;
-                    return @fieldParentPtr("node", node);
-                }
-
-                self.current = node.next;
-                return @fieldParentPtr("node", node);
-            } else {
-                return null;
-            }
-        }
+        pub const Direction = enum {
+            forward,
+            reverse,
+        };
     };
 
-    pub fn instructionIter(self: *BasicBlock) InstructionIter {
-        return .{ .current = &self.start.node, .finish = &self.finish.node, .done = false };
+    pub fn Iterator(comptime options: IteratorOptions) type {
+        return struct {
+            const Self = @This();
+
+            current: ?*std.DoublyLinkedList.Node,
+            finish: *std.DoublyLinkedList.Node,
+            done: bool,
+
+            pub fn next(self: *Self) ?*ir.InstructionListNode {
+                if (self.done) return null;
+
+                if (self.current) |node| {
+                    if (node == self.finish) {
+                        self.done = true;
+                        return @fieldParentPtr("node", node);
+                    }
+
+                    // Move to next node based on direction
+                    switch (options.direction) {
+                        .forward => self.current = node.next,
+                        .reverse => self.current = node.prev,
+                    }
+                    return @fieldParentPtr("node", node);
+                } else {
+                    return null;
+                }
+            }
+        };
+    }
+
+    pub fn instructionIter(self: *BasicBlock, comptime options: IteratorOptions) Iterator(options) {
+        return switch (options.direction) {
+            .forward => Iterator(options){
+                .current = &self.start.node,
+                .finish = &self.finish.node,
+                .done = false,
+            },
+            .reverse => Iterator(options){
+                .current = &self.finish.node,
+                .finish = &self.start.node,
+                .done = false,
+            },
+        };
     }
 
     pub fn fillVarSets(self: *BasicBlock) !void {
-        var iter = self.instructionIter();
+        var iter = self.instructionIter(.{});
 
         while (iter.next()) |insn| {
             // Fill the UE set.
@@ -922,7 +950,7 @@ pub const BasicBlock = struct {
     }
 
     pub fn hasPhiFor(self: *BasicBlock, opnd: *Var) bool {
-        var iter = self.instructionIter();
+        var iter = self.instructionIter(.{});
         while (iter.next()) |insn| {
             switch (insn.data) {
                 .putlabel => {}, // Skip putlabel
@@ -938,7 +966,7 @@ pub const BasicBlock = struct {
     }
 
     pub fn addPhi(self: *BasicBlock, scope: *Scope, opnd: *Var) !void {
-        var iter = self.instructionIter();
+        var iter = self.instructionIter(.{});
         while (iter.next()) |insn| {
             switch (insn.data) {
                 inline .phi, .putlabel => {}, // Skip phi and putlabel
@@ -968,7 +996,7 @@ pub const BasicBlock = struct {
 
     fn instructionCount(self: *BasicBlock) u32 {
         var count: u32 = 0;
-        var iter = self.instructionIter();
+        var iter = self.instructionIter(.{});
 
         while (iter.next()) |_| {
             count += 1;
@@ -1771,7 +1799,7 @@ fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
     defer iter.deinit();
 
     while (try iter.next()) |bb| {
-        var insni = bb.instructionIter();
+        var insni = bb.instructionIter(.{});
         while (insni.next()) |insn| {
             if (name == @as(ir.InstructionName, insn.data)) {
                 return bb;
@@ -1787,7 +1815,7 @@ fn findInsn(cfg: *CFG, name: ir.InstructionName) !?*ir.InstructionListNode {
     defer iter.deinit();
 
     while (try iter.next()) |bb| {
-        var insni = bb.instructionIter();
+        var insni = bb.instructionIter(.{});
         while (insni.next()) |insn| {
             if (name == @as(ir.InstructionName, insn.data)) {
                 return insn;

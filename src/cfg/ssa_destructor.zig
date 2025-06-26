@@ -298,7 +298,7 @@ pub const SSADestructor = struct {
     }
 
     fn removePrimesAndAliases(block: *BasicBlock, prime_map: []*Var) void {
-        var iter = block.instructionIter();
+        var iter = block.instructionIter(.{});
         while (iter.next()) |insn_node| {
             var insn = &insn_node.data;
 

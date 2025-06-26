@@ -62,7 +62,7 @@ pub const RegisterAllocator = struct {
         for (self.cfg.blocks) |bb| {
             assert(bb.reachable);
             
-            var iter = bb.instructionIter();
+            var iter = bb.instructionIter(.{});
             while (iter.next()) |insn_node| {
                 switch (insn_node.data) {
                     .putlabel => {}, // Skip putlabel instructions

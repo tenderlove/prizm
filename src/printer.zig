@@ -462,7 +462,7 @@ const CFGPrinter = struct {
         try ctx.out.printLineBreak();
         try ctx.out.printInsnHeader();
 
-        var iter = blk.instructionIter();
+        var iter = blk.instructionIter(.{});
         while (iter.next()) |insn| {
             if (ir.InstructionName.define_method == @as(ir.InstructionName, insn.data)) {
                 try ctx.work.append(insn.data.define_method.func);
@@ -493,7 +493,7 @@ const CFGPrinter = struct {
 
             for (cfg.blocks) |bb| {
                 if (!bb.reachable) continue;
-                var iter = bb.instructionIter();
+                var iter = bb.instructionIter(.{});
                 while (iter.next()) |insn| {
                     if (@tagName(insn.data).len > widest_insn) {
                         widest_insn = @tagName(insn.data).len;
