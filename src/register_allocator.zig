@@ -7,6 +7,22 @@ const BitMap = std.DynamicBitSetUnmanaged;
 const assert = @import("std").debug.assert;
 const UnionFind = @import("union_find.zig").UnionFind;
 const IRPrinter = @import("printer.zig").IRPrinter;
+const InterferenceGraph = @import("interference_graph.zig").InterferenceGraph;
+
+// Physical register representation
+pub const PhysicalRegister = enum(u8) {
+    R0 = 0,
+    R1 = 1,
+    R2 = 2,
+    R3 = 3,
+    R4 = 4,
+    R5 = 5,
+    R6 = 6,
+    R7 = 7,
+    // Add more registers as needed
+};
+
+pub const RegisterMapping = std.AutoHashMap(usize, PhysicalRegister);
 
 pub const RegisterAllocator = struct {
     allocator: std.mem.Allocator,
@@ -30,17 +46,17 @@ pub const RegisterAllocator = struct {
     // 1. Each SSA name starts in its own set
     // 2. Visit each phi function and union parameters with result  
     // 3. Each remaining unique set becomes a LiveRange
-    pub fn allocate(self: *RegisterAllocator) !void {
+    // 4. Assign physical registers to each live range
+    // Returns: HashMap from live range ID to physical register
+    pub fn allocate(self: *RegisterAllocator, _: *RegisterMapping) !void {
         // Ensure CFG is in the right state (after SSA renaming, before phi isolation)
         if (self.cfg.state != .renamed) {
             std.debug.print("Register allocation requires CFG to be in 'renamed' state\n", .{});
-            return;
+            return error.InvalidCFGState;
         }
 
         // Reanalyze so we get the right liveout sets
         try self.cfg.analyze();
-        
-        std.debug.print("Starting register allocation with {d} variables...\n", .{self.cfg.opndCount()});
         
         // Step 1: Each SSA name starts in its own set (already done in UnionFind.init)
         
@@ -55,6 +71,40 @@ pub const RegisterAllocator = struct {
 
         // Rewrite the code with Live Ranges
         self.rewriteWithLiveRanges(range_map);
+
+        // We have to re-analyze the CFG after updating the code with LR
+        try self.cfg.analyze();
+
+        // Build an interference graph
+        var graph = try InterferenceGraph.init(self.allocator, self.cfg.scope.liveRangeCount());
+        defer graph.deinit(self.allocator);
+        try self.buildInterferenceGraph(graph);
+    }
+
+    fn buildInterferenceGraph(self: *RegisterAllocator, graph: *InterferenceGraph) !void {
+        for (self.cfg.blocks) |bb| {
+            assert(bb.reachable);
+
+            // The LiveOut set should be a set of Live Ranges
+            var live_now = try bb.liveout_set.clone(self.allocator);
+            defer live_now.deinit(self.allocator);
+
+            var iter = bb.instructionIter(.{ .direction = .reverse });
+            while (iter.next()) |insn| {
+                if (insn.data.outVar()) |n| {
+                    live_now.unset(n.id);
+                    var live_iter = live_now.iterator(.{});
+                    while (live_iter.next()) |lr_id| {
+                        graph.add(lr_id, n.id);
+                    }
+                }
+
+                var opiter = insn.data.opIter();
+                while (opiter.next()) |op| {
+                    live_now.set(op.id);
+                }
+            }
+        }
     }
     
     // Step 2: Process phi functions to union related variables

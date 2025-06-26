@@ -12,6 +12,7 @@ const bitmatrix = @import("utils/bitmatrix.zig");
 const BitMatrix = bitmatrix.BitMatrix;
 const SSADestructor = @import("cfg/ssa_destructor.zig").SSADestructor;
 const RegisterAllocator = @import("register_allocator.zig").RegisterAllocator;
+const RegisterMapping = @import("register_allocator.zig").RegisterMapping;
 
 pub const CFG = struct {
     pub const State = enum {
@@ -559,7 +560,10 @@ pub const CFG = struct {
     fn allocateRegisters(self: *CFG) !void {
         var ra = try RegisterAllocator.init(self.mem, self);
         defer ra.deinit();
-        try ra.allocate();
+        var mapping = RegisterMapping.init(self.mem);
+        defer mapping.deinit();
+
+        try ra.allocate(&mapping);
         self.state = .registers_allocated;
     }
 

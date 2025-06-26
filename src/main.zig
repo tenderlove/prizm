@@ -10,6 +10,7 @@ const Allocator = std.mem.Allocator;
 const yazap = @import("yazap");
 const printer = @import("printer.zig");
 const RegisterAllocator = @import("register_allocator.zig").RegisterAllocator;
+const RegisterMapping = @import("register_allocator.zig").RegisterMapping;
 const App = yazap.App;
 const Arg = yazap.Arg;
 
@@ -162,8 +163,10 @@ pub fn main() !void {
             // Create and run register allocator
             var ra = try RegisterAllocator.init(allocator, cfg);
             defer ra.deinit();
+            var mapping = RegisterMapping.init(allocator);
+            defer mapping.deinit();
 
-            try ra.allocate();
+            try ra.allocate(&mapping);
 
             return;
         }
