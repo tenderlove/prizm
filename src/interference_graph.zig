@@ -53,19 +53,8 @@ pub const InterferenceGraph = struct {
         return self.adjacency.getColumn(node);
     }
 
-    pub const NeighborIterator = struct {
-        bit_iterator: BitMap.Iterator(.{}),
-
-        pub fn next(self: *NeighborIterator) ?usize {
-            return self.bit_iterator.next();
-        }
-    };
-
-    pub fn neighborIterator(self: *const Self, node: usize) NeighborIterator {
-        const neighbors = self.adjacency.getColumn(node);
-        return NeighborIterator{
-            .bit_iterator = neighbors.iterator(.{}),
-        };
+    pub fn neighborIterator(self: *const Self, node: usize) BitMap.Iterator(.{}) {
+        return self.getNeighbors(node).iterator(.{});
     }
 };
 
