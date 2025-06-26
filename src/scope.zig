@@ -21,6 +21,7 @@ pub const Scope = struct {
     parent: ?*Scope,
     locals: std.StringHashMapUnmanaged(*Var),
     variables: std.ArrayList(*Var),
+    live_ranges: std.ArrayList(*Var),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
 
@@ -44,12 +45,25 @@ pub const Scope = struct {
         return var_;
     }
 
+    fn addLiveRange(self: *Scope, lr: *Var) !*Var {
+        try self.live_ranges.append(lr);
+        return lr;
+    }
+
     pub fn nextVarId(self: *Scope) usize {
         return self.variables.items.len;
     }
 
+    fn nextLiveRangeId(self: *Scope) usize {
+        return self.live_ranges.items.len;
+    }
+
     pub fn varCount(self: Scope) usize {
         return self.variables.items.len;
+    }
+
+    pub fn liveRangeCount(self: Scope) usize {
+        return self.live_ranges.items.len;
     }
 
     pub fn insnCount(self: *Scope) usize {
@@ -58,6 +72,10 @@ pub const Scope = struct {
 
     pub fn getVariableById(self: Scope, id: usize) *Var {
         return self.variables.items[id];
+    }
+
+    pub fn getLiveRangeById(self: Scope, id: usize) *Var {
+        return self.live_ranges.items[id];
     }
 
     fn newLocal(self: *Scope, source_name: []const u8) !*Var {
@@ -77,7 +95,7 @@ pub const Scope = struct {
 
     pub fn newLiveRange(self: *Scope, varcount: usize) !*Var {
         defer self.lr_id += 1;
-        return try self.addVar(try Var.initLiveRange(self.arena.allocator(), self.nextVarId(), self.lr_id, varcount));
+        return try self.addLiveRange(try Var.initLiveRange(self.arena.allocator(), self.nextLiveRangeId(), self.lr_id, varcount));
     }
 
     pub fn newTemp(self: *Scope) !*Var {
@@ -215,6 +233,7 @@ pub const Scope = struct {
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(*Var){},
             .variables = std.ArrayList(*Var).init(alloc),
+            .live_ranges = std.ArrayList(*Var).init(alloc),
             .allocator = alloc,
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
@@ -298,6 +317,7 @@ pub const Scope = struct {
         }
         self.locals.deinit(self.allocator);
         self.variables.deinit();
+        self.live_ranges.deinit();
         self.arena.deinit();
         self.allocator.destroy(self);
     }
