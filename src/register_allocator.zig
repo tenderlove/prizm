@@ -204,3 +204,35 @@ pub const RegisterAllocator = struct {
         }
     }
 };
+
+test "live ranges" {
+    const allocator = std.testing.allocator;
+
+    const machine = try VM.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code =
+        \\ x = 123
+        \\ y = 456
+        \\ if foo
+        \\   y += 3
+        \\ else
+        \\   y += 2
+        \\ end
+        \\ puts x + y
+        ;
+
+    const scope = try cmp.compileString(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try CFG.build(allocator, scope);
+    defer cfg.deinit();
+    try cfg.compileUntil(.renamed);
+    const ra = try RegisterAllocator.allocateRegisters(allocator, cfg);
+    defer ra.deinit();
+
+    // const stdout = std.io.getStdErr().writer().any();
+    // try @import("printer.zig").printInterferenceGraphDOT(allocator, cfg, ra.interference_graph, stdout);
+
+    // std.debug.print("edge count {d}\n", .{ ra.interference_graph.edgeCount() });
+}
