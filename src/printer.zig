@@ -6,6 +6,8 @@ const CFG = cfg_z.CFG;
 const BasicBlock = cfg_z.BasicBlock;
 const Scope = @import("scope.zig").Scope;
 const BitMap = std.DynamicBitSetUnmanaged;
+const InterferenceGraph = @import("interference_graph.zig").InterferenceGraph;
+const assert = @import("std").debug.assert;
 
 const DotOutputStrategy = struct {
     writer: std.io.AnyWriter,
@@ -191,7 +193,7 @@ pub const IRPrinter = struct {
                 const temp_str = try std.fmt.allocPrint(alloc, "LR{d}", .{t.id});
                 defer alloc.free(temp_str);
                 try result.appendSlice(temp_str);
-            }
+            },
         }
 
         return result.toOwnedSlice();
@@ -231,7 +233,7 @@ pub const IRPrinter = struct {
             },
             .live_range => |t| {
                 try out.print("LR{d}", .{t.id});
-            }
+            },
         }
     }
 
@@ -343,7 +345,7 @@ pub const IRPrinter = struct {
 
                 switch (unwrapped_node.data) {
                     .putlabel => |insn| {
-                        try out.print("L{d}:\n", .{ insn.name.id });
+                        try out.print("L{d}:\n", .{insn.name.id});
                     },
                     .define_method => |insn| {
                         try work.append(insn.func);
@@ -361,6 +363,70 @@ pub const IRPrinter = struct {
 
             try out.print("\n", .{});
         }
+    }
+};
+
+const InterferenceGraphPrinter = struct {
+    pub fn printDOT(allocator: std.mem.Allocator, cfg: *CFG, graph: *const InterferenceGraph, writer: std.io.AnyWriter) !void {
+        const node_count = graph.size();
+
+        try writer.print("graph InterferenceGraph {{\n", .{});
+        try writer.print("  rankdir=TB;\n", .{});
+        try writer.print("  node [shape=circle];\n", .{});
+        try writer.print("\n", .{});
+
+        // Create lookup table for live range variables (already sorted by ID)
+        var lr_lookup = try std.ArrayList(*const ir.Variable).initCapacity(allocator, node_count);
+        defer lr_lookup.deinit();
+
+        // Populate lookup table - live ranges are already sorted by ID
+        for (cfg.scope.variables.items) |var_ptr| {
+            if (var_ptr.data == .live_range) {
+                try lr_lookup.append(var_ptr);
+            }
+        }
+
+        // Print all nodes with their variable contents
+        for (0..node_count) |i| {
+            assert(i < lr_lookup.items.len);
+            const lr = lr_lookup.items[i];
+
+            // Build a label showing the variables in this live range
+            var label = std.ArrayList(u8).init(allocator);
+            defer label.deinit();
+
+            try label.appendSlice("LR");
+            try label.writer().print("{d}\\n", .{i});
+
+            // Add variables in this live range
+            var var_iter = lr.data.live_range.variables.iterator(.{});
+            var first = true;
+            while (var_iter.next()) |var_id| {
+                if (!first) {
+                    try label.appendSlice(", ");
+                }
+                first = false;
+
+                const var_ptr = cfg.scope.getVariableById(var_id);
+                const var_name = try IRPrinter.formatOpnd(allocator, var_ptr);
+                defer allocator.free(var_name);
+                try label.appendSlice(var_name);
+            }
+
+            try writer.print("  LR{d} [label=\"{s}\"];\n", .{ i, label.items });
+        }
+        try writer.print("\n", .{});
+
+        // Print edges (interference relationships)
+        for (0..node_count) |i| {
+            for (i + 1..node_count) |j| {
+                if (graph.interferes(i, j)) {
+                    try writer.print("  LR{d} -- LR{d};\n", .{ i, j });
+                }
+            }
+        }
+
+        try writer.print("}}\n", .{});
     }
 };
 
@@ -656,4 +722,8 @@ pub fn printCFGWithFormat(alloc: std.mem.Allocator, scope: *Scope, step: CFG.Sta
             try CFGPrinter.printAsciiCFG(alloc, scope, step, &strategy);
         },
     }
+}
+
+pub fn printInterferenceGraphDOT(allocator: std.mem.Allocator, cfg: *CFG, graph: *const InterferenceGraph, out: std.io.AnyWriter) !void {
+    try InterferenceGraphPrinter.printDOT(allocator, cfg, graph, out);
 }
