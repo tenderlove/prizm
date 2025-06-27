@@ -90,21 +90,6 @@ pub const RegisterAllocator = struct {
         self.allocator.destroy(self);
     }
 
-    // Read-only access to the range map
-    pub fn getRangeMap(self: *const RegisterAllocator) *const std.AutoHashMap(usize, *Var) {
-        return &self.range_map;
-    }
-
-    // Read-only access to the interference graph
-    pub fn getInterferenceGraph(self: *const RegisterAllocator) *const InterferenceGraph {
-        return self.interference_graph;
-    }
-
-    // Read-only access to the register mapping
-    pub fn getRegisterMapping(self: *const RegisterAllocator) *const RegisterMapping {
-        return &self.register_mapping;
-    }
-
     fn buildInterferenceGraph(allocator: std.mem.Allocator, cfg: *CFG, graph: *InterferenceGraph) !void {
         for (cfg.blocks) |bb| {
             assert(bb.reachable);
