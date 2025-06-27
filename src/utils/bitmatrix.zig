@@ -54,6 +54,18 @@ pub const BitMatrix = struct {
         mem.free(self.buffer);
         mem.destroy(self);
     }
+
+    pub fn clone(self: *const Self, mem: std.mem.Allocator) !*Self {
+        const cloned = try mem.create(Self);
+
+        const bitmap_array = try mem.alloc(BitMap, self.rows);
+        for (0..self.rows) |i| {
+            bitmap_array[i] = try self.buffer[i].clone(mem);
+        }
+
+        cloned.* = .{ .rows = self.rows, .columns = self.columns, .buffer = bitmap_array };
+        return cloned;
+    }
 };
 
 pub const SymmetricMatrix = struct {
@@ -105,6 +117,12 @@ pub const SymmetricMatrix = struct {
 
     pub fn getRow(self: *Self, row: usize) BitMap {
         return self.matrix.getColumn(row); // Same as getColumn due to symmetry
+    }
+
+    pub fn clone(self: *Self, allocator: std.mem.Allocator) !*Self {
+        const cloned = try allocator.create(Self);
+        cloned.matrix = try self.matrix.clone(allocator);
+        return cloned;
     }
 };
 
