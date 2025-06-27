@@ -161,12 +161,8 @@ pub fn main() !void {
             std.debug.print("CFG compiled to 'renamed' state with {d} variables\n", .{cfg.opndCount()});
 
             // Create and run register allocator
-            var ra = try RegisterAllocator.init(allocator, cfg);
+            const ra = try RegisterAllocator.allocateRegisters(allocator, cfg);
             defer ra.deinit();
-            var mapping = RegisterMapping.init(allocator);
-            defer mapping.deinit();
-
-            try ra.allocate(&mapping);
 
             return;
         }

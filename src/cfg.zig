@@ -558,12 +558,8 @@ pub const CFG = struct {
     }
 
     fn allocateRegisters(self: *CFG) !void {
-        var ra = try RegisterAllocator.init(self.mem, self);
+        const ra = try RegisterAllocator.allocateRegisters(self.mem, self);
         defer ra.deinit();
-        var mapping = RegisterMapping.init(self.mem);
-        defer mapping.deinit();
-
-        try ra.allocate(&mapping);
         self.state = .registers_allocated;
     }
 

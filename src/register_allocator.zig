@@ -28,66 +28,90 @@ pub const RegisterAllocator = struct {
     allocator: std.mem.Allocator,
     cfg: *CFG,
     union_find: UnionFind,
-    
-    pub fn init(allocator: std.mem.Allocator, cfg: *CFG) !RegisterAllocator {
-        const var_count = cfg.scope.varCount();
-        return RegisterAllocator{
-            .allocator = allocator,
-            .cfg = cfg,
-            .union_find = try UnionFind.init(allocator, var_count),
-        };
-    }
-    
-    pub fn deinit(self: *RegisterAllocator) void {
-        self.union_find.deinit();
-    }
-    
-    // Register allocation using union-find algorithm:
-    // 1. Each SSA name starts in its own set
-    // 2. Visit each phi function and union parameters with result  
-    // 3. Each remaining unique set becomes a LiveRange
-    // 4. Assign physical registers to each live range
-    // Returns: HashMap from live range ID to physical register
-    pub fn allocate(self: *RegisterAllocator, _: *RegisterMapping) !void {
+    range_map: std.AutoHashMap(usize, *Var),
+    interference_graph: *InterferenceGraph,
+    register_mapping: RegisterMapping,
+
+    /// Performs register allocation and returns a RegisterAllocator with all data structures populated
+    pub fn allocateRegisters(allocator: std.mem.Allocator, cfg: *CFG) !*RegisterAllocator {
         // Ensure CFG is in the right state (after SSA renaming, before phi isolation)
-        if (self.cfg.state != .renamed) {
-            std.debug.print("Register allocation requires CFG to be in 'renamed' state\n", .{});
-            return error.InvalidCFGState;
-        }
+        assert(cfg.state == .renamed);
 
         // Reanalyze so we get the right liveout sets
-        try self.cfg.analyze();
-        
-        // Step 1: Each SSA name starts in its own set (already done in UnionFind.init)
-        
+        try cfg.analyze();
+
+        // Step 1: Each SSA name starts in its own set
+        const var_count = cfg.scope.varCount();
+        var union_find = try UnionFind.init(allocator, var_count);
+        errdefer union_find.deinit();
+
         // Step 2: Visit each phi function and union parameters with result
-        self.processPhiFunctions();
-        
+        processPhiFunctions(cfg, &union_find);
+
         // Step 3: Build live ranges from union-find groups
-        // Map from union-find representative to live range index
-        var range_map = std.AutoHashMap(usize, *Var).init(self.allocator);
-        defer range_map.deinit();
-        try self.buildLiveRangesFromUnionFind(&range_map);
+        var range_map = std.AutoHashMap(usize, *Var).init(allocator);
+        errdefer range_map.deinit();
+        try buildLiveRangesFromUnionFind(cfg, &union_find, &range_map);
 
         // Rewrite the code with Live Ranges
-        self.rewriteWithLiveRanges(range_map);
+        rewriteWithLiveRanges(cfg, &union_find, &range_map);
 
         // We have to re-analyze the CFG after updating the code with LR
-        try self.cfg.analyze();
+        try cfg.analyze();
 
         // Build an interference graph
-        var graph = try InterferenceGraph.init(self.allocator, self.cfg.scope.liveRangeCount());
-        defer graph.deinit(self.allocator);
-        try self.buildInterferenceGraph(graph);
+        const interference_graph = try InterferenceGraph.init(allocator, cfg.scope.liveRangeCount());
+        errdefer interference_graph.deinit(allocator);
+        try buildInterferenceGraph(allocator, cfg, interference_graph);
+
+        // Create register mapping
+        const register_mapping = RegisterMapping.init(allocator);
+
+        // Create the allocator instance with all data structures populated
+        const self = try allocator.create(RegisterAllocator);
+
+        self.* = RegisterAllocator{
+            .allocator = allocator,
+            .cfg = cfg,
+            .union_find = union_find,
+            .range_map = range_map,
+            .interference_graph = interference_graph,
+            .register_mapping = register_mapping,
+        };
+
+        return self;
     }
 
-    fn buildInterferenceGraph(self: *RegisterAllocator, graph: *InterferenceGraph) !void {
-        for (self.cfg.blocks) |bb| {
+    pub fn deinit(self: *RegisterAllocator) void {
+        self.union_find.deinit();
+        self.range_map.deinit();
+        self.interference_graph.deinit(self.allocator);
+        self.register_mapping.deinit();
+        self.allocator.destroy(self);
+    }
+
+    // Read-only access to the range map
+    pub fn getRangeMap(self: *const RegisterAllocator) *const std.AutoHashMap(usize, *Var) {
+        return &self.range_map;
+    }
+
+    // Read-only access to the interference graph
+    pub fn getInterferenceGraph(self: *const RegisterAllocator) *const InterferenceGraph {
+        return self.interference_graph;
+    }
+
+    // Read-only access to the register mapping
+    pub fn getRegisterMapping(self: *const RegisterAllocator) *const RegisterMapping {
+        return &self.register_mapping;
+    }
+
+    fn buildInterferenceGraph(allocator: std.mem.Allocator, cfg: *CFG, graph: *InterferenceGraph) !void {
+        for (cfg.blocks) |bb| {
             assert(bb.reachable);
 
             // The LiveOut set should be a set of Live Ranges
-            var live_now = try bb.liveout_set.clone(self.allocator);
-            defer live_now.deinit(self.allocator);
+            var live_now = try bb.liveout_set.clone(allocator);
+            defer live_now.deinit(allocator);
 
             var iter = bb.instructionIter(.{ .direction = .reverse });
             while (iter.next()) |insn| {
@@ -106,12 +130,12 @@ pub const RegisterAllocator = struct {
             }
         }
     }
-    
+
     // Step 2: Process phi functions to union related variables
-    fn processPhiFunctions(self: *RegisterAllocator) void {
-        for (self.cfg.blocks) |bb| {
+    fn processPhiFunctions(cfg: *CFG, union_find: *UnionFind) void {
+        for (cfg.blocks) |bb| {
             assert(bb.reachable);
-            
+
             var iter = bb.instructionIter(.{});
             while (iter.next()) |insn_node| {
                 switch (insn_node.data) {
@@ -122,7 +146,7 @@ pub const RegisterAllocator = struct {
                         // Union the phi output with each of its parameters
                         for (phi.params.items) |input_var| {
                             // This is the core of the algorithm: union phi parameters with result
-                            self.union_find.unite(phi_out, input_var.id);
+                            union_find.unite(phi_out, input_var.id);
                         }
                     },
                     else => {
@@ -133,18 +157,18 @@ pub const RegisterAllocator = struct {
             }
         }
     }
-    
+
     // Step 3: Build live ranges from union-find groups
-    fn buildLiveRangesFromUnionFind(self: *RegisterAllocator, range_map: anytype) !void {
-        const varcount = self.cfg.scope.varCount();
-        const scope = self.cfg.scope;
+    fn buildLiveRangesFromUnionFind(cfg: *CFG, union_find: *UnionFind, range_map: *std.AutoHashMap(usize, *Var)) !void {
+        const varcount = cfg.scope.varCount();
+        const scope = cfg.scope;
 
         // Process each variable and assign it to a live range
-        for (self.cfg.blocks) |block| {
+        for (cfg.blocks) |block| {
             assert(block.reachable);
             var iter = block.killed_set.iterator(.{});
             while (iter.next()) |var_id| {
-                const root = self.union_find.find(var_id);
+                const root = union_find.find(var_id);
 
                 if (range_map.get(root)) |range| {
                     // Add this variable to existing live range
@@ -159,9 +183,9 @@ pub const RegisterAllocator = struct {
         }
     }
 
-    fn rewriteWithLiveRanges(self: *RegisterAllocator, range_map: anytype) void {
+    fn rewriteWithLiveRanges(cfg: *CFG, union_find: *UnionFind, range_map: *std.AutoHashMap(usize, *Var)) void {
         // Iterate through all instructions in the scope and replace variables with live ranges
-        var node = self.cfg.scope.insns.first;
+        var node = cfg.scope.insns.first;
 
         while (node) |insn_node| {
             const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
@@ -169,7 +193,7 @@ pub const RegisterAllocator = struct {
 
             // Replace output variable if it exists
             if (insn.getOut()) |out_var| {
-                const root = self.union_find.find(out_var.id);
+                const root = union_find.find(out_var.id);
                 if (range_map.get(root)) |live_range_var| {
                     insn.setOut(live_range_var);
                 }
@@ -178,12 +202,12 @@ pub const RegisterAllocator = struct {
             // Replace input operands
             var op_iter = insn.opIter();
             while (op_iter.next()) |operand| {
-                const root = self.union_find.find(operand.id);
+                const root = union_find.find(operand.id);
                 if (range_map.get(root)) |live_range_var| {
                     insn.replaceOpnd(operand, live_range_var);
                 }
             }
-            
+
             node = insn_node.next;
         }
     }
