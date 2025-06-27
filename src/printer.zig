@@ -183,12 +183,12 @@ pub const IRPrinter = struct {
                 try result.appendSlice(subscript);
             },
             .temp => |t| {
-                const temp_str = try std.fmt.allocPrint(alloc, "t{d}", .{t.name});
+                const temp_str = try std.fmt.allocPrint(alloc, "t{d}", .{t.id});
                 defer alloc.free(temp_str);
                 try result.appendSlice(temp_str);
             },
             .live_range => |t| {
-                const temp_str = try std.fmt.allocPrint(alloc, "LR{d}", .{t.name});
+                const temp_str = try std.fmt.allocPrint(alloc, "LR{d}", .{t.id});
                 defer alloc.free(temp_str);
                 try result.appendSlice(temp_str);
             }
@@ -227,10 +227,10 @@ pub const IRPrinter = struct {
                 try printIntAsSubscript(r.orig.data.redef.variant, out);
             },
             .temp => |t| {
-                try out.print("t{d}", .{t.name});
+                try out.print("t{d}", .{t.id});
             },
             .live_range => |t| {
-                try out.print("LR{d}", .{t.name});
+                try out.print("LR{d}", .{t.id});
             }
         }
     }
@@ -393,7 +393,7 @@ const CFGPrinter = struct {
                 }
                 first = false;
 
-                const op = scope.variables.items[opnd_id];
+                const op = scope.getVariableById(opnd_id);
                 const opnd_str = try IRPrinter.formatOpnd(ctx.allocator, op);
                 defer ctx.allocator.free(opnd_str);
                 try buffer.appendSlice(opnd_str);
@@ -611,8 +611,8 @@ fn outVarWidth(opnd: *ir.Variable) usize {
         .local => |l| l.source_name.len,
         .redef => |r| outVarWidth(r.orig) + countDigits(r.variant),
         .prime => |p| outVarWidth(p.orig) + 1,
-        .temp => |t| countDigits(t.name) + 1,
-        .live_range => |t| countDigits(t.name) + 2,
+        .temp => |t| countDigits(t.id) + 1,
+        .live_range => |t| countDigits(t.id) + 2,
     };
 }
 

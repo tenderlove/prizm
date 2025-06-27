@@ -12,6 +12,7 @@ pub const Scope = struct {
     param_id: u32 = 0,
     label_id: usize = 0,
     lr_id: usize = 0,
+    redef_id: usize = 0,
     param_size: usize = 0,
     local_storage: usize = 0,
     primes: usize = 0,
@@ -21,7 +22,6 @@ pub const Scope = struct {
     parent: ?*Scope,
     locals: std.StringHashMapUnmanaged(*Var),
     variables: std.ArrayList(*Var),
-    live_ranges: std.ArrayList(*Var),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
 
@@ -45,17 +45,8 @@ pub const Scope = struct {
         return var_;
     }
 
-    fn addLiveRange(self: *Scope, lr: *Var) !*Var {
-        try self.live_ranges.append(lr);
-        return lr;
-    }
-
     pub fn nextVarId(self: *Scope) usize {
         return self.variables.items.len;
-    }
-
-    fn nextLiveRangeId(self: *Scope) usize {
-        return self.live_ranges.items.len;
     }
 
     pub fn varCount(self: Scope) usize {
@@ -63,7 +54,7 @@ pub const Scope = struct {
     }
 
     pub fn liveRangeCount(self: Scope) usize {
-        return self.live_ranges.items.len;
+        return self.lr_id;
     }
 
     pub fn insnCount(self: *Scope) usize {
@@ -75,7 +66,7 @@ pub const Scope = struct {
     }
 
     pub fn getLiveRangeById(self: Scope, id: usize) *Var {
-        return self.live_ranges.items[id];
+        return self.variables.items[id];
     }
 
     fn newLocal(self: *Scope, source_name: []const u8) !*Var {
@@ -84,7 +75,8 @@ pub const Scope = struct {
     }
 
     pub fn newDefinition(self: *Scope, opnd: *Var, bb: *BasicBlock, variant: usize) !*Var {
-        const new = try Var.initRedef(self.arena.allocator(), self.nextVarId(), variant, opnd, bb);
+        defer self.redef_id += 1;
+        const new = try Var.initRedef(self.arena.allocator(), self.nextVarId(), self.redef_id, variant, opnd, bb);
         return try self.addVar(new);
     }
 
@@ -95,7 +87,7 @@ pub const Scope = struct {
 
     pub fn newLiveRange(self: *Scope, varcount: usize) !*Var {
         defer self.lr_id += 1;
-        return try self.addLiveRange(try Var.initLiveRange(self.arena.allocator(), self.nextLiveRangeId(), self.lr_id, varcount));
+        return try self.addVar(try Var.initLiveRange(self.arena.allocator(), self.nextVarId(), self.lr_id, varcount));
     }
 
     pub fn newTemp(self: *Scope) !*Var {
@@ -233,7 +225,6 @@ pub const Scope = struct {
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(*Var){},
             .variables = std.ArrayList(*Var).init(alloc),
-            .live_ranges = std.ArrayList(*Var).init(alloc),
             .allocator = alloc,
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
@@ -317,7 +308,6 @@ pub const Scope = struct {
         }
         self.locals.deinit(self.allocator);
         self.variables.deinit();
-        self.live_ranges.deinit();
         self.arena.deinit();
         self.allocator.destroy(self);
     }

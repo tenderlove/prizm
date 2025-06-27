@@ -304,7 +304,7 @@ pub const SSADestructor = struct {
 
             if (insn.getOut()) |out| {
                 if (out.isPrime()) {
-                    const tmp = prime_map[out.data.prime.prime_id];
+                    const tmp = prime_map[out.data.prime.id];
                     tmp.setDefinitionBlock(out.getDefinitionBlock());
                     insn.setOut(tmp);
                 }
@@ -317,7 +317,7 @@ pub const SSADestructor = struct {
             var itr = insn.opIter();
             while (itr.next()) |op| {
                 if (op.isPrime()) {
-                    insn.replaceOpnd(op, prime_map[op.data.prime.prime_id]);
+                    insn.replaceOpnd(op, prime_map[op.data.prime.id]);
                 }
 
                 if (op.isRedef()) {

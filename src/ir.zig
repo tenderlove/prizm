@@ -16,15 +16,19 @@ pub const VariableType = enum {
 };
 
 pub const VariableData = union(VariableType) {
-    local: struct { name: usize, source_name: []const u8 },
+    local: struct {
+        id: usize, source_name: []const u8
+    },
     temp: struct {
-        name: usize,
+        id: usize,
         defblock: ?*BasicBlock = null,
     },
-    redef: struct { variant: usize, orig: *Variable, defblock: *BasicBlock },
-    prime: struct { prime_id: usize, orig: *Variable },
+    redef: struct {
+        id: usize, variant: usize, orig: *Variable, defblock: *BasicBlock
+    },
+    prime: struct { id: usize, orig: *Variable },
     live_range: struct {
-        name: usize,
+        id: usize,
         variables: BitMap,  // All variables in this live range
     },
 };
@@ -39,32 +43,32 @@ pub const Variable = struct {
 
     pub fn initLocal(alloc: std.mem.Allocator, id: usize, name: anytype, source_name: anytype) !*Variable {
         const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .local = .{ .name = name, .source_name = source_name } } };
+        opnd.* = .{ .id = id, .data = .{ .local = .{ .id = name, .source_name = source_name } } };
         return opnd;
     }
 
-    pub fn initRedef(alloc: std.mem.Allocator, id: usize, variant: usize, orig: *Variable, defblock: *BasicBlock) !*Variable {
+    pub fn initRedef(alloc: std.mem.Allocator, id: usize, local_id: usize, variant: usize, orig: *Variable, defblock: *BasicBlock) !*Variable {
         const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .redef = .{ .variant = variant, .orig = orig, .defblock = defblock } } };
+        opnd.* = .{ .id = id, .data = .{ .redef = .{ .id = local_id, .variant = variant, .orig = orig, .defblock = defblock } } };
         return opnd;
     }
 
-    pub fn initPrime(alloc: std.mem.Allocator, id: usize, primeid: usize, orig: *Variable) !*Variable {
+    pub fn initPrime(alloc: std.mem.Allocator, id: usize, local_id: usize, orig: *Variable) !*Variable {
         const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .prime = .{ .prime_id = primeid, .orig = orig } } };
+        opnd.* = .{ .id = id, .data = .{ .prime = .{ .id = local_id, .orig = orig } } };
         return opnd;
     }
 
 
-    pub fn initTemp(alloc: std.mem.Allocator, id: usize, name: anytype) !*Variable {
+    pub fn initTemp(alloc: std.mem.Allocator, id: usize, local_id: anytype) !*Variable {
         const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .temp = .{ .name = name } } };
+        opnd.* = .{ .id = id, .data = .{ .temp = .{ .id = local_id } } };
         return opnd;
     }
 
-    pub fn initLiveRange(alloc: std.mem.Allocator, id: usize, lrid: usize, varcount: usize) !*Variable {
+    pub fn initLiveRange(alloc: std.mem.Allocator, id: usize, local_id: usize, varcount: usize) !*Variable {
         const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .live_range = .{ .name = lrid, .variables = try BitMap.initEmpty(alloc, varcount) } } };
+        opnd.* = .{ .id = id, .data = .{ .live_range = .{ .id = local_id, .variables = try BitMap.initEmpty(alloc, varcount) } } };
         return opnd;
     }
 
@@ -94,6 +98,12 @@ pub const Variable = struct {
 
     pub fn getID(self: Variable) usize {
         return self.id;
+    }
+
+    pub fn getLocalId(self: Variable) usize {
+        return switch(self.data) {
+            inline else => |payload| payload.id,
+        };
     }
 
     pub fn isTemp(self: Variable) bool {
@@ -528,11 +538,11 @@ pub const InstructionListNode = struct {
 test "can iterate on ops" {
     var out = Variable{
         .id = 0,
-        .data = .{ .temp = .{ .name = 0 } },
+        .data = .{ .temp = .{ .id = 0 } },
     };
     var in = Variable{
         .id = 1,
-        .data = .{ .temp = .{ .name = 1 } },
+        .data = .{ .temp = .{ .id = 1 } },
     };
     var insn = Instruction{
         .mov = .{
@@ -552,19 +562,19 @@ test "can iterate on ops" {
 test "can iterate on ops with list" {
     var out = Variable{
         .id = 0,
-        .data = .{ .temp = .{ .name = 0 } },
+        .data = .{ .temp = .{ .id = 0 } },
     };
     var recv = Variable{
         .id = 1,
-        .data = .{ .temp = .{ .name = 1 } },
+        .data = .{ .temp = .{ .id = 1 } },
     };
     const param1 = Variable{
         .id = 3,
-        .data = .{ .temp = .{ .name = 3 } },
+        .data = .{ .temp = .{ .id = 3 } },
     };
     const param2 = Variable{
         .id = 4,
-        .data = .{ .temp = .{ .name = 4 } },
+        .data = .{ .temp = .{ .id = 4 } },
     };
 
     var params = std.ArrayList(*Variable).init(std.testing.allocator);

@@ -693,7 +693,7 @@ test "method returns param" {
     const inop = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?)).data.leave.in;
     const inop_type: ir.VariableType = inop.data;
     try std.testing.expectEqual(ir.VariableType.local, inop_type);
-    try std.testing.expectEqual(0, inop.data.local.name);
+    try std.testing.expectEqual(0, inop.data.local.id);
 }
 
 test "always true ternary" {
@@ -778,7 +778,7 @@ test "local ternary" {
 
     // Make sure the jump instruction is testing the first parameter
     const test_reg = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?)).data.jumpunless.in;
-    try std.testing.expectEqual(0, test_reg.data.local.name);
+    try std.testing.expectEqual(0, test_reg.data.local.id);
 }
 
 test "popped if body" {

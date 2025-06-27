@@ -1,5 +1,6 @@
 const std = @import("std");
 const CFG = @import("cfg.zig").CFG;
+const cmp = @import("compiler.zig");
 const BasicBlock = @import("cfg.zig").BasicBlock;
 const ir = @import("ir.zig");
 const Var = ir.Variable;
@@ -8,6 +9,7 @@ const assert = @import("std").debug.assert;
 const UnionFind = @import("union_find.zig").UnionFind;
 const IRPrinter = @import("printer.zig").IRPrinter;
 const InterferenceGraph = @import("interference_graph.zig").InterferenceGraph;
+const VM = @import("vm.zig");
 
 // Physical register representation
 pub const PhysicalRegister = enum(u8) {
@@ -101,16 +103,21 @@ pub const RegisterAllocator = struct {
             var iter = bb.instructionIter(.{ .direction = .reverse });
             while (iter.next()) |insn| {
                 if (insn.data.outVar()) |n| {
-                    live_now.unset(n.id);
+                    assert(n.data == .live_range);
+
+                    live_now.unset(n.getLocalId());
                     var live_iter = live_now.iterator(.{});
                     while (live_iter.next()) |lr_id| {
-                        graph.add(lr_id, n.id);
+                        const from_id = cfg.scope.getVariableById(lr_id).getLocalId();
+                        graph.add(from_id, n.getLocalId());
                     }
                 }
 
                 var opiter = insn.data.opIter();
                 while (opiter.next()) |op| {
-                    live_now.set(op.id);
+                    assert(op.data == .live_range);
+
+                    live_now.set(op.getLocalId());
                 }
             }
         }
