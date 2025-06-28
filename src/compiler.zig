@@ -18,11 +18,11 @@ pub const Compiler = struct {
     vm: *vm.VM,
     scope_ids: u32 = 0,
 
-    pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{EmptyInstructionSequence, NotImplementedError, OutOfMemory}!*Scope {
+    pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{ EmptyInstructionSequence, NotImplementedError, OutOfMemory }!*Scope {
         return compileScopeNode(cc, node, null, false);
     }
 
-    pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t, op: ?*Var, popped: bool) error{NotImplementedError, OutOfMemory}!?*ir.Variable {
+    pub fn compileNode(cc: *Compiler, node: *const c.pm_node_t, op: ?*Var, popped: bool) error{ NotImplementedError, OutOfMemory }!?*ir.Variable {
         // std.debug.print("--> compiling type {s} {} op: {any}\n", .{c.pm_node_type_to_str(node.*.type), popped, op});
         const opnd = switch (node.*.type) {
             c.PM_BEGIN_NODE => try cc.compileBeginNode(@ptrCast(node), op, popped),
@@ -42,7 +42,7 @@ pub const Compiler = struct {
             else => {
                 std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
                 return error.NotImplementedError;
-            }
+            },
         };
         // std.debug.print("<-- compiling type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
         return opnd;
@@ -78,7 +78,14 @@ pub const Compiler = struct {
 
     fn compileCallNode(cc: *Compiler, node: *const c.pm_call_node_t, out: ?*Var, _: bool) !*Var {
         const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
-        const recv_op = try cc.compileRecv(node.*.receiver, null, false);
+
+        // If there's a receiver, compile it. Otherwise we know it's a
+        // "getself". In the case of a "getself" we want to do that right
+        // next to the call in order to reduce register interference
+        const recv_op = if (node.*.receiver) |_|
+            try cc.compileRecv(node.*.receiver, null, false)
+        else
+            null;
 
         var params = std.ArrayList(*Var).init(cc.scope.?.arena.allocator());
 
@@ -93,7 +100,11 @@ pub const Compiler = struct {
 
         // Get a pooled string that's owned by the VM
         const name = try cc.vm.getString(method_name);
-        return try cc.pushCall(out, recv_op.?, name, params);
+        if (recv_op) |r| {
+            return try cc.pushCall(out, r, name, params);
+        } else {
+            return try cc.pushCall(out, try cc.pushGetself(), name, params);
+        }
     }
 
     fn compileElseNode(cc: *Compiler, node: *const c.pm_else_node_t, op: ?*Var, popped: bool) !?*ir.Variable {
@@ -112,18 +123,18 @@ pub const Compiler = struct {
         var posts_list: ?*const c.pm_node_list_t = null;
 
         const parameters_node: ?*const c.pm_parameters_node_t = if (node.*.parameters) |params|
-            switch(c.PM_NODE_TYPE(params)) {
+            switch (c.PM_NODE_TYPE(params)) {
                 c.PM_PARAMETERS_NODE => @ptrCast(params),
                 else => {
                     std.debug.print("unknown parameter type {s}\n", .{c.pm_node_type_to_str(params.*.type)});
                     return error.NotImplementedError;
-                }
+                },
             }
         else
             null;
 
         const ast_node = node.*.ast_node;
-        const scope_name = switch(c.PM_NODE_TYPE(ast_node)) {
+        const scope_name = switch (c.PM_NODE_TYPE(ast_node)) {
             c.PM_PROGRAM_NODE => "main",
             c.PM_DEF_NODE => blk: {
                 const cast: *const c.pm_def_node_t = @ptrCast(ast_node);
@@ -133,7 +144,7 @@ pub const Compiler = struct {
             else => {
                 std.debug.print("can't get name for {s}\n", .{c.pm_node_type_to_str(ast_node.*.type)});
                 return error.NotImplementedError;
-            }
+            },
         };
 
         const scope = try Scope.init(cc.allocator, cc.scope_ids, scope_name, cc.scope);
@@ -207,7 +218,7 @@ pub const Compiler = struct {
                 try cc.pushLabel(end_label);
 
                 return ret;
-            }
+            },
         }
     }
 
@@ -217,17 +228,14 @@ pub const Compiler = struct {
         unknown,
     };
 
-    const JumpType = enum {
-        jump_if,
-        jump_unless
-    };
+    const JumpType = enum { jump_if, jump_unless };
 
     fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, label: ir.Label, jump_type: JumpType, out: ?*Var, popped: bool) !PredicateType {
         while (true) {
             switch (node.*.type) {
                 c.PM_CALL_NODE, c.PM_LOCAL_VARIABLE_READ_NODE => {
                     const val = try cc.compileNode(node, out, popped);
-                    switch(jump_type) {
+                    switch (jump_type) {
                         .jump_if => try cc.pushJumpIf(val.?, label),
                         .jump_unless => try cc.pushJumpUnless(val.?, label),
                     }
@@ -242,7 +250,7 @@ pub const Compiler = struct {
                 else => {
                     std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
                     return error.NotImplementedError;
-                }
+                },
             }
         }
     }
@@ -275,7 +283,7 @@ pub const Compiler = struct {
         if (op.len == 1) {
             switch (op[0]) {
                 '+' => _ = try cc.pushCall(recv, recv, op, params),
-                else => return error.NotImplementedError
+                else => return error.NotImplementedError,
             }
             return recv;
         } else {
@@ -361,8 +369,8 @@ pub const Compiler = struct {
         if ((node.*.base.flags & c.PM_LOOP_FLAGS_BEGIN_MODIFIER) == c.PM_LOOP_FLAGS_BEGIN_MODIFIER) {
             const ret = if (node.*.statements) |stmt|
                 try cc.compileNode(@ptrCast(stmt), null, popped)
-                else
-                    try cc.pushLoadNil(null);
+            else
+                try cc.pushLoadNil(null);
 
             _ = try cc.compilePredicate(node.*.predicate, loop_entry, JumpType.jump_if, null, false);
             return ret;
@@ -374,12 +382,12 @@ pub const Compiler = struct {
         const predicate = try cc.compilePredicate(node.*.predicate, loop_end, JumpType.jump_unless, null, false);
 
         switch (predicate) {
-            .always_false => { },
+            .always_false => {},
             .always_true, .unknown => {
                 if (node.*.statements) |stmt| {
                     _ = try cc.compileNode(@ptrCast(stmt), null, popped);
                 }
-            }
+            },
         }
 
         try cc.pushJump(loop_entry);
@@ -460,7 +468,7 @@ pub const Compiler = struct {
 
 pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: *prism.Prism) !*Compiler {
     const cc = try allocator.create(Compiler);
-    cc.* = Compiler {
+    cc.* = Compiler{
         .parser = @ptrCast(parser.parser),
         .vm = m,
         .allocator = allocator,
@@ -512,7 +520,7 @@ test "compile local set" {
     const scope = try compileString(allocator, machine, "foo = 5; foo");
     defer scope.deinit();
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
@@ -528,7 +536,7 @@ test "compile local get w/ return" {
     const scope = try compileString(allocator, machine, "foo = 5; return foo");
     defer scope.deinit();
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
@@ -557,7 +565,7 @@ test "compile local get w/ nil return" {
     const scope = try compileString(allocator, machine, "foo = 5; return");
     defer scope.deinit();
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.loadnil,
         ir.Instruction.leave,
@@ -582,7 +590,7 @@ test "compile ternary statement" {
     const scope = try compileString(allocator, machine, "5 < 7 ? 123 : 456");
     defer scope.deinit();
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.loadi,
         ir.Instruction.call,
@@ -625,7 +633,7 @@ test "compile call no params" {
     const scope = try compileString(allocator, machine, "foo");
     defer scope.deinit();
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getself,
         ir.Instruction.call,
         ir.Instruction.leave,
@@ -685,7 +693,7 @@ test "method returns param" {
 
     const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func;
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
         ir.Instruction.leave,
     }, method_scope.insns);
@@ -707,7 +715,7 @@ test "always true ternary" {
     defer scope.deinit();
 
     try std.testing.expectEqual(2, scope.insns.len());
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
@@ -726,7 +734,7 @@ test "always false ternary" {
     defer scope.deinit();
 
     try std.testing.expectEqual(2, scope.insns.len());
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
@@ -745,7 +753,7 @@ test "always nil ternary" {
     defer scope.deinit();
 
     try std.testing.expectEqual(2, scope.insns.len());
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
@@ -765,7 +773,7 @@ test "local ternary" {
 
     const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func;
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
@@ -793,7 +801,7 @@ test "popped if body" {
 
     const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func;
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
         ir.Instruction.jumpunless,
         ir.Instruction.jump,
@@ -818,7 +826,7 @@ test "simple function" {
 
     const method_scope = scopes.items[0];
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
         ir.Instruction.leave,
     }, method_scope.insns);
@@ -836,7 +844,7 @@ test "while loop" {
 
     const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func;
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
         ir.Instruction.putlabel,
         ir.Instruction.jumpunless,
@@ -861,7 +869,7 @@ test "empty while loop" {
 
     const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func;
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.putlabel,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
@@ -879,7 +887,7 @@ test "+=" {
     const scope = try compileString(allocator, machine, "x = 1; x += 1");
     defer scope.deinit();
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.loadi,
         ir.Instruction.call,
@@ -896,7 +904,7 @@ test "local variable write" {
     const scope = try compileString(allocator, machine, "x = 1; a = x");
     defer scope.deinit();
 
-    try expectInstructionList(&[_] ir.InstructionName {
+    try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.mov,
         ir.Instruction.leave,
