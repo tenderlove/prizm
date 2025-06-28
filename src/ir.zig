@@ -13,6 +13,7 @@ pub const VariableType = enum {
     redef,
     prime,
     live_range,
+    physical_register,
 };
 
 pub const VariableData = union(VariableType) {
@@ -31,6 +32,10 @@ pub const VariableData = union(VariableType) {
         id: usize,
         variables: BitMap,  // All variables in this live range
     },
+    physical_register: struct {
+        id: usize,
+        register: usize,
+    }
 };
 
 pub const Label = struct {
@@ -93,6 +98,7 @@ pub const Variable = struct {
             .redef => |r| getVar(r.orig),
             .prime => |p| getVar(p.orig),
             .live_range => unreachable,
+            .physical_register => unreachable,
         };
     }
 

@@ -194,6 +194,11 @@ pub const IRPrinter = struct {
                 defer alloc.free(temp_str);
                 try result.appendSlice(temp_str);
             },
+            .physical_register => |t| {
+                const temp_str = try std.fmt.allocPrint(alloc, "R{d}", .{t.id});
+                defer alloc.free(temp_str);
+                try result.appendSlice(temp_str);
+            },
         }
 
         return result.toOwnedSlice();
@@ -233,6 +238,9 @@ pub const IRPrinter = struct {
             },
             .live_range => |t| {
                 try out.print("LR{d}", .{t.id});
+            },
+            .physical_register => |t| {
+                try out.print("R{d}", .{t.id});
             },
         }
     }
@@ -679,6 +687,7 @@ fn outVarWidth(opnd: *ir.Variable) usize {
         .prime => |p| outVarWidth(p.orig) + 1,
         .temp => |t| countDigits(t.id) + 1,
         .live_range => |t| countDigits(t.id) + 2,
+        .physical_register => |t| countDigits(t.id) + 1,
     };
 }
 

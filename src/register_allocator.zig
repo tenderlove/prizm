@@ -10,6 +10,8 @@ const UnionFind = @import("union_find.zig").UnionFind;
 const IRPrinter = @import("printer.zig").IRPrinter;
 const InterferenceGraph = @import("interference_graph.zig").InterferenceGraph;
 const VM = @import("vm.zig");
+const bitmatrix = @import("utils/bitmatrix.zig");
+const BitMatrix = bitmatrix.BitMatrix;
 
 // Physical register representation
 pub const PhysicalRegister = enum(u8) {
@@ -24,13 +26,148 @@ pub const PhysicalRegister = enum(u8) {
     // Add more registers as needed
 };
 
-pub const RegisterMapping = std.AutoHashMap(usize, PhysicalRegister);
+// Lookup table from Live Range to Physical Register
+// Index is the LiveRange's local ID
+pub const RegisterMapping = std.ArrayList(*const Var);
+
+// Map of variable id (global) to LiveRange variable
+pub const LiveRangeMap = std.AutoHashMap(usize, *Var);
+
+// List of live ranges
+pub const LiveRangeList = std.ArrayList(*Var);
+
+const ChaitinAllocator = struct {
+    graph: *InterferenceGraph,
+    lr_list: std.ArrayList(*Var),
+
+    const K = @typeInfo(PhysicalRegister).@"enum".fields.len;
+
+    pub fn init(graph: *InterferenceGraph, lr_list: LiveRangeList) ChaitinAllocator {
+        return ChaitinAllocator{
+            .graph = graph,
+            .lr_list = lr_list,
+        };
+    }
+
+    pub fn deinit(self: *ChaitinAllocator, allocator: std.mem.Allocator) void {
+        _ = self;
+        _ = allocator;
+    }
+
+    pub fn allocate(self: *ChaitinAllocator, allocator: std.mem.Allocator) !RegisterMapping {
+        const stack = try self.simplify(allocator);
+        defer stack.deinit();
+        return self.select(allocator, stack);
+    }
+
+    fn simplify(self: *ChaitinAllocator, allocator: std.mem.Allocator) !LiveRangeList {
+        const work_list = self.lr_list;
+        var graph = try self.graph.clone(allocator);
+        defer graph.deinit(allocator);
+
+        var stack = LiveRangeList.init(allocator);
+
+        var selected = try BitMap.initFull(allocator, work_list.items.len);
+        defer selected.deinit(allocator);
+
+        var trial: usize = 0;
+
+        while (selected.count() != 0) {
+            std.debug.print("trial: {d}\n", .{trial});
+            var iter = selected.iterator(.{});
+            var trivial = LiveRangeList.init(allocator);
+            defer trivial.deinit();
+            while (iter.next()) |idx| {
+                const lr = work_list.items[idx];
+                if (graph.degree(lr.getLocalId()) < 4) {
+                    std.debug.print("hello d: {d}\n", .{graph.degree(lr.getLocalId())});
+                    selected.unset(idx);
+                    try trivial.append(lr);
+                }
+            }
+
+            for (trivial.items) |lr| {
+                try stack.append(lr);
+                graph.removeNode(lr.getLocalId());
+            }
+
+            if (trivial.items.len == 0 and selected.count() != 0) {
+                // TODO: figure out how to calculate spill cost
+                return error.CannotAllocate;
+            }
+            trial += 1;
+        }
+
+        return stack;
+    }
+
+    fn select(self: *ChaitinAllocator, allocator: std.mem.Allocator, worklist: LiveRangeList) !RegisterMapping {
+        var register_mapping = RegisterMapping.init(allocator);
+
+        // Initialize with undefined - index will be live range local ID
+        try register_mapping.resize(self.graph.size());
+
+        // Track which live ranges have been assigned
+        var assigned = try BitMap.initEmpty(allocator, worklist.items.len);
+        defer assigned.deinit(allocator);
+
+        // Iterate through worklist in reverse order (stack behavior)
+        var i = worklist.items.len;
+        while (i > 0) {
+            i -= 1;
+            const lr = worklist.items[i];
+            const lr_id = lr.getLocalId();
+
+            // Check which colors are forbidden by already-colored neighbors
+            var forbidden = std.StaticBitSet(K).initEmpty();
+            var neighbor_iter = self.graph.neighborIterator(lr_id);
+            while (neighbor_iter.next()) |neighbor_id| {
+                if (assigned.isSet(neighbor_id)) {
+                    const reg_var = register_mapping.items[neighbor_id];
+                    // Extract the physical register from the variable
+                    const reg = reg_var.data.physical_register.register;
+                    forbidden.set(reg);
+                }
+            }
+
+            // Pick first available color
+            const color: PhysicalRegister = for (0..K) |reg_num| {
+                if (!forbidden.isSet(reg_num)) {
+                    break @enumFromInt(reg_num);
+                }
+            } else return error.OutOfRegisters;
+
+            // Get the static Variable for this physical register
+            const reg_var = getPhysicalRegisterVar(color);
+            register_mapping.items[lr_id] = reg_var;
+            assigned.set(lr_id);
+        }
+
+        return register_mapping;
+    }
+
+    // Static array of physical register variables
+    const physical_registers: [K]Var = blk: {
+        var regs: [K]Var = undefined;
+        for (0..K) |i| {
+            regs[i] = Var{
+                .id = std.math.maxInt(usize), // We should never look these up by ID
+                .data = .{ .physical_register = .{ .id = i, .register = i } },
+            };
+        }
+        break :blk regs;
+    };
+
+    fn getPhysicalRegisterVar(reg: PhysicalRegister) *const Var {
+        return &physical_registers[@intFromEnum(reg)];
+    }
+};
 
 pub const RegisterAllocator = struct {
     allocator: std.mem.Allocator,
     cfg: *CFG,
     union_find: UnionFind,
-    range_map: std.AutoHashMap(usize, *Var),
+    range_map: LiveRangeMap,
     interference_graph: *InterferenceGraph,
     register_mapping: RegisterMapping,
 
@@ -51,7 +188,7 @@ pub const RegisterAllocator = struct {
         processPhiFunctions(cfg, &union_find);
 
         // Step 3: Build live ranges from union-find groups
-        var range_map = std.AutoHashMap(usize, *Var).init(allocator);
+        var range_map = LiveRangeMap.init(allocator);
         errdefer range_map.deinit();
         try buildLiveRangesFromUnionFind(cfg, &union_find, &range_map);
 
@@ -66,8 +203,21 @@ pub const RegisterAllocator = struct {
         errdefer interference_graph.deinit(allocator);
         try buildInterferenceGraph(allocator, cfg, interference_graph);
 
+        // Build a list of live ranges from the LiveRangeMap
+        var lr_list = std.ArrayList(*Var).init(allocator);
+        defer lr_list.deinit();
+
+        var value_iter = range_map.valueIterator();
+        while (value_iter.next()) |value_ptr| {
+            try lr_list.append(value_ptr.*);
+        }
+
         // Create register mapping
-        const register_mapping = RegisterMapping.init(allocator);
+        var alloc = ChaitinAllocator.init(interference_graph, lr_list);
+        errdefer alloc.deinit(allocator);
+
+        var register_mapping = try alloc.allocate(allocator);
+        errdefer register_mapping.deinit();
 
         // Create the allocator instance with all data structures populated
         const self = try allocator.create(RegisterAllocator);
@@ -102,6 +252,7 @@ pub const RegisterAllocator = struct {
 
             var iter = bb.instructionIter(.{ .direction = .reverse });
             while (iter.next()) |insn| {
+                // TODO: we need to skip adding edges if the operation is a mov
                 if (insn.data.outVar()) |n| {
                     assert(n.data == .live_range);
 
@@ -220,7 +371,7 @@ test "live ranges" {
         \\   y += 2
         \\ end
         \\ puts x + y
-        ;
+    ;
 
     const scope = try cmp.compileString(allocator, machine, code);
     defer scope.deinit();
