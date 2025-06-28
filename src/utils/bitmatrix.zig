@@ -24,6 +24,10 @@ pub const BitMatrix = struct {
         self.buffer[row].set(column);
     }
 
+    pub fn unset(self: *const Self, row: usize, column: usize) void {
+        self.buffer[row].unset(column);
+    }
+
     pub fn isSet(self: Self, x: usize, y: usize) bool {
         return self.buffer[x].isSet(y);
     }
