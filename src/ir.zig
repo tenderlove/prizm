@@ -102,7 +102,7 @@ pub const Variable = struct {
         };
     }
 
-    pub fn getID(self: Variable) usize {
+    pub fn getGlobalId(self: Variable) usize {
         return self.id;
     }
 
@@ -559,7 +559,7 @@ test "can iterate on ops" {
     var itr = insn.opIter();
     var count: u32 = 0;
     while (itr.next()) |op| {
-        try std.testing.expectEqual(1, op.getID());
+        try std.testing.expectEqual(1, op.getGlobalId());
         count += 1;
     }
     try std.testing.expectEqual(1, count);
@@ -602,7 +602,7 @@ test "can iterate on ops with list" {
     var var_count: u32 = 0;
     var total_count: u32 = 0;
     while (itr.next()) |op| {
-        try std.testing.expectEqual(expected_ids[var_count], op.getID());
+        try std.testing.expectEqual(expected_ids[var_count], op.getGlobalId());
         var_count += 1;
         total_count += 1;
     }

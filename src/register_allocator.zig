@@ -256,7 +256,7 @@ pub const RegisterAllocator = struct {
                 if (insn.data.outVar()) |n| {
                     assert(n.data == .live_range);
 
-                    live_now.unset(n.getLocalId());
+                    live_now.unset(n.getGlobalId());
                     var live_iter = live_now.iterator(.{});
                     while (live_iter.next()) |lr_id| {
                         const from_id = cfg.scope.getVariableById(lr_id).getLocalId();
@@ -268,7 +268,7 @@ pub const RegisterAllocator = struct {
                 while (opiter.next()) |op| {
                     assert(op.data == .live_range);
 
-                    live_now.set(op.getLocalId());
+                    live_now.set(op.getGlobalId());
                 }
             }
         }
