@@ -11,8 +11,9 @@ pub const Scope = struct {
     local_id: u32 = 0,
     param_id: u32 = 0,
     label_id: usize = 0,
-    lr_id: usize = 0,
+    live_range_id: usize = 0,
     redef_id: usize = 0,
+    physical_register_id: usize = 0,
     param_size: usize = 0,
     local_storage: usize = 0,
     primes: usize = 0,
@@ -54,7 +55,7 @@ pub const Scope = struct {
     }
 
     pub fn liveRangeCount(self: Scope) usize {
-        return self.lr_id;
+        return self.live_range_id;
     }
 
     pub fn insnCount(self: *Scope) usize {
@@ -86,13 +87,18 @@ pub const Scope = struct {
     }
 
     pub fn newLiveRange(self: *Scope, varcount: usize) !*Var {
-        defer self.lr_id += 1;
-        return try self.addVar(try Var.initLiveRange(self.arena.allocator(), self.nextVarId(), self.lr_id, varcount));
+        defer self.live_range_id += 1;
+        return try self.addVar(try Var.initLiveRange(self.arena.allocator(), self.nextVarId(), self.live_range_id, varcount));
     }
 
     pub fn newTemp(self: *Scope) !*Var {
         defer self.tmp_id += 1;
         return try self.addVar(try Var.initTemp(self.arena.allocator(), self.nextVarId(), self.tmp_id));
+    }
+
+    pub fn newPhysicalRegister(self: *Scope, register: usize) !*Var {
+        defer self.physical_register_id += 1;
+        return try self.addVar(try Var.initPhysicalRegister(self.arena.allocator(), self.nextVarId(), self.physical_register_id, register));
     }
 
     pub fn newLabel(self: *Scope) ir.Label {

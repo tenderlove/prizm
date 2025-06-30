@@ -183,23 +183,7 @@ pub const SSADestructor = struct {
     // Eliminate phi functions. Figure 9.20 part e
     // Figure 9.20, part E
     pub fn eliminatePhi(_: *SSADestructor, cfg: *CFG) !void {
-        for (cfg.blocks) |bb| {
-            if (!bb.reachable) continue;
-
-            var iter: ?*std.DoublyLinkedList.Node = &bb.start.node;
-
-            while (iter) |insn| {
-                switch(@as(*ir.InstructionListNode, @fieldParentPtr("node", insn)).data) {
-                    .putlabel => { }, // Skip putlabel
-                    .phi => cfg.scope.insns.remove(insn),
-                    // Quit after we've passed phi's
-                    else => { break; }
-                }
-
-                if (insn == &bb.finish.node) break;
-                iter = insn.next;
-            }
-        }
+        cfg.removePhi();
     }
 
     fn walkChildren(self: *SSADestructor, graph: *BitMatrix, visited: *BitMap, seen: *BitMap, node: usize) !void {

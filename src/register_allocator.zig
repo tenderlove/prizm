@@ -26,6 +26,8 @@ pub const PhysicalRegister = enum(u8) {
     // Add more registers as needed
 };
 
+const K = @typeInfo(PhysicalRegister).@"enum".fields.len;
+
 // Lookup table from Live Range to Physical Register
 // Index is the LiveRange's local ID
 pub const RegisterMapping = std.ArrayList(*const Var);
@@ -39,14 +41,10 @@ pub const LiveRangeList = std.ArrayList(*Var);
 const ChaitinAllocator = struct {
     graph: *InterferenceGraph,
     lr_list: std.ArrayList(*Var),
+    physical_registers: std.ArrayList(*Var),
 
-    const K = @typeInfo(PhysicalRegister).@"enum".fields.len;
-
-    pub fn init(graph: *InterferenceGraph, lr_list: LiveRangeList) ChaitinAllocator {
-        return ChaitinAllocator{
-            .graph = graph,
-            .lr_list = lr_list,
-        };
+    pub fn init(graph: *InterferenceGraph, lr_list: LiveRangeList, physical_registers: std.ArrayList(*Var)) ChaitinAllocator {
+        return ChaitinAllocator{ .graph = graph, .lr_list = lr_list, .physical_registers = physical_registers };
     }
 
     pub fn deinit(self: *ChaitinAllocator, allocator: std.mem.Allocator) void {
@@ -73,14 +71,12 @@ const ChaitinAllocator = struct {
         var trial: usize = 0;
 
         while (selected.count() != 0) {
-            std.debug.print("trial: {d}\n", .{trial});
             var iter = selected.iterator(.{});
             var trivial = LiveRangeList.init(allocator);
             defer trivial.deinit();
             while (iter.next()) |idx| {
                 const lr = work_list.items[idx];
                 if (graph.degree(lr.getLocalId()) < 4) {
-                    std.debug.print("hello d: {d}\n", .{graph.degree(lr.getLocalId())});
                     selected.unset(idx);
                     try trivial.append(lr);
                 }
@@ -138,7 +134,7 @@ const ChaitinAllocator = struct {
             } else return error.OutOfRegisters;
 
             // Get the static Variable for this physical register
-            const reg_var = getPhysicalRegisterVar(color);
+            const reg_var = self.getPhysicalRegisterVar(color);
             register_mapping.items[lr_id] = reg_var;
             assigned.set(lr_id);
         }
@@ -146,20 +142,8 @@ const ChaitinAllocator = struct {
         return register_mapping;
     }
 
-    // Static array of physical register variables
-    const physical_registers: [K]Var = blk: {
-        var regs: [K]Var = undefined;
-        for (0..K) |i| {
-            regs[i] = Var{
-                .id = std.math.maxInt(usize), // We should never look these up by ID
-                .data = .{ .physical_register = .{ .id = i, .register = i } },
-            };
-        }
-        break :blk regs;
-    };
-
-    fn getPhysicalRegisterVar(reg: PhysicalRegister) *const Var {
-        return &physical_registers[@intFromEnum(reg)];
+    fn getPhysicalRegisterVar(self: *ChaitinAllocator, reg: PhysicalRegister) *const Var {
+        return self.physical_registers.items[@intFromEnum(reg)];
     }
 };
 
@@ -212,12 +196,27 @@ pub const RegisterAllocator = struct {
             try lr_list.append(value_ptr.*);
         }
 
+        // Build a list of Variables that wrap Physical Registers
+        var physical_registers = std.ArrayList(*Var).init(allocator);
+        defer physical_registers.deinit();
+        for (0..K) |i| {
+            try physical_registers.append(try cfg.scope.newPhysicalRegister(i));
+        }
+
         // Create register mapping
-        var alloc = ChaitinAllocator.init(interference_graph, lr_list);
-        errdefer alloc.deinit(allocator);
+        var alloc = ChaitinAllocator.init(interference_graph, lr_list, physical_registers);
+        defer alloc.deinit(allocator);
 
         var register_mapping = try alloc.allocate(allocator);
         errdefer register_mapping.deinit();
+
+        // Remove phi nodes before rewriting with physical registers
+        try cfg.removePhi();
+
+        // Assert that all variables are still live ranges after phi removal
+        assertAllVariablesAreLiveRanges(cfg);
+
+        rewriteWithPhysicalRegisters(cfg, register_mapping);
 
         // Create the allocator instance with all data structures populated
         const self = try allocator.create(RegisterAllocator);
@@ -354,6 +353,93 @@ pub const RegisterAllocator = struct {
             node = insn_node.next;
         }
     }
+
+    fn rewriteWithPhysicalRegisters(cfg: *CFG, register_mapping: RegisterMapping) void {
+        // Collect all replacements first to avoid iterator corruption
+        const Replacement = struct {
+            insn: *ir.Instruction,
+            old_var: *const Var,
+            new_var: *const Var,
+            is_output: bool,
+        };
+
+        var replacements = std.ArrayList(Replacement).init(std.heap.page_allocator);
+        defer replacements.deinit();
+
+        // First pass: collect all replacements
+        var node = cfg.scope.insns.first;
+        while (node) |insn_node| {
+            const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
+            const insn = &insn_list_node.data;
+
+            // Collect output variable replacement
+            if (insn.getOut()) |out_var| {
+                assert(out_var.data == .live_range);
+                const lr_id = out_var.getLocalId();
+                const physical_reg_var = register_mapping.items[lr_id];
+                replacements.append(.{
+                    .insn = insn,
+                    .old_var = out_var,
+                    .new_var = physical_reg_var,
+                    .is_output = true,
+                }) catch unreachable;
+            }
+
+            // Collect input operand replacements
+            var op_iter = insn.opIter();
+            while (op_iter.next()) |operand| {
+                assert(operand.data == .live_range);
+                const lr_id = operand.getLocalId();
+                const physical_reg_var = register_mapping.items[lr_id];
+                replacements.append(.{
+                    .insn = insn,
+                    .old_var = operand,
+                    .new_var = physical_reg_var,
+                    .is_output = false,
+                }) catch unreachable;
+            }
+
+            node = insn_node.next;
+        }
+
+        // Second pass: apply all replacements
+        for (replacements.items) |replacement| {
+            if (replacement.is_output) {
+                replacement.insn.setOut(@constCast(replacement.new_var));
+            } else {
+                replacement.insn.replaceOpnd(@constCast(replacement.old_var), @constCast(replacement.new_var));
+            }
+        }
+    }
+
+    fn assertAllVariablesAreLiveRanges(cfg: *CFG) void {
+        // Iterate through all instructions and assert that all variables are live ranges
+        var node = cfg.scope.insns.first;
+
+        while (node) |insn_node| {
+            const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
+            const insn = &insn_list_node.data;
+
+            // Check output variable if it exists
+            if (insn.getOut()) |out_var| {
+                if (out_var.data != .live_range) {
+                    std.debug.print("Non-live-range output variable: {} in instruction: {}\n", .{ out_var.data, insn.* });
+                    assert(out_var.data == .live_range);
+                }
+            }
+
+            // Check input operands
+            var op_iter = insn.opIter();
+            while (op_iter.next()) |operand| {
+                if (operand.data != .live_range) {
+                    std.debug.print("Non-live-range operand: {} in instruction: {}\n", .{ operand.data, insn.* });
+                    assert(operand.data == .live_range);
+                }
+            }
+
+            node = insn_node.next;
+        }
+    }
 };
 
 test "live ranges" {
@@ -382,8 +468,6 @@ test "live ranges" {
     const ra = try RegisterAllocator.allocateRegisters(allocator, cfg);
     defer ra.deinit();
 
-    // const stdout = std.io.getStdErr().writer().any();
-    // try @import("printer.zig").printInterferenceGraphDOT(allocator, cfg, ra.interference_graph, stdout);
 
     // std.debug.print("edge count {d}\n", .{ ra.interference_graph.edgeCount() });
 }

@@ -64,6 +64,11 @@ pub const Variable = struct {
         return opnd;
     }
 
+    pub fn initPhysicalRegister(alloc: std.mem.Allocator, id: usize, local_id: usize, register: usize) !*Variable {
+        const opnd = try alloc.create(Variable);
+        opnd.* = .{ .id = id, .data = .{ .physical_register = .{ .id = local_id, .register = register } } };
+        return opnd;
+    }
 
     pub fn initTemp(alloc: std.mem.Allocator, id: usize, local_id: anytype) !*Variable {
         const opnd = try alloc.create(Variable);

@@ -584,7 +584,28 @@ pub const CFG = struct {
     }
 
     pub fn removePhi(self: *CFG) !void {
-        try self.ssa_destructor.eliminatePhi(self);
+        for (self.blocks) |bb| {
+            if (!bb.reachable) continue;
+
+            var iter: ?*std.DoublyLinkedList.Node = &bb.start.node;
+
+            while (iter) |insn| {
+                const next_insn = insn.next; // Save next before potentially removing current
+                const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
+
+                switch (insn_node.data) {
+                    .putlabel => {}, // Skip putlabel
+                    .phi => {
+                        bb.removeInstruction(insn_node, self.scope);
+                    },
+                    // Quit after we've passed phi's
+                    else => break,
+                }
+
+                if (insn == &bb.finish.node) break;
+                iter = next_insn;
+            }
+        }
         self.state = .phi_removed;
     }
 
@@ -940,6 +961,33 @@ pub const BasicBlock = struct {
             outvar.setDefinitionBlock(self);
         }
         self.finish = insn;
+    }
+
+    pub fn removeInstruction(self: *BasicBlock, insn: *ir.InstructionListNode, scope: *Scope) void {
+        // Remove the instruction from the global instruction list
+        scope.insns.remove(&insn.node);
+
+        // Update BasicBlock start/finish pointers if necessary
+        if (self.start == insn) {
+            // Removing the first instruction in the block
+            if (insn.node.next) |next_node| {
+                self.start = @fieldParentPtr("node", next_node);
+            } else {
+                // This was the only instruction - block becomes empty
+                // This shouldn't happen in well-formed CFGs, but handle it gracefully
+                unreachable;
+            }
+        }
+
+        if (self.finish == insn) {
+            // Removing the last instruction in the block
+            if (insn.node.prev) |prev_node| {
+                self.finish = @fieldParentPtr("node", prev_node);
+            } else {
+                // This was the only instruction - block becomes empty
+                unreachable;
+            }
+        }
     }
 
     fn fallsThrough(self: *BasicBlock) bool {
