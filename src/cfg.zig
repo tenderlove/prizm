@@ -939,11 +939,11 @@ pub const BasicBlock = struct {
             // Fill the UE set.
             var opiter = insn.data.opIter();
             while (opiter.next()) |op| {
-                // If the operand is a variable, and it _isn't_ part of the kill set,
-                // (in other words it hasn't been defined in this BB), then add
-                // the operand to the "upward exposed" set.  This means the operand
-                // _must_ have been defined in a block that dominates this block.
-                if (!self.killed_set.isSet(op.id)) {
+                // Special case: if this operand is the same as the output of this instruction,
+                // it should always be considered upward exposed (use before redefine)
+                const is_redefined_in_same_insn = if (insn.data.outVar()) |out| op.id == out.id else false;
+
+                if (!self.killed_set.isSet(op.id) or is_redefined_in_same_insn) {
                     self.upward_exposed_set.set(op.id);
                 }
             }
@@ -1797,6 +1797,31 @@ test "rename" {
     defer machine.deinit(allocator);
 
     const code = complexExampleCFG();
+    const scope = try compileScope(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    try std.testing.expect(!(try cfg.isSSA()));
+    try cfg.rename();
+
+    // After renaming, all assignments should be unique
+    try std.testing.expect(try cfg.isSSA());
+}
+
+test "rename with calls" {
+    const allocator = std.testing.allocator;
+
+    const machine = try vm.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code =
+        \\ b = 6
+        \\ c = 7
+        \\ b += 123
+        \\ b + c
+    ;
     const scope = try compileScope(allocator, machine, code);
     defer scope.deinit();
 
