@@ -16,6 +16,18 @@ pub const VariableType = enum {
     physical_register,
 };
 
+pub const RegisterClass = enum {
+    parameter, // R0-R3 (for flexible parameter allocation)
+    caller_saved, // R0-R3
+    callee_saved, // R4-R7
+};
+
+pub const RegisterConstraint = union(enum) {
+    general_purpose, // Can use any available register
+    specific_register: usize, // Must use this exact register (offset in to specific register list)
+    register_class: RegisterClass, // Must use one from this class
+};
+
 pub const VariableData = union(VariableType) {
     local: struct { id: usize, source_name: []const u8 },
     temp: struct {
@@ -26,12 +38,13 @@ pub const VariableData = union(VariableType) {
     prime: struct { id: usize, orig: *Variable },
     live_range: struct {
         id: usize,
-        variables: BitMap,  // All variables in this live range
+        variables: BitMap, // All variables in this live range
+        constraint: RegisterConstraint,
     },
     physical_register: struct {
         id: usize,
         register: usize,
-    }
+    },
 };
 
 pub const Label = struct {
@@ -74,7 +87,8 @@ pub const Variable = struct {
 
     pub fn initLiveRange(alloc: std.mem.Allocator, id: usize, local_id: usize, varcount: usize) !*Variable {
         const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .live_range = .{ .id = local_id, .variables = try BitMap.initEmpty(alloc, varcount) } } };
+        // Default to general purpose register, set to more specific later
+        opnd.* = .{ .id = id, .data = .{ .live_range = .{ .id = local_id, .variables = try BitMap.initEmpty(alloc, varcount), .constraint = .general_purpose } } };
         return opnd;
     }
 
@@ -101,6 +115,13 @@ pub const Variable = struct {
             .live_range => unreachable,
             .physical_register => unreachable,
         };
+    }
+
+    pub fn setSpecificRegister(self: *Variable, reg: usize) void {
+        switch (self.data) {
+            .live_range => |*lr| lr.constraint = .{ .specific_register = reg },
+            else => unreachable,
+        }
     }
 
     pub fn getGlobalId(self: Variable) usize {
@@ -163,9 +184,10 @@ pub const InstructionName = enum {
     leave,
     loadi,
     loadnil,
+    load_stack_param,
     mov,
     phi,
-    pmov,     // parallel move group
+    pmov, // parallel move group
     putlabel,
     setlocal,
 };
@@ -264,6 +286,15 @@ pub const Instruction = union(InstructionName) {
     loadnil: struct {
         const Self = @This();
         out: *Variable,
+        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
+            unreachable;
+        }
+    },
+
+    load_stack_param: struct {
+        const Self = @This();
+        out: *Variable,
+        offset: usize, // Stack index
         pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
             unreachable;
         }

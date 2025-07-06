@@ -258,6 +258,31 @@ pub const Scope = struct {
         return children;
     }
 
+    pub const ChildScopeIterator = struct {
+        current: ?*ir.InstructionList.Node,
+
+        pub fn next(self: *ChildScopeIterator) ?*Scope {
+            while (self.current) |insn| {
+                const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
+                self.current = insn.next; // Advance to next instruction
+
+                switch (insn_node.data) {
+                    .define_method => |method| {
+                        return method.func;
+                    },
+                    else => continue,
+                }
+            }
+            return null;
+        }
+    };
+
+    pub fn childScopeIterator(self: *Scope) ChildScopeIterator {
+        return ChildScopeIterator{
+            .current = self.insns.first,
+        };
+    }
+
     pub fn numberAllInstructions(self: *Scope) void {
         var counter: usize = 0;
         var it = self.insns.first;
@@ -291,7 +316,7 @@ pub const Scope = struct {
         while (it) |insn| {
             const next_insn = insn.next; // Save next before potentially removing current
             const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
-            
+
             // If this instruction number is not in the alive set, remove it
             if (!alive_numbers.isSet(insn_node.number)) {
                 self.insns.remove(insn);
@@ -301,7 +326,7 @@ pub const Scope = struct {
                 insn_node.number = counter;
                 counter += 1;
             }
-            
+
             it = next_insn;
         }
     }
@@ -321,19 +346,19 @@ pub const Scope = struct {
 
 test "number and sweep unused instructions" {
     const alloc = std.testing.allocator;
-    
+
     // Create a scope with some instructions
     const scope = try Scope.init(alloc, 0, "test", null);
     defer scope.deinit();
-    
+
     // Add some instructions to the scope
     _ = try scope.pushLoadi(null, 123);
     _ = try scope.pushLoadi(null, 456);
     _ = try scope.pushGetself();
-    
+
     // Number all instructions
     scope.numberAllInstructions();
-    
+
     // Verify instructions were numbered correctly
     try std.testing.expectEqual(3, scope.insnCount());
     var it = scope.insns.first;
@@ -344,13 +369,42 @@ test "number and sweep unused instructions" {
         expected_number += 1;
         it = insn.next;
     }
-    
+
     // For testing, we'll verify the function doesn't crash with empty live blocks
     const live_blocks = [_]*cfg.BasicBlock{};
-    
+
     // Call sweep with no live blocks - this should remove all instructions
     try scope.sweepUnusedInstructions(alloc, &live_blocks);
-    
+
     // Count remaining instructions (should be 0 since no blocks were live)
     try std.testing.expectEqual(0, scope.insnCount());
+}
+
+test "child scope iterator" {
+    const allocator = std.testing.allocator;
+
+    // Create a scope with multiple child methods
+    const scope = try Scope.init(allocator, 0, "parent", null);
+    defer scope.deinit();
+
+    // Add some child method definitions
+    _ = try scope.pushDefineMethod("method1", try Scope.init(allocator, 1, "method1", scope));
+    _ = try scope.pushDefineMethod("method2", try Scope.init(allocator, 2, "method2", scope));
+    _ = try scope.pushDefineMethod("method3", try Scope.init(allocator, 3, "method3", scope));
+
+    // Test the iterator
+    var count: usize = 0;
+    var iter = scope.childScopeIterator();
+    while (iter.next()) |child_scope| {
+        count += 1;
+        // Verify it's actually a child scope
+        try std.testing.expect(child_scope.parent == scope);
+    }
+
+    try std.testing.expectEqual(3, count);
+
+    // Compare with existing childScopes method
+    const children = try scope.childScopes(allocator);
+    defer children.deinit();
+    try std.testing.expectEqual(3, children.items.len);
 }

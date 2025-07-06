@@ -25,6 +25,7 @@ pub const PhysicalRegister = enum(u8) {
     R7 = 7,
     // Add more registers as needed
 };
+const MAX_PARAM_REGISTERS = 4; // R0-R3 for parameters
 
 const K = @typeInfo(PhysicalRegister).@"enum".fields.len;
 
@@ -311,7 +312,6 @@ pub const RegisterAllocator = struct {
             var iter = block.killed_set.iterator(.{});
             while (iter.next()) |var_id| {
                 const root = union_find.find(var_id);
-
                 if (range_map.get(root)) |range| {
                     // Add this variable to existing live range
                     range.addVariable(var_id);
@@ -338,6 +338,23 @@ pub const RegisterAllocator = struct {
                 const root = union_find.find(out_var.id);
                 if (range_map.get(root)) |live_range_var| {
                     insn.setOut(live_range_var);
+                    switch (insn.*) {
+                        .getparam => |param| {
+                            if (param.index < MAX_PARAM_REGISTERS) {
+                                live_range_var.setSpecificRegister(param.index);
+                            } else {
+                                // Transform getparam into load_stack_param
+                                const stack_index = param.index - MAX_PARAM_REGISTERS;
+                                insn.* = .{ .load_stack_param = .{
+                                    .out = live_range_var,
+                                    .offset = stack_index,
+                                } };
+                            }
+                        },
+                        else => {},
+                    }
+                } else {
+                    unreachable;
                 }
             }
 
@@ -347,6 +364,8 @@ pub const RegisterAllocator = struct {
                 const root = union_find.find(operand.id);
                 if (range_map.get(root)) |live_range_var| {
                     insn.replaceOpnd(operand, live_range_var);
+                } else {
+                    unreachable;
                 }
             }
 
@@ -468,6 +487,66 @@ test "live ranges" {
     const ra = try RegisterAllocator.allocateRegisters(allocator, cfg);
     defer ra.deinit();
 
+    // const stdout = std.io.getStdErr().writer().any();
+    // try @import("printer.zig").printInterferenceGraphDOT(allocator, cfg, ra.interference_graph, stdout);
 
     // std.debug.print("edge count {d}\n", .{ ra.interference_graph.edgeCount() });
+}
+
+test "params use specific registers" {
+    const allocator = std.testing.allocator;
+
+    const machine = try VM.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code =
+        \\ def a b, c
+        \\   b + c
+        \\ end
+    ;
+
+    const scope = try cmp.compileString(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try CFG.build(allocator, scope);
+    defer cfg.deinit();
+    try cfg.compileUntil(.renamed);
+    const ra = try RegisterAllocator.allocateRegisters(allocator, cfg);
+    defer ra.deinit();
+
+    var iter = scope.childScopeIterator();
+    const method_scope = iter.next().?;
+
+    // Build CFG for the method scope to get register allocation
+    const method_cfg = try CFG.build(allocator, method_scope);
+    defer method_cfg.deinit();
+    try method_cfg.compileUntil(.renamed);
+    const method_ra = try RegisterAllocator.allocateRegisters(allocator, method_cfg);
+    defer method_ra.deinit();
+
+    // Find getparam instructions and verify their register assignments
+    var insn_node = method_scope.insns.first;
+    var param_count: usize = 0;
+
+    while (insn_node) |node| {
+        const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", node);
+
+        switch (insn_list_node.data) {
+            .getparam => |param| {
+                // After register allocation, getparam variables should be physical registers
+                const out_var = param.out;
+
+                // Verify it's a physical register with the correct register index
+                try std.testing.expectEqual(.physical_register, @as(ir.VariableType, out_var.data));
+                try std.testing.expectEqual(param.index, out_var.data.physical_register.register);
+                param_count += 1;
+            },
+            else => {},
+        }
+
+        insn_node = node.next;
+    }
+
+    // Verify we found the expected number of parameters
+    try std.testing.expectEqual(2, param_count);
 }
