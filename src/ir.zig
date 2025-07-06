@@ -23,9 +23,10 @@ pub const RegisterClass = enum {
 };
 
 pub const RegisterConstraint = union(enum) {
-    general_purpose, // Can use any available register
-    specific_register: usize, // Must use this exact register (offset in to specific register list)
-    register_class: RegisterClass, // Must use one from this class
+    // Ordered from easiest to hardest to color (for allocation priority)
+    general_purpose,                      // Can use any available register (easiest)
+    register_class: RegisterClass,        // Must use one from this class (medium)
+    specific_register: usize,             // Must use this exact register (hardest)
 };
 
 pub const VariableData = union(VariableType) {

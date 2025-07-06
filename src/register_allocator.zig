@@ -65,7 +65,17 @@ const ChaitinAllocator = struct {
         var graph = try self.graph.clone(allocator);
         defer graph.deinit(allocator);
 
-        var stack = LiveRangeList.init(allocator);
+        // Create a stack for each constraint type based on enum size
+        const constraint_count = @typeInfo(ir.RegisterConstraint).@"union".fields.len;
+        var constraint_stacks: [constraint_count]LiveRangeList = undefined;
+        for (0..constraint_count) |i| {
+            constraint_stacks[i] = LiveRangeList.init(allocator);
+        }
+        defer {
+            for (0..constraint_count) |i| {
+                constraint_stacks[i].deinit();
+            }
+        }
 
         var selected = try BitMap.initFull(allocator, work_list.items.len);
         defer selected.deinit(allocator);
@@ -84,8 +94,11 @@ const ChaitinAllocator = struct {
                 }
             }
 
+            // Group trivial nodes by their register constraints
             for (trivial.items) |lr| {
-                try stack.append(lr);
+                const constraint = lr.data.live_range.constraint;
+                const constraint_index = @intFromEnum(constraint);
+                try constraint_stacks[constraint_index].append(lr);
                 graph.removeNode(lr.getLocalId());
             }
 
@@ -96,7 +109,14 @@ const ChaitinAllocator = struct {
             trial += 1;
         }
 
-        return stack;
+        // Concatenate stacks in forward order (easiest to hardest)
+        // This puts hardest constraints on top of stack for priority processing
+        var final_stack = LiveRangeList.init(allocator);
+        for (0..constraint_count) |i| {
+            try final_stack.appendSlice(constraint_stacks[i].items);
+        }
+
+        return final_stack;
     }
 
     fn select(self: *ChaitinAllocator, allocator: std.mem.Allocator, worklist: LiveRangeList) !RegisterMapping {
@@ -128,12 +148,24 @@ const ChaitinAllocator = struct {
                 }
             }
 
-            // Pick first available color
-            const color: PhysicalRegister = for (0..K) |reg_num| {
-                if (!forbidden.isSet(reg_num)) {
-                    break @enumFromInt(reg_num);
+            const color: PhysicalRegister = switch (lr.data.live_range.constraint) {
+                .general_purpose => blk: {
+                    // Pick first available color
+                    for (0..K) |reg_num| {
+                        if (!forbidden.isSet(reg_num)) {
+                            break :blk @enumFromInt(reg_num);
+                        }
+                    } else return error.OutOfRegisters;
+                },
+                .register_class => unreachable, // TODO: make use of this
+                .specific_register => |sr| blk: {
+                    if (forbidden.isSet(sr)) {
+                        return error.RegisterConstraintConflict;
+                    } else {
+                        break :blk @enumFromInt(sr);
+                    }
                 }
-            } else return error.OutOfRegisters;
+            };
 
             // Get the static Variable for this physical register
             const reg_var = self.getPhysicalRegisterVar(color);
@@ -569,4 +601,78 @@ test "params use specific registers" {
     try std.testing.expectEqual(2, param_count);
     try std.testing.expectEqual(1, leave_count);
     try std.testing.expectEqual(1, call_count);
+}
+
+test "N params use N specific registers" {
+    const allocator = std.testing.allocator;
+
+    const machine = try VM.init(allocator);
+    defer machine.deinit(allocator);
+
+    const code =
+        \\ def a b, c, d, e
+        \\   b + c + d + e
+        \\ end
+    ;
+
+    const scope = try cmp.compileString(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try CFG.build(allocator, scope);
+    defer cfg.deinit();
+    try cfg.compileUntil(.renamed);
+    const ra = try RegisterAllocator.allocateRegisters(allocator, cfg);
+    defer ra.deinit();
+
+    var iter = scope.childScopeIterator();
+    const method_scope = iter.next().?;
+
+    // Build CFG for the method scope to get register allocation
+    const method_cfg = try CFG.build(allocator, method_scope);
+    defer method_cfg.deinit();
+    try method_cfg.compileUntil(.renamed);
+    const method_ra = try RegisterAllocator.allocateRegisters(allocator, method_cfg);
+    defer method_ra.deinit();
+
+    // Find getparam instructions and verify their register assignments
+    var insn_node = method_scope.insns.first;
+    var param_count: usize = 0;
+    var leave_count: usize = 0;
+    var call_count: usize = 0;
+
+    while (insn_node) |node| {
+        const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", node);
+
+        switch (insn_list_node.data) {
+            .getparam => |param| {
+                // After register allocation, getparam variables should be physical registers
+                const out_var = param.out;
+
+                // Verify it's a physical register with the correct register index
+                try std.testing.expectEqual(.physical_register, @as(ir.VariableType, out_var.data));
+                try std.testing.expectEqual(param.index, out_var.data.physical_register.register);
+                param_count += 1;
+            },
+            .leave => |param| {
+                const out_var = param.out;
+                try std.testing.expectEqual(.physical_register, @as(ir.VariableType, out_var.data));
+                try std.testing.expectEqual(0, out_var.data.physical_register.register);
+                leave_count += 1;
+            },
+            .call => |param| {
+                const out_var = param.out;
+                try std.testing.expectEqual(.physical_register, @as(ir.VariableType, out_var.data));
+                try std.testing.expectEqual(0, out_var.data.physical_register.register);
+                call_count += 1;
+            },
+            else => {},
+        }
+
+        insn_node = node.next;
+    }
+
+    // Verify we found the expected number of parameters
+    try std.testing.expectEqual(4, param_count);
+    try std.testing.expectEqual(1, leave_count);
+    try std.testing.expectEqual(3, call_count);
 }
