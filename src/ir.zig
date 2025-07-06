@@ -268,6 +268,7 @@ pub const Instruction = union(InstructionName) {
 
     leave: struct {
         const Self = @This();
+        out: *Variable,
         in: *Variable,
         pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
             if (self.in == old) self.in = new;
@@ -471,18 +472,6 @@ pub const Instruction = union(InstructionName) {
         return .{ .insn = self, .item_fields = if_mask, .array_fields = af_mask };
     }
 
-    pub fn isAssignment(self: Instruction) bool {
-        return switch (self) {
-            .putlabel => false,
-            .jump => false,
-            .jumpunless => false,
-            .jumpif => false,
-            .setlocal => false,
-            .leave => false,
-            else => true,
-        };
-    }
-
     pub fn isJump(self: Instruction) bool {
         return switch (self) {
             .jump, .jumpunless, .jumpif => true,
@@ -541,7 +530,6 @@ pub const Instruction = union(InstructionName) {
             .jumpif => null,
             .jumpunless => null,
             .setlocal => null,
-            .leave => null,
             inline else => |payload| payload.out,
         };
     }
@@ -552,7 +540,7 @@ pub const Instruction = union(InstructionName) {
 
     pub fn setOut(self: *Instruction, opnd: *Variable) void {
         switch (self.*) {
-            .putlabel, .jump, .jumpif, .jumpunless, .setlocal, .leave => unreachable,
+            .putlabel, .jump, .jumpif, .jumpunless, .setlocal => unreachable,
             inline else => |*payload| payload.out = opnd,
         }
     }

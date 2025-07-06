@@ -1376,7 +1376,7 @@ test "killed operands" {
         ir.Instruction.loadi,
     }, bb);
 
-    try std.testing.expectEqual(1, bb.killedVariableCount());
+    try std.testing.expectEqual(2, bb.killedVariableCount());
     try std.testing.expectEqual(0, bb.upwardExposedCount());
 }
 
@@ -1405,7 +1405,7 @@ test "killed operands de-duplicate" {
         ir.Instruction.loadi,
     }, bb);
 
-    try std.testing.expectEqual(1, bb.killedVariableCount());
+    try std.testing.expectEqual(2, bb.killedVariableCount());
     try std.testing.expectEqual(0, bb.upwardExposedCount());
 }
 

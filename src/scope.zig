@@ -127,7 +127,6 @@ pub const Scope = struct {
             .jumpif => unreachable,
             .jumpunless => unreachable,
             .setlocal => unreachable,
-            .leave => unreachable,
             inline else => |payload| payload.out,
         };
     }
@@ -176,8 +175,8 @@ pub const Scope = struct {
         try self.pushVoidInsn(.{ .putlabel = .{ .name = name } });
     }
 
-    pub fn pushLeave(self: *Scope, in: *Var) !void {
-        try self.pushVoidInsn(.{ .leave = .{ .in = in } });
+    pub fn pushLeave(self: *Scope, in: *Var) !*Var {
+        return try self.pushInsn(.{ .leave = .{ .in = in, .out = try self.newTemp() } });
     }
 
     pub fn pushLoadi(self: *Scope, out: ?*Var, val: u64) !*Var {

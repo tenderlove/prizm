@@ -314,13 +314,11 @@ pub const Compiler = struct {
                 return error.NotImplementedError;
             } else {
                 const inreg = try cc.compileNode(args[0], null, false);
-                try cc.pushLeave(inreg.?);
-                return inreg.?;
+                return try cc.pushLeave(inreg.?);
             }
         } else {
             const nil = try cc.pushLoadNil(null);
-            try cc.pushLeave(nil);
-            return nil;
+            return try cc.pushLeave(nil);
         }
     }
 
@@ -440,7 +438,7 @@ pub const Compiler = struct {
         try self.scope.?.pushLabel(label);
     }
 
-    fn pushLeave(self: *Compiler, in: *ir.Variable) !void {
+    fn pushLeave(self: *Compiler, in: *ir.Variable) !*ir.Variable {
         return try self.scope.?.pushLeave(in);
     }
 
