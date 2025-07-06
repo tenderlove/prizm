@@ -26,6 +26,7 @@ pub const PhysicalRegister = enum(u8) {
     // Add more registers as needed
 };
 const MAX_PARAM_REGISTERS = 4; // R0-R3 for parameters
+const RETURN_REGISTER = 0; // R0
 
 const K = @typeInfo(PhysicalRegister).@"enum".fields.len;
 
@@ -351,6 +352,9 @@ pub const RegisterAllocator = struct {
                                 } };
                             }
                         },
+                        .call, .leave => {
+                            live_range_var.setSpecificRegister(RETURN_REGISTER);
+                        },
                         else => {},
                     }
                 } else {
@@ -527,6 +531,8 @@ test "params use specific registers" {
     // Find getparam instructions and verify their register assignments
     var insn_node = method_scope.insns.first;
     var param_count: usize = 0;
+    var leave_count: usize = 0;
+    var call_count: usize = 0;
 
     while (insn_node) |node| {
         const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", node);
@@ -541,6 +547,18 @@ test "params use specific registers" {
                 try std.testing.expectEqual(param.index, out_var.data.physical_register.register);
                 param_count += 1;
             },
+            .leave => |param| {
+                const out_var = param.out;
+                try std.testing.expectEqual(.physical_register, @as(ir.VariableType, out_var.data));
+                try std.testing.expectEqual(0, out_var.data.physical_register.register);
+                leave_count += 1;
+            },
+            .call => |param| {
+                const out_var = param.out;
+                try std.testing.expectEqual(.physical_register, @as(ir.VariableType, out_var.data));
+                try std.testing.expectEqual(0, out_var.data.physical_register.register);
+                call_count += 1;
+            },
             else => {},
         }
 
@@ -549,4 +567,6 @@ test "params use specific registers" {
 
     // Verify we found the expected number of parameters
     try std.testing.expectEqual(2, param_count);
+    try std.testing.expectEqual(1, leave_count);
+    try std.testing.expectEqual(1, call_count);
 }
