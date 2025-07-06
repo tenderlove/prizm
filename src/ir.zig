@@ -17,16 +17,12 @@ pub const VariableType = enum {
 };
 
 pub const VariableData = union(VariableType) {
-    local: struct {
-        id: usize, source_name: []const u8
-    },
+    local: struct { id: usize, source_name: []const u8 },
     temp: struct {
         id: usize,
         defblock: ?*BasicBlock = null,
     },
-    redef: struct {
-        id: usize, variant: usize, orig: *Variable, defblock: *BasicBlock
-    },
+    redef: struct { id: usize, variant: usize, orig: *Variable, defblock: *BasicBlock },
     prime: struct { id: usize, orig: *Variable },
     live_range: struct {
         id: usize,
@@ -112,7 +108,7 @@ pub const Variable = struct {
     }
 
     pub fn getLocalId(self: Variable) usize {
-        return switch(self.data) {
+        return switch (self.data) {
             inline else => |payload| payload.id,
         };
     }
@@ -139,7 +135,7 @@ pub const Variable = struct {
     }
 
     pub fn getDefinitionBlock(self: Variable) *BasicBlock {
-        return switch(self.data) {
+        return switch (self.data) {
             .redef => |r| r.defblock,
             .temp => |t| t.defblock.?,
             .prime => |p| p.orig.getDefinitionBlock(),
@@ -148,7 +144,7 @@ pub const Variable = struct {
     }
 
     pub fn setDefinitionBlock(self: *Variable, block: *BasicBlock) void {
-        switch(self.data) {
+        switch (self.data) {
             .redef => |*r| r.defblock = block,
             .temp => |*t| t.defblock = block,
             else => {},

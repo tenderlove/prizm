@@ -3,11 +3,11 @@ const cmp = @import("compiler.zig");
 
 const Ruby = struct {
     const TagBits = enum(u3) {
-        HEAP,  // 000
-        INT,   // 001
+        HEAP, // 000
+        INT, // 001
         FLOAT, // 010
-        BOOL,  // 011
-        NULL,  // 101
+        BOOL, // 011
+        NULL, // 101
         UNDEF, // 110
     };
 
@@ -61,16 +61,16 @@ pub const VM = struct {
     }
 
     pub fn eval(self: *VM, iseq: *cmp.InstructionSequence) !void {
-        std.debug.print("iseq len {d}\n", .{ iseq.insns.len });
+        std.debug.print("iseq len {d}\n", .{iseq.insns.len});
         for (iseq.insns) |insn_enc| {
             const insn: cmp.InstructionName = @enumFromInt(insn_enc & 0x3F);
 
-            switch(insn) {
-                .move => { 
+            switch (insn) {
+                .move => {
                     const out = (insn_enc >> 19) & 0x1FFF;
                     const in = (insn_enc >> 6) & 0x1FFF;
                     try self.move(out, in);
-                 },
+                },
                 .loadi => {
                     const out = (insn_enc >> 19) & 0x1FFF;
                     const in = (insn_enc >> 6) & 0x1FFF;

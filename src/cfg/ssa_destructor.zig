@@ -31,7 +31,7 @@ pub const SSADestructor = struct {
 
     pub fn init(mem: std.mem.Allocator) !*SSADestructor {
         const self = try mem.create(SSADestructor);
-        self.* = SSADestructor {
+        self.* = SSADestructor{
             .mem = mem,
             .phi_copies = ParallelCopyList.init(mem),
             .copy_groups = std.ArrayList(*ir.InstructionListNode).init(mem),
@@ -64,8 +64,8 @@ pub const SSADestructor = struct {
             while (iter) |insn| {
                 const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
 
-                switch(insn_node.data) {
-                    .putlabel => { }, // Skip putlabel
+                switch (insn_node.data) {
+                    .putlabel => {}, // Skip putlabel
                     .phi => |p| {
                         const current_out = insn_node.data.getOut().?;
                         const prime_out = try cfg.scope.newPrime(current_out);
@@ -75,20 +75,10 @@ pub const SSADestructor = struct {
                             const prime_in = try cfg.scope.newPrime(param);
                             p.params.items[param_i] = prime_in;
 
-                            try predecessor_copies.append(.{
-                                .source_block = bb,
-                                .dest_block = cfg.blocks[param.data.redef.defblock.name],
-                                .output = prime_in,
-                                .input = param
-                            });
+                            try predecessor_copies.append(.{ .source_block = bb, .dest_block = cfg.blocks[param.data.redef.defblock.name], .output = prime_in, .input = param });
 
                             const def_block = param.getDefinitionBlock();
-                            try self.phi_copies.append(.{
-                                .source_block = bb,
-                                .dest_block = def_block,
-                                .output = prime_out,
-                                .input = prime_in
-                            });
+                            try self.phi_copies.append(.{ .source_block = bb, .dest_block = def_block, .output = prime_out, .input = prime_in });
                         }
 
                         try isolation_copies.append(.{
@@ -101,7 +91,9 @@ pub const SSADestructor = struct {
                         insn_node.data.setOut(prime_out);
                     },
                     // Quit after we've passed phi's
-                    else => { break; }
+                    else => {
+                        break;
+                    },
                 }
 
                 if (insn == &bb.finish.node) break;
@@ -316,17 +308,17 @@ test "phi isolation adds I/O variable copies" {
     const allocator = std.testing.allocator;
 
     const code =
-\\ x = 10
-\\ y = 11
-\\ begin
-\\   t = x
-\\   x = y
-\\   y = t
-\\ end while i < 100
-\\ 
-\\ p x
-\\ p y
-;
+        \\ x = 10
+        \\ y = 11
+        \\ begin
+        \\   t = x
+        \\   x = y
+        \\   y = t
+        \\ end while i < 100
+        \\ 
+        \\ p x
+        \\ p y
+    ;
 
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
@@ -364,8 +356,8 @@ test "phi isolation adds I/O variable copies" {
 
     // Now lets test that the input values are isolated.
     const bb0 = cfg.blocks[0];
-    try expectIsolatedPhiInput(bb0, &[_] ir.Instruction { phi1.data, phi2.data });
-    try expectIsolatedPhiInput(cfg.blocks[1], &[_] ir.Instruction { phi1.data, phi2.data });
+    try expectIsolatedPhiInput(bb0, &[_]ir.Instruction{ phi1.data, phi2.data });
+    try expectIsolatedPhiInput(cfg.blocks[1], &[_]ir.Instruction{ phi1.data, phi2.data });
 }
 
 fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
@@ -391,7 +383,7 @@ fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
     }
 
     var count: usize = 0;
-    while(true) {
+    while (true) {
         if (insn == bb.finish or !insn.?.data.isPMov()) {
             break;
         }
@@ -473,17 +465,17 @@ test "inserting phi copies actually copies the right thing" {
     const allocator = std.testing.allocator;
 
     const code =
-\\ x = 10
-\\ y = 11
-\\ begin
-\\   t = x
-\\   x = y
-\\   y = t
-\\ end while i < 100
-\\ 
-\\ p x
-\\ p y
-;
+        \\ x = 10
+        \\ y = 11
+        \\ begin
+        \\   t = x
+        \\   x = y
+        \\   y = t
+        \\ end while i < 100
+        \\ 
+        \\ p x
+        \\ p y
+    ;
 
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
@@ -522,25 +514,25 @@ test "inserting phi copies actually copies the right thing" {
     const phi2 = @as(*ir.InstructionListNode, @fieldParentPtr("node", phi1.node.next.?));
     try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi2.data));
 
-    try expectPhiOutputCopies(cfg.blocks[0], &[_] ir.Instruction { phi1.data, phi2.data });
-    try expectPhiOutputCopies(cfg.blocks[1], &[_] ir.Instruction { phi1.data, phi2.data });
+    try expectPhiOutputCopies(cfg.blocks[0], &[_]ir.Instruction{ phi1.data, phi2.data });
+    try expectPhiOutputCopies(cfg.blocks[1], &[_]ir.Instruction{ phi1.data, phi2.data });
 }
 
 test "destructor fixes all variables" {
     const allocator = std.testing.allocator;
 
     const code =
-\\ x = 10
-\\ y = 11
-\\ begin
-\\   t = x
-\\   x = y
-\\   y = t
-\\ end while i < 100
-\\ 
-\\ p x
-\\ p y
-;
+        \\ x = 10
+        \\ y = 11
+        \\ begin
+        \\   t = x
+        \\   x = y
+        \\   y = t
+        \\ end while i < 100
+        \\ 
+        \\ p x
+        \\ p y
+    ;
 
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
@@ -585,17 +577,17 @@ test "cycle in parallel copy" {
     const allocator = std.testing.allocator;
 
     const code =
-\\ x = 10
-\\ y = 11
-\\ begin
-\\   t = x
-\\   x = y
-\\   y = t
-\\ end while i < 100
-\\ 
-\\ p x
-\\ p y
-;
+        \\ x = 10
+        \\ y = 11
+        \\ begin
+        \\   t = x
+        \\   x = y
+        \\   y = t
+        \\ end while i < 100
+        \\ 
+        \\ p x
+        \\ p y
+    ;
 
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
@@ -647,17 +639,17 @@ test "destruction removes all parallel copies" {
     const allocator = std.testing.allocator;
 
     const code =
-\\ x = 10
-\\ y = 11
-\\ begin
-\\   t = x
-\\   x = y
-\\   y = t
-\\ end while i < 100
-\\ 
-\\ p x
-\\ p y
-;
+        \\ x = 10
+        \\ y = 11
+        \\ begin
+        \\   t = x
+        \\   x = y
+        \\   y = t
+        \\ end while i < 100
+        \\ 
+        \\ p x
+        \\ p y
+    ;
 
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);
@@ -692,17 +684,17 @@ test "destruction maintains block endings" {
     const allocator = std.testing.allocator;
 
     const code =
-\\ x = 10
-\\ y = 11
-\\ begin
-\\   t = x
-\\   x = y
-\\   y = t
-\\ end while i < 100
-\\ 
-\\ p x
-\\ p y
-;
+        \\ x = 10
+        \\ y = 11
+        \\ begin
+        \\   t = x
+        \\   x = y
+        \\   y = t
+        \\ end while i < 100
+        \\ 
+        \\ p x
+        \\ p y
+    ;
 
     const machine = try vm.init(allocator);
     defer machine.deinit(allocator);

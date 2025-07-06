@@ -73,7 +73,7 @@ const PP = struct {
         try writer.print(":{s}", .{msg});
     }
 
-    fn writeNodeName(pp: *PP, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!void {
+    fn writeNodeName(pp: *PP, node: *const c.pm_node_t) error{ NotImplementedError, OutOfMemory }!void {
         const name = switch (node.*.type) {
             c.PM_ARGUMENTS_NODE => "@ ArgumentsNode (location: ",
             c.PM_CALL_NODE => "@ CallNode (location: ",
@@ -97,7 +97,7 @@ const PP = struct {
         try pp.writer.print(")\n", .{});
     }
 
-    fn print_node(pp: *PP, node: *const c.pm_node_t) error{NotImplementedError, OutOfMemory}!void {
+    fn print_node(pp: *PP, node: *const c.pm_node_t) error{ NotImplementedError, OutOfMemory }!void {
         try pp.writeNodeName(node);
 
         switch (node.*.type) {
@@ -125,13 +125,9 @@ const PP = struct {
 
     fn visitCallNode(pp: *PP, cast: *const c.pm_call_node_t) !void {
         // flags
-        const bits = [_]u8{
-            c.PM_CALL_NODE_FLAGS_SAFE_NAVIGATION,
-            c.PM_CALL_NODE_FLAGS_VARIABLE_CALL,
-            c.PM_CALL_NODE_FLAGS_ATTRIBUTE_WRITE,
-            c.PM_CALL_NODE_FLAGS_IGNORE_VISIBILITY};
+        const bits = [_]u8{ c.PM_CALL_NODE_FLAGS_SAFE_NAVIGATION, c.PM_CALL_NODE_FLAGS_VARIABLE_CALL, c.PM_CALL_NODE_FLAGS_ATTRIBUTE_WRITE, c.PM_CALL_NODE_FLAGS_IGNORE_VISIBILITY };
 
-        const labels = [_][]const u8 {
+        const labels = [_][]const u8{
             " safe_navigation",
             " variable_call",
             " attribute_write",
@@ -144,7 +140,7 @@ const PP = struct {
         for (bits, 0..bits.len) |item, index| {
             if ((cast.*.base.flags & item) > 0) {
                 if (found) try pp.writer.print(",", .{});
-                try pp.writer.print("{s}", .{ labels[index] });
+                try pp.writer.print("{s}", .{labels[index]});
                 found = true;
             }
         }
@@ -397,7 +393,7 @@ const PP = struct {
         try pp.writer.print("({d},{d})-({d},{d})", .{ start.line, start.column, end.line, end.column });
     }
 
-    fn print_loc_with_source(pp: *PP, name: []const u8, location: *const c.pm_location_t) !void{
+    fn print_loc_with_source(pp: *PP, name: []const u8, location: *const c.pm_location_t) !void {
         try pp.print_header(name);
         if (location.start == null) {
             try pp.writer.print("nil\n", .{});
@@ -422,7 +418,7 @@ const PP = struct {
             try pp.writer.print("+-- ", .{});
             try pp.push_prefix(if (idx == (length - 1))
                 "    "
-                else
+            else
                 "|   ");
             defer pp.pop_prefix();
 
@@ -432,7 +428,7 @@ const PP = struct {
 
     fn print_header(pp: *PP, str: []const u8) !void {
         try pp.flush_prefix();
-        try pp.writer.print("{s}", .{ str });
+        try pp.writer.print("{s}", .{str});
     }
 };
 
@@ -465,7 +461,7 @@ fn scope_node_init(node: *const c.pm_node_t, scope: *pm_scope_node_t, prev: ?*pm
         else => {
             std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
             return error.NotImplementedError;
-        }
+        },
     }
 }
 
@@ -508,20 +504,9 @@ pub const Prism = struct {
 };
 
 pub fn pmNewScopeNode(node: *const c.pm_node_t) !pm_scope_node_t {
-    var scope_node: pm_scope_node_t = .{
-        .base = .{
-            .type = c.PM_SCOPE_NODE,
-        },
-        .previous = null,
-        .ast_node = node,
-        .parameters = null,
-        .body = null,
-        .locals = .{
-            .size = 0,
-            .capacity = 0,
-            .ids = null
-        }
-    };
+    var scope_node: pm_scope_node_t = .{ .base = .{
+        .type = c.PM_SCOPE_NODE,
+    }, .previous = null, .ast_node = node, .parameters = null, .body = null, .locals = .{ .size = 0, .capacity = 0, .ids = null } };
     try scope_node_init(node, &scope_node, null);
     return scope_node;
 }

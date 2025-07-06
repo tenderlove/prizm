@@ -78,23 +78,23 @@ pub const Instruction = union(InstructionName) {
     }
 
     pub fn isReturn(self: Instruction) bool {
-        return switch(self) {
+        return switch (self) {
             .leave => true,
-            else => false
+            else => false,
         };
     }
 
     pub fn isCall(self: Instruction) bool {
-        return switch(self) {
+        return switch (self) {
             .call, .add => true,
-            else => false
+            else => false,
         };
     }
 
     pub fn deinit(self: Instruction) void {
-        switch(self) {
+        switch (self) {
             .call => |x| x.params.deinit(),
-            else  => {}
+            else => {},
         }
     }
 
@@ -134,9 +134,12 @@ pub const Instruction = union(InstructionName) {
             }
         };
 
-        std.debug.print("{[value]s: <[width]}", .{ .value = @tagName(node), .width = maxlen + 1, });
+        std.debug.print("{[value]s: <[width]}", .{
+            .value = @tagName(node),
+            .width = maxlen + 1,
+        });
 
-        switch(node) {
+        switch (node) {
             .move => |v| {
                 std.debug.print("{d} {d}\n", .{ v.out.number, v.in.number });
             },
@@ -147,13 +150,13 @@ pub const Instruction = union(InstructionName) {
                 std.debug.print("{d} {d} {d}\n", .{ v.out.number, v.in1.number, v.in2.number });
             },
             .getself => |v| {
-                std.debug.print("{d}\n", .{ v.out.number });
+                std.debug.print("{d}\n", .{v.out.number});
             },
             .getmethod => |v| {
-                std.debug.print("{d}\n", .{ v.out.number });
+                std.debug.print("{d}\n", .{v.out.number});
             },
             .call => |v| {
-                std.debug.print("{d}\n", .{ v.out.number });
+                std.debug.print("{d}\n", .{v.out.number});
             },
         }
     }
