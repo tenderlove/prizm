@@ -100,10 +100,12 @@ pub const Compiler = struct {
 
         // Get a pooled string that's owned by the VM
         const name = try cc.vm.getString(method_name);
+        const outvar = if (out) |o| o else try cc.newTemp();
+
         if (recv_op) |r| {
-            return try cc.pushCall(out, r, name, params);
+            return try cc.pushCall(outvar, r, name, params);
         } else {
-            return try cc.pushCall(out, try cc.pushGetself(), name, params);
+            return try cc.pushCall(outvar, try cc.pushGetself(), name, params);
         }
     }
 
@@ -296,6 +298,7 @@ pub const Compiler = struct {
         const name = try cc.scope.?.getLocalName(lvar_name);
         const out = try cc.compileNode(node.*.value, name, false);
         if (out != name) {
+            // FIXME: I think this should be unreachable, but we need to verify
             return try cc.pushMov(name, out.?);
         } else {
             return name;
@@ -414,8 +417,18 @@ pub const Compiler = struct {
         return try self.scope.?.pushDefineMethod(name, scope);
     }
 
-    fn pushCall(self: *Compiler, out: ?*ir.Variable, recv: *ir.Variable, name: []const u8, params: std.ArrayList(*ir.Variable)) !*ir.Variable {
-        return try self.scope.?.pushCall(out, recv, name, params);
+    fn pushCall(self: *Compiler, out: *ir.Variable, recv: *ir.Variable, name: []const u8, params: std.ArrayList(*ir.Variable)) !*ir.Variable {
+        // Isolate the call parameters from the surrounding code by
+        // emitting copies.
+        const recv_p = try self.pushSetParam(recv, 0);
+        for (params.items, 0..params.items.len) |p, i| {
+            params.items[i] = try self.pushSetParam(p, i + 1);
+        }
+        // Need a temp, then copy in to out
+        const ret = try self.scope.?.pushCall(try self.newTemp(), recv_p, name, params);
+        // We also need to isloate the return value from everything, so
+        // emit a copy instruction
+        return try self.scope.?.pushMov(out, ret);
     }
 
     fn pushGetself(self: *Compiler) !*ir.Variable {
@@ -456,6 +469,10 @@ pub const Compiler = struct {
 
     fn pushSetLocal(self: *Compiler, name: *ir.Variable, val: *ir.Variable) !void {
         return try self.scope.?.pushSetLocal(name, val);
+    }
+
+    fn pushSetParam(self: *Compiler, in: *ir.Variable, index: usize) !*ir.Variable {
+        return try self.scope.?.pushSetParam(in, index);
     }
 
     fn stringFromId(cc: *Compiler, id: c.pm_constant_id_t) []const u8 {
@@ -591,13 +608,17 @@ test "compile ternary statement" {
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.loadi,
+        ir.Instruction.setparam,
+        ir.Instruction.setparam,
         ir.Instruction.call,
+        ir.Instruction.mov,
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
         ir.Instruction.loadi,
         ir.Instruction.putlabel,
+        ir.Instruction.leave,
     }, scope.insns);
 }
 
@@ -633,7 +654,9 @@ test "compile call no params" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getself,
+        ir.Instruction.setparam,
         ir.Instruction.call,
+        ir.Instruction.mov,
         ir.Instruction.leave,
     }, scope.insns);
 }
@@ -847,7 +870,10 @@ test "while loop" {
         ir.Instruction.putlabel,
         ir.Instruction.jumpunless,
         ir.Instruction.getself,
+        ir.Instruction.setparam,
+        ir.Instruction.setparam,
         ir.Instruction.call,
+        ir.Instruction.mov,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
         ir.Instruction.loadnil,
@@ -888,7 +914,10 @@ test "+=" {
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.loadi,
         ir.Instruction.loadi,
+        ir.Instruction.setparam,
+        ir.Instruction.setparam,
         ir.Instruction.call,
+        ir.Instruction.mov,
         ir.Instruction.leave,
     }, scope.insns);
 }

@@ -164,7 +164,7 @@ const ChaitinAllocator = struct {
                     } else {
                         break :blk @enumFromInt(sr);
                     }
-                }
+                },
             };
 
             // Get the static Variable for this physical register
@@ -220,6 +220,10 @@ pub const RegisterAllocator = struct {
         const interference_graph = try InterferenceGraph.init(allocator, cfg.scope.liveRangeCount());
         errdefer interference_graph.deinit(allocator);
         try buildInterferenceGraph(allocator, cfg, interference_graph);
+
+        // Print interference graph
+        //const stdout = std.io.getStdErr().writer().any();
+        //try @import("printer.zig").printInterferenceGraphDOT(allocator, cfg, interference_graph, stdout);
 
         // Build a list of live ranges from the LiveRangeMap
         var lr_list = std.ArrayList(*Var).init(allocator);
@@ -382,6 +386,11 @@ pub const RegisterAllocator = struct {
                                     .out = live_range_var,
                                     .offset = stack_index,
                                 } };
+                            }
+                        },
+                        .setparam => |param| {
+                            if (param.index < MAX_PARAM_REGISTERS) {
+                                live_range_var.setSpecificRegister(param.index);
                             }
                         },
                         .call, .leave => {
@@ -675,4 +684,65 @@ test "N params use N specific registers" {
     try std.testing.expectEqual(4, param_count);
     try std.testing.expectEqual(1, leave_count);
     try std.testing.expectEqual(3, call_count);
+}
+
+test "setparam and call can share R0 register" {
+    const allocator = std.testing.allocator;
+
+    const machine = try VM.init(allocator);
+    defer machine.deinit(allocator);
+
+    // Code that generates setparam(0) followed by call
+    const code =
+        \\def test(a)
+        \\  a + 1
+        \\end
+        \\
+        \\result = test(42)
+    ;
+
+    const scope = try cmp.compileString(allocator, machine, code);
+    defer scope.deinit();
+
+    const cfg = try CFG.build(allocator, scope);
+    defer cfg.deinit();
+    try cfg.compileUntil(.renamed);
+
+    // Build register allocator - this should succeed without constraint conflicts
+    const ra = try RegisterAllocator.allocateRegisters(allocator, cfg);
+    defer ra.deinit();
+
+    // Find the setparam(0) and call instructions
+    var setparam_found = false;
+    var call_found = false;
+
+    var node = cfg.scope.insns.first;
+    while (node) |insn_node| {
+        const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
+        const insn = &insn_list_node.data;
+
+        switch (insn.*) {
+            .setparam => |param| {
+                if (param.index == 0) {
+                    setparam_found = true;
+                    // setparam(0) should be assigned to R0
+                    try std.testing.expect(param.out.data == .physical_register);
+                    try std.testing.expectEqual(0, param.out.data.physical_register.register);
+                }
+            },
+            .call => |call| {
+                call_found = true;
+                // call return value should be assigned to R0
+                try std.testing.expect(call.out.data == .physical_register);
+                try std.testing.expectEqual(0, call.out.data.physical_register.register);
+            },
+            else => {},
+        }
+
+        node = insn_node.next;
+    }
+
+    // Both setparam(0) and call should have been found
+    try std.testing.expect(setparam_found);
+    try std.testing.expect(call_found);
 }

@@ -1439,8 +1439,8 @@ test "upward exposed bits get set" {
     const bb = (try findBBWithInsn(methodcfg, ir.InstructionName.call)).?;
     // One for x
     try std.testing.expectEqual(1, bb.upwardExposedCount());
-    // one for loadi, and return value of call
-    try std.testing.expectEqual(2, bb.killedVariableCount());
+    // setparam for x, loadi, setparam for 1, and return value of call
+    try std.testing.expectEqual(5, bb.killedVariableCount());
 }
 
 test "complex loop with if" {
@@ -1709,8 +1709,8 @@ test "dead code removal" {
     try std.testing.expectEqual(1, children.items.len);
 
     const method_scope = children.items[0];
-    // Get a CFG for the foo method
-    try std.testing.expectEqual(6, method_scope.insnCount());
+    // Get a CFG for the foo method (includes setparam instructions now)
+    try std.testing.expectEqual(9, method_scope.insnCount());
 
     const cfg = try CFG.build(mem, method_scope);
     defer cfg.deinit();

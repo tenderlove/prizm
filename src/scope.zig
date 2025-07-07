@@ -159,6 +159,14 @@ pub const Scope = struct {
         return try self.pushInsn(.{ .getparam = .{ .out = out, .index = index } });
     }
 
+    pub fn pushSetParam(self: *Scope, in: *Var, index: usize) !*Var {
+        return try self.pushInsn(.{ .setparam = .{
+            .out = try self.newTemp(),
+            .in = in,
+            .index = index,
+        } });
+    }
+
     pub fn pushJump(self: *Scope, label: ir.Label) !void {
         try self.pushVoidInsn(.{ .jump = .{ .label = label } });
     }

@@ -251,6 +251,11 @@ pub const IRPrinter = struct {
                 try out.print("({s})", .{i.name});
             },
             .getparam => |i| try out.print("({d})", .{i.index}),
+            .setparam => |i| {
+                try out.print("({d}, ", .{i.index});
+                try printOpnd(i.in, out);
+                try out.print(")", .{});
+            },
             .putlabel => |i| try out.print("L{d}", .{i.name.id}),
             .loadi => |i| try out.print("({d})", .{i.val}),
             .jump => |i| try out.print("(L{d})", .{i.label.id}),
@@ -421,7 +426,15 @@ const InterferenceGraphPrinter = struct {
                 try label.appendSlice(var_name);
             }
 
-            try writer.print("  LR{d} [label=\"{s}\"];\n", .{ i, label.items });
+            try writer.print("  LR{d} [label=\"{s}", .{ i, label.items });
+
+            switch (lr.data.live_range.constraint) {
+                .specific_register => |sr| {
+                    try writer.print(" wants: {d}", .{sr});
+                },
+                else => {},
+            }
+            try writer.print("\"];\n", .{});
         }
         try writer.print("\n", .{});
 
