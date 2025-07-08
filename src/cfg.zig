@@ -347,6 +347,7 @@ pub const CFG = struct {
 
             // Upward exposed variables must cross between BBs
             globals.setUnion(block.upward_exposed_set);
+            globals.setUnion(block.redefined_set);
             var iter = block.killed_set.iterator(.{});
             while (iter.next()) |operand_num| {
                 block_set.set(operand_num, block.name);
@@ -715,6 +716,7 @@ pub const BasicBlock = struct {
     finish: *ir.InstructionListNode,
     predecessors: std.ArrayList(*BasicBlock),
     killed_set: BitMap,
+    redefined_set: BitMap,
     upward_exposed_set: BitMap,
     liveout_set: BitMap,
     livein_set: BitMap,
@@ -733,6 +735,7 @@ pub const BasicBlock = struct {
             .finish = finish,
             .entry = entry,
             .killed_set = try BitMap.initEmpty(alloc, 0),
+            .redefined_set = try BitMap.initEmpty(alloc, 0),
             .upward_exposed_set = try BitMap.initEmpty(alloc, 0),
             .liveout_set = try BitMap.initEmpty(alloc, 0),
             .livein_set = try BitMap.initEmpty(alloc, 0),
@@ -746,11 +749,13 @@ pub const BasicBlock = struct {
 
     pub fn resetSets(self: *BasicBlock, vars: usize, alloc: std.mem.Allocator) !void {
         try self.killed_set.resize(alloc, vars, false);
+        try self.redefined_set.resize(alloc, vars, false);
         try self.upward_exposed_set.resize(alloc, vars, false);
         try self.liveout_set.resize(alloc, vars, false);
         try self.livein_set.resize(alloc, vars, false);
 
         self.killed_set.unsetAll();
+        self.redefined_set.unsetAll();
         self.upward_exposed_set.unsetAll();
         self.liveout_set.unsetAll();
         self.livein_set.unsetAll();
@@ -941,14 +946,16 @@ pub const BasicBlock = struct {
             while (opiter.next()) |op| {
                 // Special case: if this operand is the same as the output of this instruction,
                 // it should always be considered upward exposed (use before redefine)
-                const is_redefined_in_same_insn = if (insn.data.outVar()) |out| op.id == out.id else false;
 
-                if (!self.killed_set.isSet(op.id) or is_redefined_in_same_insn) {
+                if (!self.killed_set.isSet(op.id)) {
                     self.upward_exposed_set.set(op.id);
                 }
             }
 
             if (insn.data.outVar()) |v| {
+                if (self.killed_set.isSet(v.id)) {
+                    self.redefined_set.set(v.id);
+                }
                 self.killed_set.set(v.id);
             }
         }
