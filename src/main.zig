@@ -92,7 +92,15 @@ pub fn main() !void {
 
             const scope = try compileFile(allocator, path, machine);
 
-            try printer.printIR(allocator, scope, std.io.getStdOut().writer().any());
+            var output: printer.Output = .{
+                .writer = .{
+                    .interface = std.fs.File.Writer.initInterface(&.{}),
+                    .file = .stdout(),
+                    .mode = .streaming,
+                },
+            };
+
+            try printer.printIR(allocator, scope, &output);
 
             return;
         }
@@ -136,7 +144,15 @@ pub fn main() !void {
                 }
             }
 
-            try printer.printCFGWithFormat(allocator, scope, step, format, std.io.getStdOut().writer().any());
+            var output: printer.Output = .{
+                .writer = .{
+                    .interface = std.fs.File.Writer.initInterface(&.{}),
+                    .file = .stdout(),
+                    .mode = .streaming,
+                },
+            };
+
+            try printer.printCFGWithFormat(allocator, scope, step, format, &output);
 
             return;
         }

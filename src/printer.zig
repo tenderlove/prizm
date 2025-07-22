@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 const ir = @import("ir.zig");
 const cmp = @import("compiler.zig");
 const cfg_z = @import("cfg.zig");
@@ -9,10 +10,19 @@ const BitMap = std.DynamicBitSetUnmanaged;
 const InterferenceGraph = @import("interference_graph.zig").InterferenceGraph;
 const assert = @import("std").debug.assert;
 
-const DotOutputStrategy = struct {
-    writer: std.io.AnyWriter,
+pub const Output = struct {
+    writer: std.fs.File.Writer,
 
-    pub fn init(writer: std.io.AnyWriter) DotOutputStrategy {
+    fn print(self: *Output, comptime format: []const u8, args: anytype) !void {
+        const wr = &self.writer.interface;
+        try wr.print(format, args);
+    }
+};
+
+const DotOutputStrategy = struct {
+    writer: *Output,
+
+    pub fn init(writer: *Output) DotOutputStrategy {
         return DotOutputStrategy{ .writer = writer };
     }
 
@@ -71,10 +81,10 @@ const DotOutputStrategy = struct {
 };
 
 const AsciiOutputStrategy = struct {
-    writer: std.io.AnyWriter,
+    writer: *Output,
     table_started: bool = false,
 
-    pub fn init(writer: std.io.AnyWriter) AsciiOutputStrategy {
+    pub fn init(writer: *Output) AsciiOutputStrategy {
         return AsciiOutputStrategy{ .writer = writer, .table_started = false };
     }
 
@@ -719,7 +729,7 @@ fn widestOutOp(scope: *Scope) usize {
     return widest;
 }
 
-pub fn printIR(alloc: std.mem.Allocator, scope: *Scope, out: std.io.AnyWriter) !void {
+pub fn printIR(alloc: std.mem.Allocator, scope: *Scope, out: *Output) !void {
     const strategy = DotOutputStrategy.init(out);
     try IRPrinter.printIR(alloc, scope, &strategy);
 }
@@ -733,7 +743,7 @@ pub const CFGFormat = enum {
     ascii,
 };
 
-pub fn printCFGWithFormat(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, format: CFGFormat, out: std.io.AnyWriter) !void {
+pub fn printCFGWithFormat(alloc: std.mem.Allocator, scope: *Scope, step: CFG.State, format: CFGFormat, out: *Output) !void {
     switch (format) {
         .dot => {
             const strategy = DotOutputStrategy.init(out);
@@ -746,6 +756,6 @@ pub fn printCFGWithFormat(alloc: std.mem.Allocator, scope: *Scope, step: CFG.Sta
     }
 }
 
-pub fn printInterferenceGraphDOT(allocator: std.mem.Allocator, cfg: *CFG, graph: *const InterferenceGraph, out: std.io.AnyWriter) !void {
+pub fn printInterferenceGraphDOT(allocator: std.mem.Allocator, cfg: *CFG, graph: *const InterferenceGraph, out: *Output) !void {
     try InterferenceGraphPrinter.printDOT(allocator, cfg, graph, out);
 }
