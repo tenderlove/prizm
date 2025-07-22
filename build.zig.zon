@@ -26,8 +26,8 @@
     // internet connectivity.
     .dependencies = .{
         .yazap = .{
-            .url = "git+https://github.com/prajwalch/yazap#71490491b8f1b0741218160b88cf0a87d2a941ce",
-            .hash = "yazap-0.6.3-Z1t-EiLlAQCR5mUSOlF1PovnwyPcIUGeV02lAIVMUEOc",
+            .url = "git+https://github.com/tenderlove/yazap.git#b6ff8c42dbbb00400bc0cd02f3f47812575cb806",
+            .hash = "yazap-0.6.3-Z1t-ElnmAQDQfgVUSRgbRVQdjOzQcY0pxk_lHmHaPDZX",
         },
     },
     .paths = .{
