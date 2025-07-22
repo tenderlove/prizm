@@ -161,12 +161,15 @@ pub const Compiler = struct {
             keywords_list = &params.*.keywords;
             posts_list = &params.*.posts;
 
+            const lvar_name = try cc.vm.getString("self");
+            _ = try scope.pushGetParam(try cc.scope.?.getLocalName(lvar_name), 0);
+
             if (requireds_list) |listptr| {
                 scope.param_size = listptr.*.size;
                 const list = listptr.*.nodes[0..scope.param_size];
                 for (list, 0..) |param, i| {
                     const opnd = (try cc.compileNode(@ptrCast(param), null, popped)).?;
-                    _ = try scope.pushGetParam(opnd, i);
+                    _ = try scope.pushGetParam(opnd, i + 1);
                 }
             }
         }
@@ -432,7 +435,8 @@ pub const Compiler = struct {
     }
 
     fn pushGetself(self: *Compiler) !*ir.Variable {
-        return try self.scope.?.pushGetself();
+        // return try self.scope.?.pushGetself();
+        return try self.scope.?.getLocalName("self");
     }
 
     fn pushJump(self: *Compiler, label: ir.Label) !void {
