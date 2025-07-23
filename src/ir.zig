@@ -177,7 +177,6 @@ pub const Variable = struct {
 pub const InstructionName = enum {
     call,
     define_method,
-    getself,
     getparam,
     jump,
     jumpif,
@@ -220,14 +219,6 @@ pub const Instruction = union(InstructionName) {
         out: *Variable,
         name: []const u8,
         func: *Scope,
-        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
-            unreachable;
-        }
-    },
-
-    getself: struct {
-        const Self = @This();
-        out: *Variable,
         pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
             unreachable;
         }

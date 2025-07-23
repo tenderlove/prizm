@@ -155,6 +155,10 @@ pub const Compiler = struct {
         scope.local_storage = locals.size;
         cc.scope = scope;
 
+        // Every scope gets a "self" as a parameter
+        const lvar_name = try cc.vm.getString("self");
+        _ = try scope.pushGetParam(try cc.scope.?.getLocalName(lvar_name), 0);
+
         if (parameters_node) |params| {
             requireds_list = &params.*.requireds;
             optionals_list = &params.*.optionals;
@@ -166,7 +170,7 @@ pub const Compiler = struct {
                 const list = listptr.*.nodes[0..scope.param_size];
                 for (list, 0..) |param, i| {
                     const opnd = (try cc.compileNode(@ptrCast(param), null, popped)).?;
-                    _ = try scope.pushGetParam(opnd, i);
+                    _ = try scope.pushGetParam(opnd, i + 1);
                 }
             }
         }
@@ -432,7 +436,8 @@ pub const Compiler = struct {
     }
 
     fn pushGetself(self: *Compiler) !*ir.Variable {
-        return try self.scope.?.pushGetself();
+        // return try self.scope.?.pushGetself();
+        return try self.scope.?.getLocalName("self");
     }
 
     fn pushJump(self: *Compiler, label: ir.Label) !void {
@@ -518,7 +523,7 @@ test "compile math" {
     try std.testing.expectEqual(null, scope.parent);
     const insn = scope.insns.first;
     try std.testing.expect(insn != null);
-    try expectInstructionType(ir.Instruction.loadi, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
+    try expectInstructionType(ir.Instruction.getparam, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
 }
 
 fn expectInstructionType(expected: ir.InstructionName, actual: ir.InstructionName) !void {
@@ -536,6 +541,7 @@ test "compile local set" {
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
@@ -552,6 +558,7 @@ test "compile local get w/ return" {
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
@@ -581,6 +588,7 @@ test "compile local get w/ nil return" {
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
         ir.Instruction.loadnil,
         ir.Instruction.leave,
@@ -606,6 +614,7 @@ test "compile ternary statement" {
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
         ir.Instruction.loadi,
         ir.Instruction.setparam,
@@ -632,12 +641,11 @@ test "compile def method" {
     const scope = try compileString(allocator, machine, "def foo; end");
     defer scope.deinit();
 
-    const insn = scope.insns.first;
-    try expectInstructionType(ir.Instruction.define_method, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
-
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func;
+    const scopes = try scope.childScopes(allocator);
+    defer scopes.deinit();
+    const method_scope = scopes.items[0];
     const method_insns = method_scope.insns;
-    try std.testing.expectEqual(2, method_insns.len());
+    try std.testing.expectEqual(3, method_insns.len());
     try std.testing.expectEqual(0, method_scope.param_size);
     try std.testing.expectEqual(0, method_scope.local_storage);
 }
@@ -653,7 +661,7 @@ test "compile call no params" {
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
-        ir.Instruction.getself,
+        ir.Instruction.getparam,
         ir.Instruction.setparam,
         ir.Instruction.call,
         ir.Instruction.mov,
@@ -671,12 +679,11 @@ test "compile def method 2 params" {
     const scope = try compileString(allocator, machine, "def foo(a, b); end");
     defer scope.deinit();
 
-    const insn = scope.insns.first;
-    try expectInstructionType(ir.Instruction.define_method, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
-
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func;
+    const scopes = try scope.childScopes(allocator);
+    defer scopes.deinit();
+    const method_scope = scopes.items[0];
     const method_insns = method_scope.insns;
-    try std.testing.expectEqual(4, method_insns.len());
+    try std.testing.expectEqual(5, method_insns.len());
     try std.testing.expectEqual(2, method_scope.param_size);
     try std.testing.expectEqual(2, method_scope.local_storage);
 }
@@ -691,10 +698,11 @@ test "compile def method 2 params 3 locals" {
     const scope = try compileString(allocator, machine, "def foo(a, b); c = 123; d = a; e = d + b; end");
     defer scope.deinit();
 
-    const insn = scope.insns.first;
-    try expectInstructionType(ir.Instruction.define_method, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
+    const scopes = try scope.childScopes(allocator);
+    defer scopes.deinit();
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func;
+    const method_scope = scopes.items[0];
+
     try std.testing.expectEqual(2, method_scope.param_size);
     try std.testing.expectEqual(5, method_scope.local_storage);
 }
@@ -709,20 +717,16 @@ test "method returns param" {
     const scope = try compileString(allocator, machine, "def foo(a); a; end");
     defer scope.deinit();
 
-    const insn = scope.insns.first;
-    try expectInstructionType(ir.Instruction.define_method, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
+    const scopes = try scope.childScopes(allocator);
+    defer scopes.deinit();
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data.define_method.func;
+    const method_scope = scopes.items[0];
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.getparam,
         ir.Instruction.leave,
     }, method_scope.insns);
-
-    const inop = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?)).data.leave.in;
-    const inop_type: ir.VariableType = inop.data;
-    try std.testing.expectEqual(ir.VariableType.local, inop_type);
-    try std.testing.expectEqual(0, inop.data.local.id);
 }
 
 test "always true ternary" {
@@ -735,13 +739,14 @@ test "always true ternary" {
     const scope = try compileString(allocator, machine, "6 ? 7 : 8");
     defer scope.deinit();
 
-    try std.testing.expectEqual(2, scope.insns.len());
+    try std.testing.expectEqual(3, scope.insns.len());
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(7, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val);
+    try std.testing.expectEqual(7, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?)).data.loadi.val);
 }
 
 test "always false ternary" {
@@ -754,13 +759,13 @@ test "always false ternary" {
     const scope = try compileString(allocator, machine, "false ? 7 : 8");
     defer scope.deinit();
 
-    try std.testing.expectEqual(2, scope.insns.len());
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val);
+    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?)).data.loadi.val);
 }
 
 test "always nil ternary" {
@@ -773,13 +778,14 @@ test "always nil ternary" {
     const scope = try compileString(allocator, machine, "nil ? 7 : 8");
     defer scope.deinit();
 
-    try std.testing.expectEqual(2, scope.insns.len());
+    try std.testing.expectEqual(3, scope.insns.len());
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.loadi.val);
+    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?)).data.loadi.val);
 }
 
 test "local ternary" {
@@ -792,9 +798,12 @@ test "local ternary" {
     const scope = try compileString(allocator, machine, "def foo(x); x ? 7 : 8; end");
     defer scope.deinit();
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func;
+    const scopes = try scope.childScopes(allocator);
+    defer scopes.deinit();
+    const method_scope = scopes.items[0];
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.getparam,
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
@@ -805,9 +814,9 @@ test "local ternary" {
         ir.Instruction.leave,
     }, method_scope.insns);
 
-    // Make sure the jump instruction is testing the first parameter
-    const test_reg = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?)).data.jumpunless.in;
-    try std.testing.expectEqual(0, test_reg.data.local.id);
+    // Make sure the jump instruction is testing the second parameter (first is self)
+    const test_reg = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?.next.?)).data.jumpunless.in;
+    try std.testing.expectEqual(1, test_reg.data.local.id);
 }
 
 test "popped if body" {
@@ -820,9 +829,12 @@ test "popped if body" {
     const scope = try compileString(allocator, machine, "def foo(x); x ? 7 : 8; x; end");
     defer scope.deinit();
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func;
+    const scopes = try scope.childScopes(allocator);
+    defer scopes.deinit();
+    const method_scope = scopes.items[0];
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.getparam,
         ir.Instruction.jumpunless,
         ir.Instruction.jump,
@@ -849,6 +861,7 @@ test "simple function" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.getparam,
         ir.Instruction.leave,
     }, method_scope.insns);
 }
@@ -863,13 +876,15 @@ test "while loop" {
     const scope = try compileString(allocator, machine, "def foo(x); while x; puts x; end; end");
     defer scope.deinit();
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func;
+    const scopes = try scope.childScopes(allocator);
+    defer scopes.deinit();
+    const method_scope = scopes.items[0];
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.getparam,
         ir.Instruction.putlabel,
         ir.Instruction.jumpunless,
-        ir.Instruction.getself,
         ir.Instruction.setparam,
         ir.Instruction.setparam,
         ir.Instruction.call,
@@ -891,9 +906,12 @@ test "empty while loop" {
     const scope = try compileString(allocator, machine, "def foo; while true; end; end");
     defer scope.deinit();
 
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func;
+    const scopes = try scope.childScopes(allocator);
+    defer scopes.deinit();
+    const method_scope = scopes.items[0];
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.putlabel,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
@@ -912,6 +930,7 @@ test "+=" {
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
         ir.Instruction.loadi,
         ir.Instruction.setparam,
@@ -932,6 +951,7 @@ test "local variable write" {
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
         ir.Instruction.mov,
         ir.Instruction.leave,

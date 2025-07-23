@@ -1237,7 +1237,7 @@ test "basic block one instruction" {
     const scope = try Scope.init(std.testing.allocator, 0, "empty", null);
     defer scope.deinit();
 
-    _ = try scope.pushGetself();
+    _ = try scope.pushLoadi(null, 123);
 
     const cfg = try buildCFG(std.testing.allocator, scope);
     defer cfg.deinit();
@@ -1255,7 +1255,7 @@ test "basic block two instruction" {
     defer scope.deinit();
 
     _ = try scope.pushLoadi(null, 123);
-    _ = try scope.pushGetself();
+    _ = try scope.pushLoadi(null, 234);
 
     const cfg = try buildCFG(std.testing.allocator, scope);
     defer cfg.deinit();
@@ -1281,7 +1281,7 @@ test "CFG from compiler" {
 
     const bb = cfg.head;
     const start_type: ir.InstructionName = bb.start.data;
-    try std.testing.expectEqual(ir.InstructionName.loadi, start_type);
+    try std.testing.expectEqual(ir.InstructionName.getparam, start_type);
 
     const finish_type: ir.InstructionName = bb.finish.data;
     try std.testing.expectEqual(ir.InstructionName.leave, finish_type);
@@ -1317,7 +1317,10 @@ test "if statement should have 2 children blocks" {
     defer scope.deinit();
 
     // Get the scope for the method
-    const method_scope: *Scope = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?)).data.define_method.func;
+    const scopes = try scope.childScopes(allocator);
+    defer scopes.deinit();
+
+    const method_scope = scopes.items[0];
 
     const cfg = try buildCFG(allocator, method_scope);
     defer cfg.deinit();
@@ -1325,11 +1328,12 @@ test "if statement should have 2 children blocks" {
     const block = cfg.head;
 
     try expectInstructionList(&[_]ir.InstructionName{
-        ir.Instruction.getparam,
+        ir.Instruction.getparam, // self
+        ir.Instruction.getparam, // x
         ir.Instruction.jumpunless,
     }, block);
     try std.testing.expect(block.fallsThrough());
-    try std.testing.expectEqual(2, block.instructionCount());
+    try std.testing.expectEqual(3, block.instructionCount());
 
     var child = block.fall_through_dest.?;
     try expectInstructionList(&[_]ir.InstructionName{
@@ -1380,10 +1384,11 @@ test "killed operands" {
     const bb = (try iter.next()).?;
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
     }, bb);
 
-    try std.testing.expectEqual(2, bb.killedVariableCount());
+    try std.testing.expectEqual(3, bb.killedVariableCount());
     try std.testing.expectEqual(0, bb.upwardExposedCount());
 }
 
@@ -1408,11 +1413,12 @@ test "killed operands de-duplicate" {
     const bb = (try iter.next()).?;
 
     try expectInstructionList(&[_]ir.InstructionName{
+        ir.Instruction.getparam,
         ir.Instruction.loadi,
         ir.Instruction.loadi,
     }, bb);
 
-    try std.testing.expectEqual(2, bb.killedVariableCount());
+    try std.testing.expectEqual(3, bb.killedVariableCount());
     try std.testing.expectEqual(0, bb.upwardExposedCount());
 }
 
@@ -1724,7 +1730,7 @@ test "dead code removal" {
     // Manually sweep unused instructions
     try method_scope.sweepUnusedInstructions(mem, blocks);
 
-    try std.testing.expectEqual(2, method_scope.insnCount());
+    try std.testing.expectEqual(3, method_scope.insnCount());
 }
 
 test "dominance frontiers" {

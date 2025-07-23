@@ -82,10 +82,6 @@ pub const VM = struct {
                     const in2 = (insn_enc >> 6) & 0x1FFF;
                     self.add(out, in1, in2);
                 },
-                .getself => {
-                    const out = (insn_enc >> 6) & 0x1FFF;
-                    self.getself(out);
-                },
             }
         }
     }

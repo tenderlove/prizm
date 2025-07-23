@@ -12,7 +12,6 @@ pub const InstructionName = enum {
     call,
     getlocal,
     getmethod,
-    getself,
     leave,
     loadi,
     loadnil,
@@ -42,10 +41,6 @@ pub const Instruction = union(InstructionName) {
         out: Register,
         recv: Register,
         ccid: usize,
-    },
-
-    getself: struct {
-        out: Register,
     },
 
     leave: struct {
@@ -111,7 +106,6 @@ pub const Instruction = union(InstructionName) {
         //     .loadi => |v| v.out.number << 19 | v.val << 6 | @intFromEnum(InstructionName.loadi),
         //     // | out - 8 bit | in1 - 8 bit | in2 - 8 bit | insn 6 bit |
         //     .add => |v| v.out.number << (6 + 8 + 8) | v.in1.number << (6 + 8) | v.in2.number << 6 | @intFromEnum(InstructionName.add),
-        //     .getself => |v| v.out.number << 6 | @intFromEnum(InstructionName.getself),
         //     .getmethod => |v| {
         //         v.ccid << (6 + 8) | v.out.number << 6 | @intFromEnum(InstructionName.getself);
         //     },

@@ -520,7 +520,7 @@ test "live ranges" {
         \\ else
         \\   y += 2
         \\ end
-        \\ puts x + y
+        \\ x + y
     ;
 
     const scope = try cmp.compileString(allocator, machine, code);
@@ -607,7 +607,7 @@ test "params use specific registers" {
     }
 
     // Verify we found the expected number of parameters
-    try std.testing.expectEqual(2, param_count);
+    try std.testing.expectEqual(3, param_count);
     try std.testing.expectEqual(1, leave_count);
     try std.testing.expectEqual(1, call_count);
 }

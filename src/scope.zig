@@ -150,11 +150,6 @@ pub const Scope = struct {
         } });
     }
 
-    pub fn pushGetself(self: *Scope) !*Var {
-        const outreg = try self.newTemp();
-        return try self.pushInsn(.{ .getself = .{ .out = outreg } });
-    }
-
     pub fn pushGetParam(self: *Scope, out: *Var, index: usize) !*Var {
         return try self.pushInsn(.{ .getparam = .{ .out = out, .index = index } });
     }
@@ -361,7 +356,7 @@ test "number and sweep unused instructions" {
     // Add some instructions to the scope
     _ = try scope.pushLoadi(null, 123);
     _ = try scope.pushLoadi(null, 456);
-    _ = try scope.pushGetself();
+    _ = try scope.pushLoadi(null, 789);
 
     // Number all instructions
     scope.numberAllInstructions();
