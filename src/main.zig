@@ -2,7 +2,6 @@ const std = @import("std");
 const prism = @import("prism.zig");
 const compiler = @import("compiler.zig");
 const vm = @import("vm.zig");
-const ssa = @import("ssa.zig");
 const cfg_z = @import("cfg.zig");
 const CFG = cfg_z.CFG;
 const Scope = @import("scope.zig").Scope;
