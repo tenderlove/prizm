@@ -211,7 +211,7 @@ pub const RegisterAllocator = struct {
         try buildLiveRangesFromUnionFind(cfg, &union_find, &range_map);
 
         // Rewrite the code with Live Ranges
-        rewriteWithLiveRanges(cfg, &union_find, &range_map);
+        try rewriteWithLiveRanges(cfg, &union_find, &range_map);
 
         // We have to re-analyze the CFG after updating the code with LR
         try cfg.analyze();
@@ -362,7 +362,7 @@ pub const RegisterAllocator = struct {
         }
     }
 
-    fn rewriteWithLiveRanges(cfg: *CFG, union_find: *UnionFind, range_map: *std.AutoHashMap(usize, *Var)) void {
+    fn rewriteWithLiveRanges(cfg: *CFG, union_find: *UnionFind, range_map: *std.AutoHashMap(usize, *Var)) !void {
         // Iterate through all instructions in the scope and replace variables with live ranges
         var node = cfg.scope.insns.first;
 
@@ -375,6 +375,7 @@ pub const RegisterAllocator = struct {
                 const root = union_find.find(out_var.id);
                 if (range_map.get(root)) |live_range_var| {
                     insn.setOut(live_range_var);
+                    live_range_var.setDefinition(insn);
                     switch (insn.*) {
                         .getparam => |param| {
                             if (param.index < MAX_PARAM_REGISTERS) {
@@ -409,6 +410,7 @@ pub const RegisterAllocator = struct {
                 const root = union_find.find(operand.id);
                 if (range_map.get(root)) |live_range_var| {
                     insn.replaceOpnd(operand, live_range_var);
+                    try live_range_var.addUse(cfg.arena.allocator(), insn);
                 } else {
                     unreachable;
                 }

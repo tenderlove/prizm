@@ -4,6 +4,7 @@ const cfg = @import("cfg.zig");
 const Scope = @import("scope.zig").Scope;
 const BasicBlock = cfg.BasicBlock;
 const BitMap = std.DynamicBitSetUnmanaged;
+const Insn = @import("ir.zig").Instruction;
 
 pub const InstructionList = std.DoublyLinkedList;
 
@@ -41,6 +42,8 @@ pub const VariableData = union(VariableType) {
         id: usize,
         variables: BitMap, // All variables in this live range
         constraint: RegisterConstraint,
+        def: ?*Insn = null,
+        last_use: std.DoublyLinkedList,
     },
     physical_register: struct {
         id: usize,
@@ -89,7 +92,7 @@ pub const Variable = struct {
     pub fn initLiveRange(alloc: std.mem.Allocator, id: usize, local_id: usize, varcount: usize) !*Variable {
         const opnd = try alloc.create(Variable);
         // Default to general purpose register, set to more specific later
-        opnd.* = .{ .id = id, .data = .{ .live_range = .{ .id = local_id, .variables = try BitMap.initEmpty(alloc, varcount), .constraint = .general_purpose } } };
+        opnd.* = .{ .id = id, .data = .{ .live_range = .{ .id = local_id, .variables = try BitMap.initEmpty(alloc, varcount), .constraint = .general_purpose, .last_use = std.DoublyLinkedList{} } } };
         return opnd;
     }
 
@@ -98,6 +101,24 @@ pub const Variable = struct {
             .redef => unreachable,
             .prime => unreachable,
             inline else => |payload| payload.name,
+        };
+    }
+
+    pub fn setDefinition(self: *Variable, insn: *Insn) void {
+        return switch (self.data) {
+            .live_range => |*v| v.def = insn,
+            inline else => unreachable,
+        };
+    }
+
+    pub fn addUse(self: *Variable, alloc: std.mem.Allocator, insn: *Insn) !void {
+        return switch (self.data) {
+            .live_range => |*v| {
+                const use = try alloc.create(Use);
+                use.*.insn = insn;
+                v.last_use.append(&use.node);
+            },
+            inline else => unreachable,
         };
     }
 
@@ -562,6 +583,11 @@ pub const InstructionListNode = struct {
     node: std.DoublyLinkedList.Node,
     number: usize = 0,
     data: Instruction,
+};
+
+pub const Use = struct {
+    node: std.DoublyLinkedList.Node,
+    insn: *Instruction,
 };
 
 test "can iterate on ops" {
