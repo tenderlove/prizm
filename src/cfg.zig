@@ -584,6 +584,39 @@ pub const CFG = struct {
         self.state = .renamed_variables_removed;
     }
 
+    pub fn removeUselessCopies(self: *CFG) void {
+        for (self.blocks) |bb| {
+            assert(bb.reachable);
+
+            var iter: ?*std.DoublyLinkedList.Node = &bb.start.node;
+
+            while (iter) |insn| {
+                const next_insn = insn.next; // Save next before potentially removing current
+                const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
+
+                switch (insn_node.data) {
+                    .getparam => {
+                        bb.removeInstruction(insn_node, self.scope);
+                    },
+                    .mov => |mov| {
+                        if (mov.out == mov.in) {
+                            bb.removeInstruction(insn_node, self.scope);
+                        }
+                    },
+                    .setparam => |sp| {
+                        if (sp.out == sp.in) {
+                            bb.removeInstruction(insn_node, self.scope);
+                        }
+                    },
+                    else => {},
+                }
+
+                if (insn == &bb.finish.node) break;
+                iter = next_insn;
+            }
+        }
+    }
+
     pub fn removePhi(self: *CFG) !void {
         for (self.blocks) |bb| {
             if (!bb.reachable) continue;
@@ -1329,11 +1362,13 @@ test "if statement should have 2 children blocks" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam, // self
+        ir.Instruction.mov,
         ir.Instruction.getparam, // x
+        ir.Instruction.mov,
         ir.Instruction.jumpunless,
     }, block);
     try std.testing.expect(block.fallsThrough());
-    try std.testing.expectEqual(3, block.instructionCount());
+    try std.testing.expectEqual(5, block.instructionCount());
 
     var child = block.fall_through_dest.?;
     try expectInstructionList(&[_]ir.InstructionName{
@@ -1385,10 +1420,11 @@ test "killed operands" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
     }, bb);
 
-    try std.testing.expectEqual(3, bb.killedVariableCount());
+    try std.testing.expectEqual(4, bb.killedVariableCount());
     try std.testing.expectEqual(0, bb.upwardExposedCount());
 }
 
@@ -1414,11 +1450,12 @@ test "killed operands de-duplicate" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
         ir.Instruction.loadi,
     }, bb);
 
-    try std.testing.expectEqual(3, bb.killedVariableCount());
+    try std.testing.expectEqual(4, bb.killedVariableCount());
     try std.testing.expectEqual(0, bb.upwardExposedCount());
 }
 
@@ -1716,7 +1753,7 @@ test "dead code removal" {
 
     const method_scope = children.items[0];
     // Get a CFG for the foo method (includes setparam instructions now)
-    try std.testing.expectEqual(9, method_scope.insnCount());
+    try std.testing.expectEqual(10, method_scope.insnCount());
 
     const cfg = try CFG.build(mem, method_scope);
     defer cfg.deinit();
@@ -1730,7 +1767,7 @@ test "dead code removal" {
     // Manually sweep unused instructions
     try method_scope.sweepUnusedInstructions(mem, blocks);
 
-    try std.testing.expectEqual(3, method_scope.insnCount());
+    try std.testing.expectEqual(4, method_scope.insnCount());
 }
 
 test "dominance frontiers" {

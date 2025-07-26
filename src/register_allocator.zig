@@ -137,7 +137,9 @@ const ChaitinAllocator = struct {
             const lr_id = lr.getLocalId();
 
             // Check which colors are forbidden by already-colored neighbors
-            var forbidden = std.StaticBitSet(K).initEmpty();
+            var forbidden = try std.DynamicBitSetUnmanaged.initEmpty(allocator, self.physical_registers.items.len);
+            defer forbidden.deinit(allocator);
+
             var neighbor_iter = self.graph.neighborIterator(lr_id);
             while (neighbor_iter.next()) |neighbor_id| {
                 if (assigned.isSet(neighbor_id)) {
@@ -287,6 +289,9 @@ pub const RegisterAllocator = struct {
             var live_now = try bb.liveout_set.clone(allocator);
             defer live_now.deinit(allocator);
 
+            // TODO: While we're building the interference graph, we should
+            // detect what LRs are alive at a call instruction so that we
+            // can save the LRs before the call and restore them after
             var iter = bb.instructionIter(.{ .direction = .reverse });
             while (iter.next()) |insn| {
                 // TODO: we need to skip adding edges if the operation is a mov

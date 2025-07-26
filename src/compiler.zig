@@ -157,7 +157,9 @@ pub const Compiler = struct {
 
         // Every scope gets a "self" as a parameter
         const lvar_name = try cc.vm.getString("self");
-        _ = try scope.pushGetParam(try cc.scope.?.getLocalName(lvar_name), 0);
+        //_ = try scope.pushGetParam(try cc.scope.?.getLocalName(lvar_name), 0);
+        _ = try cc.pushMov(try cc.scope.?.getLocalName(lvar_name),
+            try scope.pushGetParam(try cc.newTemp(), 0));
 
         if (parameters_node) |params| {
             requireds_list = &params.*.requireds;
@@ -170,7 +172,8 @@ pub const Compiler = struct {
                 const list = listptr.*.nodes[0..scope.param_size];
                 for (list, 0..) |param, i| {
                     const opnd = (try cc.compileNode(@ptrCast(param), null, popped)).?;
-                    _ = try scope.pushGetParam(opnd, i + 1);
+                    const ptemp = try scope.pushGetParam(try cc.newTemp(), i + 1);
+                    _ = try cc.pushMov(opnd, ptemp);
                 }
             }
         }
@@ -432,7 +435,7 @@ pub const Compiler = struct {
         const ret = try self.scope.?.pushCall(try self.newTemp(), recv_p, name, params);
         // We also need to isloate the return value from everything, so
         // emit a copy instruction
-        return try self.scope.?.pushMov(out, ret);
+        return try self.pushMov(out, ret);
     }
 
     fn pushGetself(self: *Compiler) !*ir.Variable {
@@ -542,6 +545,7 @@ test "compile local set" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
@@ -559,6 +563,7 @@ test "compile local get w/ return" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
@@ -589,6 +594,7 @@ test "compile local get w/ nil return" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
         ir.Instruction.loadnil,
         ir.Instruction.leave,
@@ -615,6 +621,7 @@ test "compile ternary statement" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
         ir.Instruction.loadi,
         ir.Instruction.setparam,
@@ -645,7 +652,7 @@ test "compile def method" {
     defer scopes.deinit();
     const method_scope = scopes.items[0];
     const method_insns = method_scope.insns;
-    try std.testing.expectEqual(3, method_insns.len());
+    try std.testing.expectEqual(4, method_insns.len());
     try std.testing.expectEqual(0, method_scope.param_size);
     try std.testing.expectEqual(0, method_scope.local_storage);
 }
@@ -662,6 +669,7 @@ test "compile call no params" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.setparam,
         ir.Instruction.call,
         ir.Instruction.mov,
@@ -683,7 +691,7 @@ test "compile def method 2 params" {
     defer scopes.deinit();
     const method_scope = scopes.items[0];
     const method_insns = method_scope.insns;
-    try std.testing.expectEqual(5, method_insns.len());
+    try std.testing.expectEqual(8, method_insns.len());
     try std.testing.expectEqual(2, method_scope.param_size);
     try std.testing.expectEqual(2, method_scope.local_storage);
 }
@@ -724,7 +732,9 @@ test "method returns param" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.leave,
     }, method_scope.insns);
 }
@@ -739,14 +749,15 @@ test "always true ternary" {
     const scope = try compileString(allocator, machine, "6 ? 7 : 8");
     defer scope.deinit();
 
-    try std.testing.expectEqual(3, scope.insns.len());
+    try std.testing.expectEqual(4, scope.insns.len());
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(7, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?)).data.loadi.val);
+    try std.testing.expectEqual(7, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?.next.?)).data.loadi.val);
 }
 
 test "always false ternary" {
@@ -761,11 +772,12 @@ test "always false ternary" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?)).data.loadi.val);
+    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?.next.?)).data.loadi.val);
 }
 
 test "always nil ternary" {
@@ -778,14 +790,15 @@ test "always nil ternary" {
     const scope = try compileString(allocator, machine, "nil ? 7 : 8");
     defer scope.deinit();
 
-    try std.testing.expectEqual(3, scope.insns.len());
+    try std.testing.expectEqual(4, scope.insns.len());
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
         ir.Instruction.leave,
     }, scope.insns);
 
-    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?)).data.loadi.val);
+    try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?.next.?)).data.loadi.val);
 }
 
 test "local ternary" {
@@ -804,7 +817,9 @@ test "local ternary" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.jumpunless,
         ir.Instruction.loadi,
         ir.Instruction.jump,
@@ -815,7 +830,7 @@ test "local ternary" {
     }, method_scope.insns);
 
     // Make sure the jump instruction is testing the second parameter (first is self)
-    const test_reg = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?.next.?)).data.jumpunless.in;
+    const test_reg = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?.next.?.next.?.next.?)).data.jumpunless.in;
     try std.testing.expectEqual(1, test_reg.data.local.id);
 }
 
@@ -835,7 +850,9 @@ test "popped if body" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.jumpunless,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
@@ -861,7 +878,9 @@ test "simple function" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.leave,
     }, method_scope.insns);
 }
@@ -882,7 +901,9 @@ test "while loop" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.putlabel,
         ir.Instruction.jumpunless,
         ir.Instruction.setparam,
@@ -912,6 +933,7 @@ test "empty while loop" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.putlabel,
         ir.Instruction.jump,
         ir.Instruction.putlabel,
@@ -931,6 +953,7 @@ test "+=" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
         ir.Instruction.loadi,
         ir.Instruction.setparam,
@@ -952,6 +975,7 @@ test "local variable write" {
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
+        ir.Instruction.mov,
         ir.Instruction.loadi,
         ir.Instruction.mov,
         ir.Instruction.leave,
