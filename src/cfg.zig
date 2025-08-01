@@ -896,7 +896,7 @@ pub const BasicBlock = struct {
     pub fn insertParallelCopy(self: *BasicBlock, scope: *Scope, node: *ir.InstructionListNode, dest: *Var, src: *Var, group: usize) !*ir.InstructionListNode {
         self.has_pcopy = true;
 
-        const ret = try scope.insertParallelCopy(node, dest, src, self, group);
+        const ret = try scope.insertParallelCopy(node, dest, src, group);
 
         if (node == self.finish) {
             self.finish = ret;

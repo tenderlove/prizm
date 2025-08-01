@@ -341,7 +341,6 @@ pub const Instruction = union(InstructionName) {
         const Self = @This();
         out: *Variable,
         in: *Variable,
-        block: *BasicBlock,
         group: usize,
         pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
             if (self.in == old) self.in = new;
