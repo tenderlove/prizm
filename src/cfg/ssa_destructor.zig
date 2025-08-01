@@ -14,7 +14,6 @@ pub const SSADestructor = struct {
     mem: std.mem.Allocator,
     group: usize = 0,
     phi_copies: ParallelCopyList,
-    copy_groups: std.ArrayList(*ir.InstructionListNode),
 
     const ParallelCopy = struct {
         source_block: *BasicBlock,
@@ -34,14 +33,12 @@ pub const SSADestructor = struct {
         self.* = SSADestructor{
             .mem = mem,
             .phi_copies = ParallelCopyList.init(mem),
-            .copy_groups = std.ArrayList(*ir.InstructionListNode).init(mem),
         };
         return self;
     }
 
     pub fn deinit(self: *SSADestructor) void {
         self.phi_copies.deinit();
-        self.copy_groups.deinit();
         self.mem.destroy(self);
     }
 
@@ -113,7 +110,6 @@ pub const SSADestructor = struct {
 
                 for (isolation_copies.items) |copy| {
                     insn = &(try bb.insertParallelCopy(cfg.scope, @fieldParentPtr("node", insn), copy.input, copy.output, self.group)).node;
-                    try self.copy_groups.append(@fieldParentPtr("node", insn));
                 }
                 self.group += 1;
             }
@@ -127,8 +123,7 @@ pub const SSADestructor = struct {
                         current_block = copy.dest_block.name;
                         self.group += 1;
                     }
-                    const insn = try copy.dest_block.appendParallelCopy(cfg.scope, copy.output, copy.input, self.group);
-                    try self.copy_groups.append(insn);
+                    _ = try copy.dest_block.appendParallelCopy(cfg.scope, copy.output, copy.input, self.group);
                 }
                 self.group += 1;
             }
@@ -165,8 +160,7 @@ pub const SSADestructor = struct {
                     current_block = copy.dest_block.name;
                     self.group += 1;
                 }
-                const pcopy = try copy.dest_block.appendParallelCopy(cfg.scope, copy.output, copy.input, self.group);
-                try self.copy_groups.append(pcopy);
+                _ = try copy.dest_block.appendParallelCopy(cfg.scope, copy.output, copy.input, self.group);
             }
             self.group += 1;
         }
@@ -224,52 +218,10 @@ pub const SSADestructor = struct {
         }
     }
 
-    fn serializeCopyGroup(_: *SSADestructor, cfg: *CFG, insn: *ir.InstructionListNode, group: usize) !void {
-        // There shouldn't be any cycles, so we should be able to just insert
-        // copies.
-        var cursor = insn;
-        while (cursor.data.pmov.group == group) {
-            const src = cursor.data.pmov.in;
-            const dst = cursor.data.pmov.out;
-            const old = cursor;
-
-            cursor = @fieldParentPtr("node", cursor.node.next.?);
-
-            const copy = try cfg.makeMov(dst, src);
-            cfg.replace(old.data.pmov.block, old, copy);
-            if (@as(ir.InstructionName, cursor.data) != ir.InstructionName.pmov) break;
-        }
-    }
-
     // Figure 9.20, part F & G
-    pub fn serializeCopyGroups(self: *SSADestructor, cfg: *CFG) !void {
-        if (self.copy_groups.items.len == 0) {
-            return;
-        }
-
-        const bits = cfg.opndCount();
-        const matrix = try BitMatrix.init(self.mem, bits, bits);
-        defer matrix.deinit(self.mem);
-
-        var current_group: usize = 0;
-        var start_of_group = self.copy_groups.items[0];
-
-        for (self.copy_groups.items) |pcopy| {
-            const src = pcopy.data.pmov.in;
-            const dst = pcopy.data.pmov.out;
-            matrix.set(src.id, dst.id);
-            if (pcopy.data.pmov.group != current_group) {
-                try self.checkForCycles(cfg, matrix);
-                try self.serializeCopyGroup(cfg, start_of_group, current_group);
-                matrix.clear();
-                start_of_group = pcopy;
-                current_group = pcopy.data.pmov.group;
-            }
-        }
-
-        if (matrix.count() > 0) {
-            try self.checkForCycles(cfg, matrix);
-            try self.serializeCopyGroup(cfg, start_of_group, current_group);
+    pub fn serializeCopyGroups(_: *SSADestructor, cfg: *CFG) !void {
+        for (cfg.blocks) |block| {
+            try block.serializeCopyGroups();
         }
     }
 

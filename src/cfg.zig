@@ -297,10 +297,6 @@ pub const CFG = struct {
         return self.blocks.len;
     }
 
-    pub fn makeMov(self: *CFG, out: *Var, in: *Var) !*ir.InstructionListNode {
-        return try self.scope.makeMov(out, in);
-    }
-
     pub fn isSSA(self: CFG) !bool {
         const allocator = self.mem;
         var seen_opnd = try BitMap.initEmpty(allocator, self.opndCount());
@@ -745,6 +741,8 @@ pub const BasicBlock = struct {
     name: u64,
     entry: bool,
     reachable: bool = false,
+    has_pcopy: bool = false,
+    scope: *Scope,
     start: *ir.InstructionListNode,
     finish: *ir.InstructionListNode,
     predecessors: std.ArrayList(*BasicBlock),
@@ -759,7 +757,7 @@ pub const BasicBlock = struct {
     jump_dest: ?*BasicBlock = null,
     idom: ?u64 = null,
 
-    fn initBlock(alloc: std.mem.Allocator, name: u64, start: anytype, finish: anytype, entry: bool) !*BasicBlock {
+    fn initBlock(alloc: std.mem.Allocator, name: u64, scope: *Scope, start: anytype, finish: anytype, entry: bool) !*BasicBlock {
         const block = try alloc.create(BasicBlock);
 
         block.* = .{
@@ -767,6 +765,7 @@ pub const BasicBlock = struct {
             .start = start,
             .finish = finish,
             .entry = entry,
+            .scope = scope,
             .killed_set = try BitMap.initEmpty(alloc, 0),
             .redefined_set = try BitMap.initEmpty(alloc, 0),
             .upward_exposed_set = try BitMap.initEmpty(alloc, 0),
@@ -812,14 +811,66 @@ pub const BasicBlock = struct {
         return self.finish;
     }
 
-    pub fn replace(self: *BasicBlock, scope: *Scope, old: *ir.InstructionListNode, new: *ir.InstructionListNode) void {
-        scope.insns.insertAfter(&old.node, &new.node);
-        scope.insns.remove(&old.node);
+    pub fn replace(self: *BasicBlock, old: *ir.InstructionListNode, new: *ir.InstructionListNode) void {
+        self.scope.insns.insertAfter(&old.node, &new.node);
+        self.scope.insns.remove(&old.node);
         if (self.start == old) {
             self.start = new;
         }
         if (self.finish == old) {
             self.finish = new;
+        }
+    }
+
+    pub fn makeMov(self: *BasicBlock, out: *Var, in: *Var) !*ir.InstructionListNode {
+        return try self.scope.makeMov(out, in);
+    }
+
+    pub fn serializeCopyGroups(self: *@This()) !void {
+        if (!self.has_pcopy) {
+            return;
+        }
+
+        var iter = self.instructionIter(.{});
+        var current_group: usize = 0xFFFFF;
+
+        var copy_group = std.ArrayList(*ir.InstructionListNode).init(self.scope.allocator);
+        defer copy_group.deinit();
+
+        var start: ?*ir.InstructionListNode = null;
+
+        while (iter.next()) |insn| {
+            if (insn.data.isPMov()) {
+                if (insn.data.pmov.group != current_group) {
+                    current_group = insn.data.pmov.group;
+                    if (start) |snode| {
+                        try self.serializeCopyGroup(snode, snode.data.pmov.group);
+                    }
+                    start = insn;
+                }
+                try copy_group.append(insn);
+            }
+        }
+
+        if (start) |snode| {
+            try self.serializeCopyGroup(snode, snode.data.pmov.group);
+        }
+    }
+
+    pub fn serializeCopyGroup(block: *BasicBlock, insn: *ir.InstructionListNode, group: usize) !void {
+        // There shouldn't be any cycles, so we should be able to just insert
+        // copies.
+        var cursor = insn;
+        while (cursor.data.pmov.group == group) {
+            const src = cursor.data.pmov.in;
+            const dst = cursor.data.pmov.out;
+            const old = cursor;
+
+            cursor = @fieldParentPtr("node", cursor.node.next.?);
+
+            const copy = try block.makeMov(dst, src);
+            block.replace(old, copy);
+            if (@as(ir.InstructionName, cursor.data) != ir.InstructionName.pmov) break;
         }
     }
 
@@ -843,6 +894,8 @@ pub const BasicBlock = struct {
     }
 
     pub fn insertParallelCopy(self: *BasicBlock, scope: *Scope, node: *ir.InstructionListNode, dest: *Var, src: *Var, group: usize) !*ir.InstructionListNode {
+        self.has_pcopy = true;
+
         const ret = try scope.insertParallelCopy(node, dest, src, self, group);
 
         if (node == self.finish) {
@@ -1137,8 +1190,8 @@ const CFGBuilder = struct {
     block_name: u32 = 0,
     scope: *Scope,
 
-    fn makeBlock(self: *CFGBuilder, mem: std.mem.Allocator, start: *ir.InstructionListNode, finish: *ir.InstructionListNode, entry: bool) !*BasicBlock {
-        const block = try BasicBlock.initBlock(mem, self.block_name, start, finish, entry);
+    fn makeBlock(self: *CFGBuilder, mem: std.mem.Allocator, scope: *Scope, start: *ir.InstructionListNode, finish: *ir.InstructionListNode, entry: bool) !*BasicBlock {
+        const block = try BasicBlock.initBlock(mem, self.block_name, scope, start, finish, entry);
 
         self.block_name += 1;
 
@@ -1174,7 +1227,7 @@ const CFGBuilder = struct {
         // For all of our instructions
         while (node) |insn| {
             // Create a new block
-            const current_block = try self.makeBlock(arena.allocator(), @ptrCast(insn), @ptrCast(insn), entry);
+            const current_block = try self.makeBlock(arena.allocator(), scope, @ptrCast(insn), @ptrCast(insn), entry);
             try all_blocks.append(current_block);
             entry = false;
 
