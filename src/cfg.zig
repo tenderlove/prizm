@@ -28,7 +28,6 @@ pub const CFG = struct {
         phi_removed,
     };
 
-    arena: std.heap.ArenaAllocator,
     mem: std.mem.Allocator,
     head: *BasicBlock,
     blocks: []const *BasicBlock,
@@ -38,11 +37,10 @@ pub const CFG = struct {
     scope: *Scope,
     state: State = .start,
 
-    pub fn init(mem: std.mem.Allocator, arena: std.heap.ArenaAllocator, scope: *Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
+    pub fn init(mem: std.mem.Allocator, scope: *Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
         const cfg = try mem.create(CFG);
 
         cfg.* = CFG{
-            .arena = arena,
             .mem = mem,
             .head = head,
             .blocks = blocks,
@@ -143,8 +141,8 @@ pub const CFG = struct {
             if (maybebb) |bb| {
                 blocklist[bb.name] = bb;
 
-                try bb.df.resize(self.arena.allocator(), self.blockCount(), false);
-                try bb.dom.resize(self.arena.allocator(), self.blockCount(), false);
+                try bb.df.resize(self.mem, self.blockCount(), false);
+                try bb.dom.resize(self.mem, self.blockCount(), false);
 
                 if (bb.entry) {
                     // Entry blocks dominate themselves, and nothing else
@@ -190,7 +188,7 @@ pub const CFG = struct {
             }
         }
 
-        const dom_tree = try BitMatrix.init(self.arena.allocator(), self.blockCount(), self.blockCount());
+        const dom_tree = try BitMatrix.init(self.mem, self.blockCount(), self.blockCount());
 
         // Set idom on each bb
         for (list) |maybebb| {
@@ -209,6 +207,9 @@ pub const CFG = struct {
             }
         }
 
+        if (self.dom_tree) |dt| {
+            dt.deinit(self.mem);
+        }
         self.dom_tree = dom_tree;
 
         try self.fillDominanceFrontiers(blocklist);
@@ -279,7 +280,7 @@ pub const CFG = struct {
     pub fn analyze(self: *CFG) !void {
         for (self.blocks) |block| {
             assert(block.reachable);
-            try block.resetSets(self.scope.nextVarId(), self.arena.allocator());
+            try block.resetSets(self.scope.nextVarId(), self.mem);
         }
 
         try self.fillVarSets();
@@ -325,7 +326,7 @@ pub const CFG = struct {
 
     pub fn placePhis(self: *CFG) !void {
         const opnd_count = self.opndCount();
-        try self.globals.resize(self.arena.allocator(), opnd_count, false);
+        try self.globals.resize(self.mem, opnd_count, false);
         var globals = self.globals;
 
         const all_blocks = self.blockList();
@@ -333,7 +334,8 @@ pub const CFG = struct {
         // Create a matrix where each row in the matrix maps to a particular
         // operand id, and the bits in the row indicate which block number
         // defined that operand.
-        const block_set = try BitMatrix.init(self.arena.allocator(), opnd_count, all_blocks.len);
+        const block_set = try BitMatrix.init(self.mem, opnd_count, all_blocks.len);
+        defer block_set.deinit(self.mem);
 
         // Find "global" variables.  Global variables are variables that
         // live between basic blocks.
@@ -353,7 +355,8 @@ pub const CFG = struct {
         // Keeps track of what blocks have phi assignments for particular
         // variables.  This way we can avoid doing a linear scan of
         // the instructions in a block.
-        const phi_map = try BitMatrix.init(self.arena.allocator(), opnd_count, all_blocks.len);
+        const phi_map = try BitMatrix.init(self.mem, opnd_count, all_blocks.len);
+        defer phi_map.deinit(self.mem);
 
         var global_iter = globals.iterator(.{});
         var worklist: std.ArrayList(*BasicBlock) = .empty;
@@ -689,8 +692,11 @@ pub const CFG = struct {
         for (self.blocks) |blk| {
             blk.deinit(self.mem);
         }
+        if (self.dom_tree) |dt| {
+            dt.deinit(self.mem);
+        }
+        self.globals.deinit(self.mem);
         self.mem.free(self.blocks);
-        self.arena.deinit();
         self.mem.destroy(self);
     }
 
@@ -1187,6 +1193,13 @@ pub const BasicBlock = struct {
     }
 
     pub fn deinit(self: *BasicBlock, alloc: std.mem.Allocator) void {
+        self.df.deinit(alloc);
+        self.dom.deinit(alloc);
+        self.killed_set.deinit(alloc);
+        self.redefined_set.deinit(alloc);
+        self.upward_exposed_set.deinit(alloc);
+        self.liveout_set.deinit(alloc);
+        self.livein_set.deinit(alloc);
         self.predecessors.deinit(alloc);
         alloc.destroy(self);
     }
@@ -1307,8 +1320,7 @@ const CFGBuilder = struct {
 
         const live_blocks = try CFG.sweepUnreachableBlocks(alloc, head.?, all_blocks);
 
-        const arena = std.heap.ArenaAllocator.init(alloc);
-        const cfg = try CFG.init(alloc, arena, scope, head.?, live_blocks);
+        const cfg = try CFG.init(alloc, scope, head.?, live_blocks);
 
         // TODO: We could calculate the killed set and the upward exposed set
         // while building the basic blocks, rather than here.  But then we
