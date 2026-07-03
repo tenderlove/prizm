@@ -1,4 +1,5 @@
 const std = @import("std");
+const Globals = @import("globals.zig").Globals;
 const CFG = @import("cfg.zig").CFG;
 const cmp = @import("compiler.zig");
 const BasicBlock = @import("cfg.zig").BasicBlock;
@@ -9,7 +10,6 @@ const assert = @import("std").debug.assert;
 const UnionFind = @import("union_find.zig").UnionFind;
 const IRPrinter = @import("printer.zig").IRPrinter;
 const InterferenceGraph = @import("interference_graph.zig").InterferenceGraph;
-const VM = @import("vm.zig");
 const bitmatrix = @import("utils/bitmatrix.zig");
 const BitMatrix = bitmatrix.BitMatrix;
 
@@ -28,7 +28,7 @@ pub const PhysicalRegister = enum(u8) {
 const MAX_PARAM_REGISTERS = 4; // R0-R3 for parameters
 const RETURN_REGISTER = 0; // R0
 
-const K = @typeInfo(PhysicalRegister).@"enum".fields.len;
+const K = @typeInfo(PhysicalRegister).@"enum".field_names.len;
 
 // Lookup table from Live Range to Physical Register
 // Index is the LiveRange's local ID
@@ -55,8 +55,8 @@ const ChaitinAllocator = struct {
     }
 
     pub fn allocate(self: *ChaitinAllocator, allocator: std.mem.Allocator) !RegisterMapping {
-        const stack = try self.simplify(allocator);
-        defer stack.deinit();
+        var stack = try self.simplify(allocator);
+        defer stack.deinit(allocator);
         return self.select(allocator, stack);
     }
 
@@ -66,14 +66,14 @@ const ChaitinAllocator = struct {
         defer graph.deinit(allocator);
 
         // Create a stack for each constraint type based on enum size
-        const constraint_count = @typeInfo(ir.RegisterConstraint).@"union".fields.len;
+        const constraint_count = @typeInfo(ir.RegisterConstraint).@"union".field_names.len;
         var constraint_stacks: [constraint_count]LiveRangeList = undefined;
         for (0..constraint_count) |i| {
-            constraint_stacks[i] = LiveRangeList.init(allocator);
+            constraint_stacks[i] = .empty;
         }
         defer {
             for (0..constraint_count) |i| {
-                constraint_stacks[i].deinit();
+                constraint_stacks[i].deinit(allocator);
             }
         }
 
@@ -84,13 +84,13 @@ const ChaitinAllocator = struct {
 
         while (selected.count() != 0) {
             var iter = selected.iterator(.{});
-            var trivial = LiveRangeList.init(allocator);
-            defer trivial.deinit();
+            var trivial: LiveRangeList = .empty;
+            defer trivial.deinit(allocator);
             while (iter.next()) |idx| {
                 const lr = work_list.items[idx];
                 if (graph.degree(lr.getLocalId()) < 4) {
                     selected.unset(idx);
-                    try trivial.append(lr);
+                    try trivial.append(allocator, lr);
                 }
             }
 
@@ -98,7 +98,7 @@ const ChaitinAllocator = struct {
             for (trivial.items) |lr| {
                 const constraint = lr.data.live_range.constraint;
                 const constraint_index = @intFromEnum(constraint);
-                try constraint_stacks[constraint_index].append(lr);
+                try constraint_stacks[constraint_index].append(allocator, lr);
                 graph.removeNode(lr.getLocalId());
             }
 
@@ -111,19 +111,19 @@ const ChaitinAllocator = struct {
 
         // Concatenate stacks in forward order (easiest to hardest)
         // This puts hardest constraints on top of stack for priority processing
-        var final_stack = LiveRangeList.init(allocator);
+        var final_stack: LiveRangeList = .empty;
         for (0..constraint_count) |i| {
-            try final_stack.appendSlice(constraint_stacks[i].items);
+            try final_stack.appendSlice(allocator, constraint_stacks[i].items);
         }
 
         return final_stack;
     }
 
     fn select(self: *ChaitinAllocator, allocator: std.mem.Allocator, worklist: LiveRangeList) !RegisterMapping {
-        var register_mapping = RegisterMapping.init(allocator);
+        var register_mapping: RegisterMapping = .empty;
 
         // Initialize with undefined - index will be live range local ID
-        try register_mapping.resize(self.graph.size());
+        try register_mapping.resize(allocator, self.graph.size());
 
         // Track which live ranges have been assigned
         var assigned = try BitMap.initEmpty(allocator, worklist.items.len);
@@ -228,19 +228,19 @@ pub const RegisterAllocator = struct {
         //try @import("printer.zig").printInterferenceGraphDOT(allocator, cfg, interference_graph, stdout);
 
         // Build a list of live ranges from the LiveRangeMap
-        var lr_list = std.ArrayList(*Var).init(allocator);
-        defer lr_list.deinit();
+        var lr_list: std.ArrayList(*Var) = .empty;
+        defer lr_list.deinit(allocator);
 
         var value_iter = range_map.valueIterator();
         while (value_iter.next()) |value_ptr| {
-            try lr_list.append(value_ptr.*);
+            try lr_list.append(allocator, value_ptr.*);
         }
 
         // Build a list of Variables that wrap Physical Registers
-        var physical_registers = std.ArrayList(*Var).init(allocator);
-        defer physical_registers.deinit();
+        var physical_registers: std.ArrayList(*Var) = .empty;
+        defer physical_registers.deinit(allocator);
         for (0..K) |i| {
-            try physical_registers.append(try cfg.scope.newPhysicalRegister(i));
+            try physical_registers.append(allocator, try cfg.scope.newPhysicalRegister(i));
         }
 
         // Create register mapping
@@ -248,7 +248,7 @@ pub const RegisterAllocator = struct {
         defer alloc.deinit(allocator);
 
         var register_mapping = try alloc.allocate(allocator);
-        errdefer register_mapping.deinit();
+        errdefer register_mapping.deinit(allocator);
 
         // Remove phi nodes before rewriting with physical registers
         try cfg.removePhi();
@@ -277,7 +277,7 @@ pub const RegisterAllocator = struct {
         self.union_find.deinit();
         self.range_map.deinit();
         self.interference_graph.deinit(self.allocator);
-        self.register_mapping.deinit();
+        self.register_mapping.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
@@ -434,8 +434,8 @@ pub const RegisterAllocator = struct {
             is_output: bool,
         };
 
-        var replacements = std.ArrayList(Replacement).init(std.heap.page_allocator);
-        defer replacements.deinit();
+        var replacements: std.ArrayList(Replacement) = .empty;
+        defer replacements.deinit(cfg.mem);
 
         // First pass: collect all replacements
         var node = cfg.scope.insns.first;
@@ -448,7 +448,7 @@ pub const RegisterAllocator = struct {
                 assert(out_var.data == .live_range);
                 const lr_id = out_var.getLocalId();
                 const physical_reg_var = register_mapping.items[lr_id];
-                replacements.append(.{
+                replacements.append(cfg.mem, .{
                     .insn = insn,
                     .old_var = out_var,
                     .new_var = physical_reg_var,
@@ -462,7 +462,7 @@ pub const RegisterAllocator = struct {
                 assert(operand.data == .live_range);
                 const lr_id = operand.getLocalId();
                 const physical_reg_var = register_mapping.items[lr_id];
-                replacements.append(.{
+                replacements.append(cfg.mem, .{
                     .insn = insn,
                     .old_var = operand,
                     .new_var = physical_reg_var,
@@ -516,8 +516,8 @@ pub const RegisterAllocator = struct {
 test "live ranges" {
     const allocator = std.testing.allocator;
 
-    const machine = try VM.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code =
         \\ x = 123
@@ -530,7 +530,7 @@ test "live ranges" {
         \\ x + y
     ;
 
-    const scope = try cmp.compileString(allocator, machine, code);
+    const scope = try cmp.compileString(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try CFG.build(allocator, scope);
@@ -548,8 +548,8 @@ test "live ranges" {
 test "params use specific registers" {
     const allocator = std.testing.allocator;
 
-    const machine = try VM.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code =
         \\ def a b, c
@@ -557,7 +557,7 @@ test "params use specific registers" {
         \\ end
     ;
 
-    const scope = try cmp.compileString(allocator, machine, code);
+    const scope = try cmp.compileString(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try CFG.build(allocator, scope);
@@ -622,8 +622,8 @@ test "params use specific registers" {
 test "N params use N specific registers" {
     const allocator = std.testing.allocator;
 
-    const machine = try VM.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code =
         \\ def a b, c, d, e
@@ -631,7 +631,7 @@ test "N params use N specific registers" {
         \\ end
     ;
 
-    const scope = try cmp.compileString(allocator, machine, code);
+    const scope = try cmp.compileString(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try CFG.build(allocator, scope);
@@ -696,8 +696,8 @@ test "N params use N specific registers" {
 test "setparam and call can share R0 register" {
     const allocator = std.testing.allocator;
 
-    const machine = try VM.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     // Code that generates setparam(0) followed by call
     const code =
@@ -708,7 +708,7 @@ test "setparam and call can share R0 register" {
         \\result = test(42)
     ;
 
-    const scope = try cmp.compileString(allocator, machine, code);
+    const scope = try cmp.compileString(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try CFG.build(allocator, scope);

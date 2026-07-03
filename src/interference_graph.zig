@@ -137,12 +137,12 @@ test "InterferenceGraph neighbor iteration" {
     graph.add(1, 4);
 
     // Test neighbor iteration for node 0 (should have neighbors: 1, 2, 3)
-    var neighbors = std.ArrayList(usize).init(allocator);
-    defer neighbors.deinit();
+    var neighbors: std.ArrayList(usize) = .empty;
+    defer neighbors.deinit(allocator);
 
     var iter = graph.neighborIterator(0);
     while (iter.next()) |neighbor| {
-        try neighbors.append(neighbor);
+        try neighbors.append(allocator, neighbor);
     }
 
     try std.testing.expectEqual(3, neighbors.items.len);
@@ -154,7 +154,7 @@ test "InterferenceGraph neighbor iteration" {
     neighbors.clearRetainingCapacity();
     iter = graph.neighborIterator(1);
     while (iter.next()) |neighbor| {
-        try neighbors.append(neighbor);
+        try neighbors.append(allocator, neighbor);
     }
 
     try std.testing.expectEqual(2, neighbors.items.len);

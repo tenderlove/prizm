@@ -391,10 +391,12 @@ pub const Instruction = union(InstructionName) {
     }
 
     fn nth_field(comptime T: type, comptime F: type, t: *const T, index: usize) ?*const F {
-        inline for (std.meta.fields(T), 0..) |field, field_index| {
-            if (field.type == (*F)) {
+        const names = comptime std.meta.fieldNames(T);
+        const types = comptime std.meta.fieldTypes(T);
+        inline for (names, types, 0..) |name, ftype, field_index| {
+            if (ftype == (*F)) {
                 if (index == field_index) {
-                    return @field(t, field.name);
+                    return @field(t, name);
                 }
             }
         }
@@ -408,10 +410,12 @@ pub const Instruction = union(InstructionName) {
     }
 
     fn nth_list(comptime T: type, comptime F: type, t: *const T, index: usize) ?std.ArrayList(*F) {
-        inline for (std.meta.fields(T), 0..) |field, field_index| {
-            if (field.type == (std.ArrayList(*F))) {
+        const names = comptime std.meta.fieldNames(T);
+        const types = comptime std.meta.fieldTypes(T);
+        inline for (names, types, 0..) |name, ftype, field_index| {
+            if (ftype == (std.ArrayList(*F))) {
                 if (index == field_index) {
-                    return @field(t, field.name);
+                    return @field(t, name);
                 }
             }
         }
@@ -427,8 +431,10 @@ pub const Instruction = union(InstructionName) {
     fn item_fields_sub(comptime T: type) u64 {
         var mask: u64 = 0;
 
-        inline for (std.meta.fields(T), 0..) |field, field_index| {
-            if (field.type == (*Variable) and !std.mem.eql(u8, field.name, "out")) {
+        const names = comptime std.meta.fieldNames(T);
+        const types = comptime std.meta.fieldTypes(T);
+        inline for (names, types, 0..) |name, ftype, field_index| {
+            if (ftype == (*Variable) and !std.mem.eql(u8, name, "out")) {
                 mask |= (1 << field_index);
             }
         }
@@ -444,8 +450,10 @@ pub const Instruction = union(InstructionName) {
     fn array_fields_sub(comptime T: type, comptime F: type) u64 {
         var fields: u64 = 0;
 
-        inline for (std.meta.fields(T), 0..) |field, field_index| {
-            if (field.type == (std.ArrayList(*F)) and !std.mem.eql(u8, field.name, "out")) {
+        const names = comptime std.meta.fieldNames(T);
+        const types = comptime std.meta.fieldTypes(T);
+        inline for (names, types, 0..) |name, ftype, field_index| {
+            if (ftype == (std.ArrayList(*F)) and !std.mem.eql(u8, name, "out")) {
                 fields |= (1 << field_index);
             }
         }
@@ -641,11 +649,11 @@ test "can iterate on ops with list" {
         .data = .{ .temp = .{ .id = 4 } },
     };
 
-    var params = std.ArrayList(*Variable).init(std.testing.allocator);
-    defer params.deinit();
+    var params: std.ArrayList(*Variable) = .empty;
+    defer params.deinit(std.testing.allocator);
 
-    try params.append(@constCast(&param1));
-    try params.append(@constCast(&param2));
+    try params.append(std.testing.allocator, @constCast(&param1));
+    try params.append(std.testing.allocator, @constCast(&param2));
 
     var insn = Instruction{
         .call = .{

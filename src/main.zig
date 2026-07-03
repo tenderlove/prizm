@@ -3,6 +3,7 @@ const prism = @import("prism.zig");
 const compiler = @import("compiler.zig");
 const g = @import("globals.zig");
 const cfg_z = @import("cfg.zig");
+const IonGraph = @import("iongraph.zig").IonGraph;
 const CFG = cfg_z.CFG;
 const Scope = @import("scope.zig").Scope;
 const Allocator = std.mem.Allocator;
@@ -83,7 +84,6 @@ fn runCompile(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterat
         return clap.helpToFile(io, .stderr(), clap.Help, &params, .{});
 
     const path = res.positionals[0] orelse return error.MissingFile;
-    std.debug.print("compile file {s}\n", .{path});
     const src = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited);
     defer gpa.free(src);
 
@@ -112,6 +112,14 @@ fn runCompile(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterat
 
     const cfg = try CFG.build(gpa, scope);
     defer cfg.deinit();
+
+    if (res.args.cfg != 0) {
+        var buf: [4096]u8 = undefined;
+        var fw = std.Io.File.stdout().writer(io, &buf);
+        const w = &fw.interface;
+        try IonGraph.print(cfg, gpa, w);
+        try w.flush();
+    }
 
     return;
 }

@@ -2,9 +2,9 @@ const std = @import("std");
 const ir = @import("ir.zig");
 const Var = ir.Variable;
 const prism = @import("prism.zig");
-const vm = @import("vm.zig");
 const compiler = @import("compiler.zig");
 const Scope = @import("scope.zig").Scope;
+const Globals = @import("globals.zig").Globals;
 const printer = @import("printer.zig");
 const assert = @import("std").debug.assert;
 const BitMap = std.DynamicBitSetUnmanaged;
@@ -90,17 +90,17 @@ pub const CFG = struct {
         try worklist.append(alloc, self.head);
 
         return .{
-            .seen = std.AutoHashMap(u64, *BasicBlock).init(self.mem),
+            .seen = std.AutoHashMap(u64, *BasicBlock).init(alloc),
             .work = worklist,
         };
     }
 
     // Fill in VarKilled and UE var sets for all BBs
     fn fillVarSets(self: *CFG) !void {
-        var iter = try self.depthFirstIterator();
-        defer iter.deinit();
+        var iter = try self.depthFirstIterator(self.mem);
+        defer iter.deinit(self.mem);
 
-        while (try iter.next()) |bb| {
+        while (try iter.next(self.mem)) |bb| {
             try bb.fillVarSets();
         }
     }
@@ -218,11 +218,11 @@ pub const CFG = struct {
     pub fn fillLiveOut(self: *CFG) !void {
         var changed = true;
         while (changed) {
-            var liveout_iter = try self.depthFirstIterator();
-            defer liveout_iter.deinit();
+            var liveout_iter = try self.depthFirstIterator(self.mem);
+            defer liveout_iter.deinit(self.mem);
 
             changed = false;
-            while (try liveout_iter.next()) |bb| {
+            while (try liveout_iter.next(self.mem)) |bb| {
                 if (try bb.updateLiveOut(self.mem)) {
                     changed = true;
                 }
@@ -356,8 +356,8 @@ pub const CFG = struct {
         const phi_map = try BitMatrix.init(self.arena.allocator(), opnd_count, all_blocks.len);
 
         var global_iter = globals.iterator(.{});
-        var worklist = std.ArrayList(*BasicBlock).init(self.mem);
-        defer worklist.deinit();
+        var worklist: std.ArrayList(*BasicBlock) = .empty;
+        defer worklist.deinit(self.mem);
 
         while (global_iter.next()) |operand_num| {
             // We only want to process a block once per global name
@@ -376,7 +376,7 @@ pub const CFG = struct {
             while (biter.next()) |i| {
                 const block = all_blocks[i];
                 block_seen.set(block.name);
-                try worklist.append(block);
+                try worklist.append(self.mem, block);
             }
 
             while (worklist.pop()) |block| {
@@ -391,7 +391,7 @@ pub const CFG = struct {
                         }
 
                         if (!block_seen.isSet(dfblock.name)) {
-                            try worklist.append(dfblock);
+                            try worklist.append(self.mem, dfblock);
                             block_seen.set(dfblock.name);
                         }
                     }
@@ -412,7 +412,7 @@ pub const CFG = struct {
             var stacks: []std.ArrayList(*Var) = try mem.alloc(std.ArrayList(*Var), global_count);
 
             for (0..global_count) |i| {
-                stacks[i] = std.ArrayList(*Var).init(mem);
+                stacks[i] = .empty;
             }
 
             return .{
@@ -424,14 +424,14 @@ pub const CFG = struct {
 
         pub fn deinit(self: *Renamer, mem: std.mem.Allocator) void {
             mem.free(self.counters);
-            for (self.stacks) |stack| {
-                stack.deinit();
+            for (self.stacks) |*stack| {
+                stack.deinit(mem);
             }
             self.seen.deinit();
             mem.free(self.stacks);
         }
 
-        pub fn fillPhiParams(self: *Renamer, _: *BasicBlock, variable_source_bb: *BasicBlock) !void {
+        pub fn fillPhiParams(self: *Renamer, mem: std.mem.Allocator, _: *BasicBlock, variable_source_bb: *BasicBlock) !void {
             var iter = variable_source_bb.instructionIter(.{});
             while (iter.next()) |insn| {
                 switch (insn.data) {
@@ -439,7 +439,7 @@ pub const CFG = struct {
                     .phi => |*p| {
                         const v = insn.data.getOut().?.getVar();
                         if (self.stackTop(v)) |op| {
-                            try p.params.append(op);
+                            try p.params.append(mem, op);
                         }
                     },
                     // Quit after we've passed phi's
@@ -452,15 +452,15 @@ pub const CFG = struct {
 
         pub fn rename(self: *Renamer, cfg: *CFG, bb: *BasicBlock) !void {
             var iter = bb.instructionIter(.{});
-            var pushed = std.ArrayList(*Var).init(cfg.mem);
-            defer pushed.deinit();
+            var pushed: std.ArrayList(*Var) = .empty;
+            defer pushed.deinit(cfg.mem);
 
             while (iter.next()) |insn| {
                 switch (insn.data) {
                     .putlabel => {}, // Skip putlabel
                     .phi => |p| {
-                        try pushed.append(p.out);
-                        insn.data.setOut(try self.newName(p.out, bb, cfg.scope));
+                        try pushed.append(cfg.mem, p.out);
+                        insn.data.setOut(try self.newName(cfg.mem, p.out, bb, cfg.scope));
                     },
                     else => {
                         var should_append = false;
@@ -476,8 +476,8 @@ pub const CFG = struct {
                         // Rename output variable
                         if (insn.data.getOut()) |out| {
                             if (cfg.globals.isSet(out.id)) {
-                                try pushed.append(out);
-                                const newname = try self.newName(out, bb, cfg.scope);
+                                try pushed.append(cfg.mem, out);
+                                const newname = try self.newName(cfg.mem, out, bb, cfg.scope);
                                 insn.data.setOut(newname);
                                 should_append = true;
                             }
@@ -488,11 +488,11 @@ pub const CFG = struct {
 
             // For each successor, fill in the phi parameters
             if (bb.fall_through_dest) |succ| {
-                try self.fillPhiParams(bb, succ);
+                try self.fillPhiParams(cfg.mem, bb, succ);
             }
 
             if (bb.jump_dest) |succ| {
-                try self.fillPhiParams(bb, succ);
+                try self.fillPhiParams(cfg.mem, bb, succ);
             }
 
             // For each successor in the dominator tree
@@ -526,12 +526,12 @@ pub const CFG = struct {
             }
         }
 
-        fn newName(self: *Renamer, variable: *Var, bb: *BasicBlock, scope: *Scope) !*Var {
+        fn newName(self: *Renamer, mem: std.mem.Allocator, variable: *Var, bb: *BasicBlock, scope: *Scope) !*Var {
             const idx = try self.getStackIndex(variable);
             const i = self.counters[idx];
             self.counters[idx] = i + 1;
             const new_opnd = try scope.newDefinition(variable, bb, i);
-            try self.stacks[idx].append(new_opnd);
+            try self.stacks[idx].append(mem, new_opnd);
             return new_opnd;
         }
 
@@ -674,11 +674,11 @@ pub const CFG = struct {
     }
 
     pub fn liveBlockCount(self: *CFG) !usize {
-        var dfi = try self.depthFirstIterator();
-        defer dfi.deinit();
+        var dfi = try self.depthFirstIterator(self.mem);
+        defer dfi.deinit(self.mem);
 
         var count: usize = 0;
-        while (try dfi.next()) |_| {
+        while (try dfi.next(self.mem)) |_| {
             count += 1;
         }
         return count;
@@ -837,8 +837,8 @@ pub const BasicBlock = struct {
         var iter = self.instructionIter(.{});
         var current_group: usize = 0xFFFFF;
 
-        var copy_group = std.ArrayList(*ir.InstructionListNode).init(self.scope.allocator);
-        defer copy_group.deinit();
+        var copy_group: std.ArrayList(*ir.InstructionListNode) = .empty;
+        defer copy_group.deinit(self.scope.allocator);
 
         var start: ?*ir.InstructionListNode = null;
 
@@ -851,7 +851,7 @@ pub const BasicBlock = struct {
                     }
                     start = insn;
                 }
-                try copy_group.append(insn);
+                try copy_group.append(self.scope.allocator, insn);
             }
         }
 
@@ -1062,6 +1062,8 @@ pub const BasicBlock = struct {
     pub fn removeInstruction(self: *BasicBlock, insn: *ir.InstructionListNode, scope: *Scope) void {
         // Remove the instruction from the global instruction list
         scope.insns.remove(&insn.node);
+        // Free anything the instruction payload owns (e.g. .phi/.call params ArrayList).
+        insn.data.deinit(scope.allocator);
 
         // Update BasicBlock start/finish pointers if necessary
         if (self.start == insn) {
@@ -1219,7 +1221,14 @@ const CFGBuilder = struct {
         defer wants_label.deinit(alloc);
 
         var all_blocks: std.ArrayList(*BasicBlock) = .empty;
-        defer all_blocks.deinit(alloc);
+        defer {
+            for (all_blocks.items) |b| {
+                if (!b.reachable) {
+                    b.deinit(alloc);
+                }
+            }
+            all_blocks.deinit(alloc);
+        }
 
         var last_block: ?*BasicBlock = null;
         var head: ?*BasicBlock = null;
@@ -1362,11 +1371,10 @@ test "basic block two instruction" {
 test "CFG from compiler" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "5 + 7");
+    const scope = try compileScope(allocator, globals, "5 + 7");
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1383,11 +1391,10 @@ test "CFG from compiler" {
 test "no uninitialized in ternary" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "x ? 1 : 23");
+    const scope = try compileScope(allocator, globals, "x ? 1 : 23");
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1402,16 +1409,15 @@ test "no uninitialized in ternary" {
 test "if statement should have 2 children blocks" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "def foo(x); x ? 1 : 23; end");
+    const scope = try compileScope(allocator, globals, "def foo(x); x ? 1 : 23; end");
     defer scope.deinit();
 
     // Get the scope for the method
-    const scopes = try scope.childScopes(allocator);
-    defer scopes.deinit();
+    var scopes = try scope.childScopes(allocator);
+    defer scopes.deinit(allocator);
 
     const method_scope = scopes.items[0];
 
@@ -1459,24 +1465,23 @@ test "if statement should have 2 children blocks" {
 }
 
 test "killed operands" {
-    const allocator = std.testing.allocator;
+    const alloc = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(alloc);
+    defer globals.deinit(alloc);
 
-    const scope = try compileScope(allocator, machine, "x = 5");
+    const scope = try compileScope(alloc, globals, "x = 5");
     defer scope.deinit();
 
-    const cfg = try buildCFG(allocator, scope);
+    const cfg = try buildCFG(alloc, scope);
     defer cfg.deinit();
 
     try std.testing.expectEqual(1, cfg.liveBlockCount());
 
-    var iter = try cfg.depthFirstIterator();
-    defer iter.deinit();
+    var iter = try cfg.depthFirstIterator(alloc);
+    defer iter.deinit(alloc);
 
-    const bb = (try iter.next()).?;
+    const bb = (try iter.next(alloc)).?;
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
@@ -1489,24 +1494,23 @@ test "killed operands" {
 }
 
 test "killed operands de-duplicate" {
-    const allocator = std.testing.allocator;
+    const alloc = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(alloc);
+    defer globals.deinit(alloc);
 
-    const scope = try compileScope(allocator, machine, "x = 5; x = 10");
+    const scope = try compileScope(alloc, globals, "x = 5; x = 10");
     defer scope.deinit();
 
-    const cfg = try buildCFG(allocator, scope);
+    const cfg = try buildCFG(alloc, scope);
     defer cfg.deinit();
 
     try std.testing.expectEqual(1, cfg.liveBlockCount());
 
-    var iter = try cfg.depthFirstIterator();
-    defer iter.deinit();
+    var iter = try cfg.depthFirstIterator(alloc);
+    defer iter.deinit(alloc);
 
-    const bb = (try iter.next()).?;
+    const bb = (try iter.next(alloc)).?;
 
     try expectInstructionList(&[_]ir.InstructionName{
         ir.Instruction.getparam,
@@ -1522,11 +1526,10 @@ test "killed operands de-duplicate" {
 test "upward exposed bits get set" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, machine, "def foo(x); x ? x + 1 : 5; end");
+    const scope = try compileScope(allocator, globals, "def foo(x); x ? x + 1 : 5; end");
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1549,9 +1552,8 @@ test "upward exposed bits get set" {
 test "complex loop with if" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code =
         \\ def foo y, z
@@ -1569,7 +1571,7 @@ test "complex loop with if" {
         \\   y
         \\ end
     ;
-    const scope = try compileScope(allocator, machine, code);
+    const scope = try compileScope(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1585,9 +1587,8 @@ test "complex loop with if" {
 test "live out passes through if statement" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code =
         \\ def foo y, z
@@ -1600,7 +1601,7 @@ test "live out passes through if statement" {
         \\   x + y
         \\ end
     ;
-    const scope = try compileScope(allocator, machine, code);
+    const scope = try compileScope(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1614,10 +1615,10 @@ test "live out passes through if statement" {
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
 
-    var iter = try methodcfg.depthFirstIterator();
-    defer iter.deinit();
+    var iter = try methodcfg.depthFirstIterator(allocator);
+    defer iter.deinit(allocator);
 
-    while (try iter.next()) |bb| {
+    while (try iter.next(allocator)) |bb| {
         if (bb.fall_through_dest) |_| {
             try std.testing.expect(bb.liveout_set.isSet(opnd.id));
         }
@@ -1627,8 +1628,8 @@ test "live out passes through if statement" {
 test "jumps targets get predecessors" {
     const allocator = std.testing.allocator;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code =
         \\ def foo y
@@ -1639,7 +1640,7 @@ test "jumps targets get predecessors" {
         \\   end
         \\ end
     ;
-    const scope = try compileScope(allocator, machine, code);
+    const scope = try compileScope(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1676,8 +1677,8 @@ test "jumps targets get predecessors" {
 test "blocks have dominators" {
     const allocator = std.testing.allocator;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code =
         \\ def foo y
@@ -1688,7 +1689,7 @@ test "blocks have dominators" {
         \\   end
         \\ end
     ;
-    const scope = try compileScope(allocator, machine, code);
+    const scope = try compileScope(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1733,8 +1734,8 @@ test "blocks have dominators" {
 test "while loop dominators" {
     const allocator = std.testing.allocator;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code =
         \\ a = 1
@@ -1749,7 +1750,7 @@ test "while loop dominators" {
         \\ end
         \\ puts a
     ;
-    const scope = try compileScope(allocator, machine, code);
+    const scope = try compileScope(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1766,8 +1767,8 @@ test "while loop dominators" {
 test "method definitions" {
     const mem = std.testing.allocator;
 
-    const machine = try vm.init(mem);
-    defer machine.deinit(mem);
+    const globals = try Globals.init(mem);
+    defer globals.deinit(mem);
 
     const code =
         \\ def foo
@@ -1775,11 +1776,11 @@ test "method definitions" {
         \\ end
         \\ foo
     ;
-    const scope = try compileScope(mem, machine, code);
+    const scope = try compileScope(mem, globals, code);
     defer scope.deinit();
 
-    const children = try scope.childScopes(mem);
-    defer children.deinit();
+    var children = try scope.childScopes(mem);
+    defer children.deinit(mem);
     try std.testing.expectEqual(1, children.items.len);
 
     // Get a CFG for the foo method
@@ -1795,8 +1796,8 @@ test "method definitions" {
 test "dead code removal" {
     const mem = std.testing.allocator;
 
-    const machine = try vm.init(mem);
-    defer machine.deinit(mem);
+    const globals = try Globals.init(mem);
+    defer globals.deinit(mem);
 
     const code =
         \\ def foo
@@ -1804,11 +1805,11 @@ test "dead code removal" {
         \\   puts 456
         \\ end
     ;
-    const scope = try compileScope(mem, machine, code);
+    const scope = try compileScope(mem, globals, code);
     defer scope.deinit();
 
-    const children = try scope.childScopes(mem);
-    defer children.deinit();
+    var children = try scope.childScopes(mem);
+    defer children.deinit(mem);
     try std.testing.expectEqual(1, children.items.len);
 
     const method_scope = children.items[0];
@@ -1833,11 +1834,11 @@ test "dead code removal" {
 test "dominance frontiers" {
     const allocator = std.testing.allocator;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code = complexExampleCFG();
-    const scope = try compileScope(allocator, machine, code);
+    const scope = try compileScope(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1866,11 +1867,11 @@ test "dominance frontiers" {
 test "dominator tree" {
     const allocator = std.testing.allocator;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code = complexExampleCFG();
-    const scope = try compileScope(allocator, machine, code);
+    const scope = try compileScope(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1903,11 +1904,11 @@ test "dominator tree" {
 test "rename" {
     const allocator = std.testing.allocator;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code = complexExampleCFG();
-    const scope = try compileScope(allocator, machine, code);
+    const scope = try compileScope(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1923,8 +1924,8 @@ test "rename" {
 test "rename with calls" {
     const allocator = std.testing.allocator;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
     const code =
         \\ b = 6
@@ -1932,7 +1933,7 @@ test "rename with calls" {
         \\ b += 123
         \\ b + c
     ;
-    const scope = try compileScope(allocator, machine, code);
+    const scope = try compileScope(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try buildCFG(allocator, scope);
@@ -1978,10 +1979,10 @@ fn complexExampleCFG() []const u8 {
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
-    var iter = try cfg.depthFirstIterator();
-    defer iter.deinit();
+    var iter = try cfg.depthFirstIterator(cfg.mem);
+    defer iter.deinit(cfg.mem);
 
-    while (try iter.next()) |bb| {
+    while (try iter.next(cfg.mem)) |bb| {
         var insni = bb.instructionIter(.{});
         while (insni.next()) |insn| {
             if (name == @as(ir.InstructionName, insn.data)) {
@@ -1994,10 +1995,10 @@ fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
 }
 
 fn findInsn(cfg: *CFG, name: ir.InstructionName) !?*ir.InstructionListNode {
-    var iter = try cfg.depthFirstIterator();
-    defer iter.deinit();
+    var iter = try cfg.depthFirstIterator(cfg.mem);
+    defer iter.deinit(cfg.mem);
 
-    while (try iter.next()) |bb| {
+    while (try iter.next(cfg.mem)) |bb| {
         var insni = bb.instructionIter(.{});
         while (insni.next()) |insn| {
             if (name == @as(ir.InstructionName, insn.data)) {
@@ -2009,7 +2010,7 @@ fn findInsn(cfg: *CFG, name: ir.InstructionName) !?*ir.InstructionListNode {
     return null;
 }
 
-fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*Scope {
+fn compileScope(allocator: std.mem.Allocator, globals: *Globals, code: []const u8) !*Scope {
     const parser = try prism.Prism.newParserCtx(allocator);
     defer parser.deinit();
     parser.init(code, code.len, null);
@@ -2017,7 +2018,7 @@ fn compileScope(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8)
     defer parser.nodeDestroy(root);
 
     var scope_node = try prism.pmNewScopeNode(root);
-    const cc = try compiler.init(allocator, machine, parser);
+    const cc = try compiler.init(allocator, globals, parser);
     defer cc.deinit(allocator);
     return try cc.compile(&scope_node);
 }

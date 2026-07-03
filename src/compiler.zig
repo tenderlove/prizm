@@ -654,8 +654,8 @@ test "compile def method" {
     const scope = try compileString(allocator, globals, "def foo; end");
     defer scope.deinit();
 
-    const scopes = try scope.childScopes(allocator);
-    defer scopes.deinit();
+    var scopes = try scope.childScopes(allocator);
+    defer scopes.deinit(allocator);
     const method_scope = scopes.items[0];
     const method_insns = method_scope.insns;
     try std.testing.expectEqual(4, method_insns.len());
@@ -691,8 +691,8 @@ test "compile def method 2 params" {
     const scope = try compileString(allocator, globals, "def foo(a, b); end");
     defer scope.deinit();
 
-    const scopes = try scope.childScopes(allocator);
-    defer scopes.deinit();
+    var scopes = try scope.childScopes(allocator);
+    defer scopes.deinit(allocator);
     const method_scope = scopes.items[0];
     const method_insns = method_scope.insns;
     try std.testing.expectEqual(8, method_insns.len());
@@ -709,8 +709,8 @@ test "compile def method 2 params 3 locals" {
     const scope = try compileString(allocator, globals, "def foo(a, b); c = 123; d = a; e = d + b; end");
     defer scope.deinit();
 
-    const scopes = try scope.childScopes(allocator);
-    defer scopes.deinit();
+    var scopes = try scope.childScopes(allocator);
+    defer scopes.deinit(allocator);
 
     const method_scope = scopes.items[0];
 
@@ -727,8 +727,8 @@ test "method returns param" {
     const scope = try compileString(allocator, globals, "def foo(a); a; end");
     defer scope.deinit();
 
-    const scopes = try scope.childScopes(allocator);
-    defer scopes.deinit();
+    var scopes = try scope.childScopes(allocator);
+    defer scopes.deinit(allocator);
 
     const method_scope = scopes.items[0];
 
@@ -809,8 +809,8 @@ test "local ternary" {
     const scope = try compileString(allocator, globals, "def foo(x); x ? 7 : 8; end");
     defer scope.deinit();
 
-    const scopes = try scope.childScopes(allocator);
-    defer scopes.deinit();
+    var scopes = try scope.childScopes(allocator);
+    defer scopes.deinit(allocator);
     const method_scope = scopes.items[0];
 
     try expectInstructionList(&[_]ir.InstructionName{
@@ -841,8 +841,8 @@ test "popped if body" {
     const scope = try compileString(allocator, globals, "def foo(x); x ? 7 : 8; x; end");
     defer scope.deinit();
 
-    const scopes = try scope.childScopes(allocator);
-    defer scopes.deinit();
+    var scopes = try scope.childScopes(allocator);
+    defer scopes.deinit(allocator);
     const method_scope = scopes.items[0];
 
     try expectInstructionList(&[_]ir.InstructionName{
@@ -867,8 +867,8 @@ test "simple function" {
     const scope = try compileString(mem, globals, "def foo(x); x; end");
     defer scope.deinit();
 
-    const scopes = try scope.childScopes(mem);
-    defer scopes.deinit();
+    var scopes = try scope.childScopes(mem);
+    defer scopes.deinit(mem);
 
     const method_scope = scopes.items[0];
 
@@ -890,8 +890,8 @@ test "while loop" {
     const scope = try compileString(allocator, globals, "def foo(x); while x; puts x; end; end");
     defer scope.deinit();
 
-    const scopes = try scope.childScopes(allocator);
-    defer scopes.deinit();
+    var scopes = try scope.childScopes(allocator);
+    defer scopes.deinit(allocator);
     const method_scope = scopes.items[0];
 
     try expectInstructionList(&[_]ir.InstructionName{
@@ -921,8 +921,8 @@ test "empty while loop" {
     const scope = try compileString(allocator, globals, "def foo; while true; end; end");
     defer scope.deinit();
 
-    const scopes = try scope.childScopes(allocator);
-    defer scopes.deinit();
+    var scopes = try scope.childScopes(allocator);
+    defer scopes.deinit(allocator);
     const method_scope = scopes.items[0];
 
     try expectInstructionList(&[_]ir.InstructionName{

@@ -108,7 +108,7 @@ pub const Scope = struct {
 
     fn makeInsn(self: *Scope, insn: ir.Instruction) !*ir.InstructionListNode {
         const node = try self.arena.allocator().create(ir.InstructionListNode);
-        node.*.data = insn;
+        node.* = .{ .node = .{}, .data = insn };
         return node;
     }
 
@@ -118,7 +118,7 @@ pub const Scope = struct {
 
     fn pushInsn(self: *Scope, insn: ir.Instruction) !*Var {
         const node = try self.arena.allocator().create(ir.InstructionListNode);
-        node.*.data = insn;
+        node.* = .{ .node = .{}, .data = insn };
         self.insns.append(&node.node);
 
         return switch (insn) {
@@ -214,15 +214,14 @@ pub const Scope = struct {
 
     pub fn insertPhi(self: *Scope, node: *ir.InstructionListNode, op: *Var) !*ir.InstructionListNode {
         const new_node = try self.arena.allocator().create(ir.InstructionListNode);
-        const params = std.ArrayList(*Var).init(self.arena.allocator());
-        new_node.*.data = .{ .phi = .{ .out = op, .params = params } };
+        new_node.* = .{ .node = .{}, .data = .{ .phi = .{ .out = op, .params = .empty } } };
         self.insns.insertAfter(&node.node, &new_node.node);
         return new_node;
     }
 
     pub fn insertParallelCopy(self: *Scope, node: *ir.InstructionListNode, dest: *Var, src: *Var, group: usize) !*ir.InstructionListNode {
         const new_node = try self.arena.allocator().create(ir.InstructionListNode);
-        new_node.*.data = .{ .pmov = .{ .out = dest, .in = src, .group = group } };
+        new_node.* = .{ .node = .{}, .data = .{ .pmov = .{ .out = dest, .in = src, .group = group } } };
         self.insns.insertAfter(&node.node, &new_node.node);
         return new_node;
     }
@@ -249,7 +248,7 @@ pub const Scope = struct {
     }
 
     pub fn childScopes(self: *Scope, alloc: std.mem.Allocator) !std.ArrayList(*Scope) {
-        var children = std.ArrayList(*Scope).init(alloc);
+        var children: std.ArrayList(*Scope) = .empty;
 
         var it = self.insns.first;
         while (it) |insn| {
@@ -258,7 +257,7 @@ pub const Scope = struct {
                 .define_method => |method| {
                     // The func field is a scope operand containing the child scope
                     const child_scope = method.func;
-                    try children.append(child_scope);
+                    try children.append(alloc, child_scope);
                 },
                 else => {},
             }
@@ -330,7 +329,7 @@ pub const Scope = struct {
             // If this instruction number is not in the alive set, remove it
             if (!alive_numbers.isSet(insn_node.number)) {
                 self.insns.remove(insn);
-                insn_node.data.deinit();
+                insn_node.data.deinit(alloc);
             } else {
                 // While we're here, renumber the instructions
                 insn_node.number = counter;
@@ -414,7 +413,7 @@ test "child scope iterator" {
     try std.testing.expectEqual(3, count);
 
     // Compare with existing childScopes method
-    const children = try scope.childScopes(allocator);
-    defer children.deinit();
+    var children = try scope.childScopes(allocator);
+    defer children.deinit(allocator);
     try std.testing.expectEqual(3, children.items.len);
 }

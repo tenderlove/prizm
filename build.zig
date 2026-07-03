@@ -168,4 +168,6 @@ pub fn build(b: *std.Build) void {
 
     const clap = b.dependency("clap", .{});
     exe.root_module.addImport("clap", clap.module("clap"));
+    lib_test_mod.addImport("clap", clap.module("clap"));
+    exe_test_mod.addImport("clap", clap.module("clap"));
 }

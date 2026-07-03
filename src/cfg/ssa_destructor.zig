@@ -1,10 +1,10 @@
 const std = @import("std");
+const Globals = @import("../globals.zig").Globals;
 const cfg_zig = @import("../cfg.zig");
 const ir = @import("../ir.zig");
 const CFG = cfg_zig.CFG;
 const BasicBlock = cfg_zig.BasicBlock;
 const Var = ir.Variable;
-const vm = @import("../vm.zig");
 const cmp = @import("../compiler.zig");
 const bitmatrix = @import("../utils/bitmatrix.zig");
 const BitMatrix = bitmatrix.BitMatrix;
@@ -50,11 +50,11 @@ pub const SSADestructor = struct {
         for (cfg.blocks) |bb| {
             if (!bb.reachable) continue;
 
-            var predecessor_copies = std.ArrayList(ParallelCopy).init(self.mem);
-            defer predecessor_copies.deinit();
+            var predecessor_copies: std.ArrayList(ParallelCopy) = .empty;
+            defer predecessor_copies.deinit(self.mem);
 
-            var isolation_copies = std.ArrayList(ParallelCopy).init(self.mem);
-            defer isolation_copies.deinit();
+            var isolation_copies: std.ArrayList(ParallelCopy) = .empty;
+            defer isolation_copies.deinit(self.mem);
 
             var iter: ?*std.DoublyLinkedList.Node = &bb.start.node;
 
@@ -72,13 +72,13 @@ pub const SSADestructor = struct {
                             const prime_in = try cfg.scope.newPrime(param);
                             p.params.items[param_i] = prime_in;
 
-                            try predecessor_copies.append(.{ .source_block = bb, .dest_block = cfg.blocks[param.data.redef.defblock.name], .output = prime_in, .input = param });
+                            try predecessor_copies.append(self.mem, .{ .source_block = bb, .dest_block = cfg.blocks[param.data.redef.defblock.name], .output = prime_in, .input = param });
 
                             const def_block = param.getDefinitionBlock();
                             try self.phi_copies.append(self.mem, .{ .source_block = bb, .dest_block = def_block, .output = prime_out, .input = prime_in });
                         }
 
-                        try isolation_copies.append(.{
+                        try isolation_copies.append(self.mem, .{
                             .source_block = bb,
                             .dest_block = bb,
                             .output = prime_out,
@@ -272,10 +272,10 @@ test "phi isolation adds I/O variable copies" {
         \\ p y
     ;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try cmp.compileString(allocator, machine, code);
+    const scope = try cmp.compileString(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try CFG.build(allocator, scope);
@@ -429,10 +429,10 @@ test "inserting phi copies actually copies the right thing" {
         \\ p y
     ;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try cmp.compileString(allocator, machine, code);
+    const scope = try cmp.compileString(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try CFG.build(allocator, scope);
@@ -486,10 +486,10 @@ test "destructor fixes all variables" {
         \\ p y
     ;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try cmp.compileString(allocator, machine, code);
+    const scope = try cmp.compileString(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try CFG.build(allocator, scope);
@@ -541,10 +541,10 @@ test "cycle in parallel copy" {
         \\ p y
     ;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try cmp.compileString(allocator, machine, code);
+    const scope = try cmp.compileString(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try CFG.build(allocator, scope);
@@ -603,10 +603,10 @@ test "destruction removes all parallel copies" {
         \\ p y
     ;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try cmp.compileString(allocator, machine, code);
+    const scope = try cmp.compileString(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try CFG.build(allocator, scope);
@@ -648,10 +648,10 @@ test "destruction maintains block endings" {
         \\ p y
     ;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try cmp.compileString(allocator, machine, code);
+    const scope = try cmp.compileString(allocator, globals, code);
     defer scope.deinit();
 
     const cfg = try CFG.build(allocator, scope);
