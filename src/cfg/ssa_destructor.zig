@@ -3,7 +3,7 @@ const Globals = @import("../globals.zig").Globals;
 const cfg_zig = @import("../cfg.zig");
 const ir = @import("../ir.zig");
 const CFG = cfg_zig.CFG;
-const BasicBlock = cfg_zig.BasicBlock;
+const BasicBlock = @import("../basic_block.zig").BasicBlock;
 const Var = ir.Variable;
 const cmp = @import("../compiler.zig");
 const bitmatrix = @import("../utils/bitmatrix.zig");
@@ -56,9 +56,10 @@ pub const SSADestructor = struct {
             var isolation_copies: std.ArrayList(ParallelCopy) = .empty;
             defer isolation_copies.deinit(self.mem);
 
-            var iter: ?*std.DoublyLinkedList.Node = &bb.start.node;
-
+            var iter = bb.insns.first;
             while (iter) |insn| {
+                iter = insn.next;
+
                 const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
 
                 switch (insn_node.data) {
@@ -92,10 +93,6 @@ pub const SSADestructor = struct {
                         break;
                     },
                 }
-
-                if (insn == &bb.finish.node) break;
-
-                iter = insn.next;
             }
 
             // Insert parallel copies immediately after the Phi nodes so
@@ -109,7 +106,7 @@ pub const SSADestructor = struct {
                 var insn = iter.?.prev.?; // Should be the last Phi in the block
 
                 for (isolation_copies.items) |copy| {
-                    insn = &(try bb.insertParallelCopy(cfg.scope, @fieldParentPtr("node", insn), copy.input, copy.output, self.group)).node;
+                    insn = &(try bb.insertParallelCopy(cfg.scope.allocator, @fieldParentPtr("node", insn), copy.input, copy.output, self.group)).node;
                 }
                 self.group += 1;
             }
@@ -123,7 +120,7 @@ pub const SSADestructor = struct {
                         current_block = copy.dest_block.name;
                         self.group += 1;
                     }
-                    _ = try copy.dest_block.appendParallelCopy(cfg.scope, copy.output, copy.input, self.group);
+                    _ = try copy.dest_block.appendParallelCopy(cfg.scope.allocator, copy.output, copy.input, self.group);
                 }
                 self.group += 1;
             }
@@ -160,7 +157,7 @@ pub const SSADestructor = struct {
                     current_block = copy.dest_block.name;
                     self.group += 1;
                 }
-                _ = try copy.dest_block.appendParallelCopy(cfg.scope, copy.output, copy.input, self.group);
+                _ = try copy.dest_block.appendParallelCopy(cfg.scope.allocator, copy.output, copy.input, self.group);
             }
             self.group += 1;
         }
@@ -293,7 +290,7 @@ test "phi isolation adds I/O variable copies" {
     // instructions after the phi instructions to isolate the phi return value
 
     // Get the 2 phi instructions from BB1
-    const phi1 = @as(*ir.InstructionListNode, @fieldParentPtr("node", cfg.blocks[1].start.node.next.?));
+    const phi1 = @as(*ir.InstructionListNode, @fieldParentPtr("node", cfg.blocks[1].insns.first.?.next.?));
     try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi1.data));
 
     const phi2 = @as(*ir.InstructionListNode, @fieldParentPtr("node", phi1.node.next.?));
@@ -319,7 +316,7 @@ fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
     }
 
     while (true) {
-        if (insn == bb.start) { // If we hit this start, then there were no pmov
+        if (insn == bb.startInsn()) { // If we hit this start, then there were no pmov
             try std.testing.expect(false);
         }
 
@@ -336,7 +333,7 @@ fn expectIsolatedPhiInput(bb: *BasicBlock, phis: []const ir.Instruction) !void {
 
     var count: usize = 0;
     while (true) {
-        if (insn == bb.finish or !insn.?.data.isPMov()) {
+        if (insn == bb.finishInsn() or !insn.?.data.isPMov()) {
             break;
         }
 
@@ -460,7 +457,7 @@ test "inserting phi copies actually copies the right thing" {
     // Adding these copies make it no longer SSA (since we're copying to the Phi output twice)
 
     // Get the 2 phi instructions from BB1
-    const phi1 = @as(*ir.InstructionListNode, @fieldParentPtr("node", cfg.blocks[1].start.node.next.?));
+    const phi1 = @as(*ir.InstructionListNode, @fieldParentPtr("node", cfg.blocks[1].insns.first.?.next.?));
     try std.testing.expectEqual(ir.InstructionName.phi, @as(ir.InstructionName, phi1.data));
 
     const phi2 = @as(*ir.InstructionListNode, @fieldParentPtr("node", phi1.node.next.?));

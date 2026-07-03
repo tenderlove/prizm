@@ -1,8 +1,9 @@
 const ir = @import("ir.zig");
 const std = @import("std");
 const cfg = @import("cfg.zig");
+const CFG = cfg.CFG;
 const Var = ir.Variable;
-const BasicBlock = cfg.BasicBlock;
+const BasicBlock = @import("basic_block.zig").BasicBlock;
 const BitMap = std.DynamicBitSetUnmanaged;
 const assert = @import("std").debug.assert;
 
@@ -17,14 +18,18 @@ pub const Scope = struct {
     param_size: usize = 0,
     local_storage: usize = 0,
     primes: usize = 0,
+    block_name: usize = 0,
     id: u32,
     name: []const u8,
-    insns: ir.InstructionList,
     parent: ?*Scope,
     locals: std.StringHashMapUnmanaged(*Var),
     variables: std.ArrayList(*Var),
+    children: std.ArrayList(*Scope),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
+    entry_block: *BasicBlock,
+    current_block: *BasicBlock,
+    blocks: std.ArrayList(*BasicBlock),
 
     pub fn getName(self: *Scope) []const u8 {
         return self.name;
@@ -59,7 +64,11 @@ pub const Scope = struct {
     }
 
     pub fn insnCount(self: *Scope) usize {
-        return self.insns.len();
+        var count: usize = 0;
+        for (self.blocks.items) |block| {
+            count += block.insnCount();
+        }
+        return count;
     }
 
     pub fn getVariableById(self: Scope, id: usize) *Var {
@@ -113,26 +122,20 @@ pub const Scope = struct {
     }
 
     fn pushVoidInsn(self: *Scope, insn: ir.Instruction) !void {
-        self.insns.append(&(try self.makeInsn(insn)).node);
+        return self.current_block.pushVoidInsn(self.arena.allocator(), insn);
     }
 
     fn pushInsn(self: *Scope, insn: ir.Instruction) !*Var {
-        const node = try self.arena.allocator().create(ir.InstructionListNode);
-        node.* = .{ .node = .{}, .data = insn };
-        self.insns.append(&node.node);
+        return self.current_block.pushInsn(self.arena.allocator(), insn);
+    }
 
-        return switch (insn) {
-            .putlabel => unreachable,
-            .jump => unreachable,
-            .jumpif => unreachable,
-            .jumpunless => unreachable,
-            .setlocal => unreachable,
-            inline else => |payload| payload.out,
-        };
+    pub fn cfg(self: *Scope, mem: std.mem.Allocator) !*CFG {
+        return try CFG.init(mem, self, self.entry_block, try self.blocks.toOwnedSlice(mem));
     }
 
     pub fn pushDefineMethod(self: *Scope, name: []const u8, scope: *Scope) !*Var {
         const outreg = try self.newTemp();
+        try self.children.append(self.allocator, scope);
         return try self.pushInsn(.{ .define_method = .{
             .out = outreg,
             .name = name,
@@ -212,20 +215,6 @@ pub const Scope = struct {
         return try self.makeInsn(.{ .mov = .{ .out = out, .in = in } });
     }
 
-    pub fn insertPhi(self: *Scope, node: *ir.InstructionListNode, op: *Var) !*ir.InstructionListNode {
-        const new_node = try self.arena.allocator().create(ir.InstructionListNode);
-        new_node.* = .{ .node = .{}, .data = .{ .phi = .{ .out = op, .params = .empty } } };
-        self.insns.insertAfter(&node.node, &new_node.node);
-        return new_node;
-    }
-
-    pub fn insertParallelCopy(self: *Scope, node: *ir.InstructionListNode, dest: *Var, src: *Var, group: usize) !*ir.InstructionListNode {
-        const new_node = try self.arena.allocator().create(ir.InstructionListNode);
-        new_node.* = .{ .node = .{}, .data = .{ .pmov = .{ .out = dest, .in = src, .group = group } } };
-        self.insns.insertAfter(&node.node, &new_node.node);
-        return new_node;
-    }
-
     pub fn pushSetLocal(self: *Scope, name: *Var, val: *Var) !void {
         return try self.pushVoidInsn(.{ .setlocal = .{ .name = name, .val = val } });
     }
@@ -233,127 +222,54 @@ pub const Scope = struct {
     pub fn init(alloc: std.mem.Allocator, id: u32, name: []const u8, parent: ?*Scope) !*Scope {
         const scope = try alloc.create(Scope);
 
+        const entry_block = try BasicBlock.initBlock(alloc, 0, scope, true);
+
         scope.* = Scope{
-            .insns = ir.InstructionList{},
             .id = id,
             .name = name,
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(*Var){},
             .variables = .empty,
+            .children = .empty,
+            .blocks = .empty,
             .allocator = alloc,
+            .entry_block = entry_block,
+            .current_block = entry_block,
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
+
+        scope.block_name += 1;
 
         return scope;
     }
 
-    pub fn childScopes(self: *Scope, alloc: std.mem.Allocator) !std.ArrayList(*Scope) {
-        var children: std.ArrayList(*Scope) = .empty;
-
-        var it = self.insns.first;
-        while (it) |insn| {
-            const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
-            switch (insn_node.data) {
-                .define_method => |method| {
-                    // The func field is a scope operand containing the child scope
-                    const child_scope = method.func;
-                    try children.append(alloc, child_scope);
-                },
-                else => {},
-            }
-            it = insn.next;
-        }
-
-        return children;
-    }
-
-    pub const ChildScopeIterator = struct {
-        current: ?*ir.InstructionList.Node,
-
-        pub fn next(self: *ChildScopeIterator) ?*Scope {
-            while (self.current) |insn| {
-                const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
-                self.current = insn.next; // Advance to next instruction
-
-                switch (insn_node.data) {
-                    .define_method => |method| {
-                        return method.func;
-                    },
-                    else => continue,
-                }
-            }
-            return null;
-        }
-    };
-
-    pub fn childScopeIterator(self: *Scope) ChildScopeIterator {
-        return ChildScopeIterator{
-            .current = self.insns.first,
-        };
+    pub fn childScopes(self: *Scope) std.ArrayList(*Scope) {
+        return self.children;
     }
 
     pub fn numberAllInstructions(self: *Scope) void {
         var counter: usize = 0;
-        var it = self.insns.first;
-        while (it) |insn| {
-            const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
-            insn_node.number = counter;
-            counter += 1;
-            it = insn.next;
-        }
-    }
-
-    pub fn sweepUnusedInstructions(self: *Scope, alloc: std.mem.Allocator, live_blocks: []const *cfg.BasicBlock) !void {
-        const last_insn: *ir.InstructionListNode = @fieldParentPtr("node", self.insns.last.?);
-
-        // First, collect all instruction numbers that are alive
-        var alive_numbers = try BitMap.initEmpty(alloc, last_insn.number + 1);
-        defer alive_numbers.deinit(alloc);
-
-        // Walk through all live basic blocks and mark their instructions as alive
-        for (live_blocks) |block| {
-            var iter = block.instructionIter(.{});
-            while (iter.next()) |insn| {
-                alive_numbers.set(insn.number);
-            }
-        }
-
-        var counter: usize = 0;
-
-        // Now walk through the scope's instruction list and remove dead instructions
-        var it = self.insns.first;
-        while (it) |insn| {
-            const next_insn = insn.next; // Save next before potentially removing current
-            const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
-
-            // If this instruction number is not in the alive set, remove it
-            if (!alive_numbers.isSet(insn_node.number)) {
-                self.insns.remove(insn);
-                insn_node.data.deinit(alloc);
-            } else {
-                // While we're here, renumber the instructions
+        for (self.blocks.items) |block| {
+            var it = block.insns.first;
+            while (it) |insn| {
+                const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
                 insn_node.number = counter;
                 counter += 1;
+                it = insn.next;
             }
-
-            it = next_insn;
         }
     }
 
     pub fn deinit(self: *Scope) void {
-        var it = self.insns.first;
-        while (it) |insn| {
-            it = insn.next;
-            @as(*ir.InstructionListNode, @fieldParentPtr("node", insn)).data.deinit(self.allocator);
-        }
         self.locals.deinit(self.allocator);
         self.variables.deinit(self.allocator);
+        self.children.deinit(self.allocator);
         self.arena.deinit();
         self.allocator.destroy(self);
     }
 };
 
-test "number and sweep unused instructions" {
+test "number instructions" {
     const alloc = std.testing.allocator;
 
     // Create a scope with some instructions
@@ -370,7 +286,7 @@ test "number and sweep unused instructions" {
 
     // Verify instructions were numbered correctly
     try std.testing.expectEqual(3, scope.insnCount());
-    var it = scope.insns.first;
+    var it = scope.current_block.insns.first;
     var expected_number: usize = 0;
     while (it) |insn| {
         const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
@@ -378,15 +294,6 @@ test "number and sweep unused instructions" {
         expected_number += 1;
         it = insn.next;
     }
-
-    // For testing, we'll verify the function doesn't crash with empty live blocks
-    const live_blocks = [_]*cfg.BasicBlock{};
-
-    // Call sweep with no live blocks - this should remove all instructions
-    try scope.sweepUnusedInstructions(alloc, &live_blocks);
-
-    // Count remaining instructions (should be 0 since no blocks were live)
-    try std.testing.expectEqual(0, scope.insnCount());
 }
 
 test "child scope iterator" {
@@ -403,17 +310,11 @@ test "child scope iterator" {
 
     // Test the iterator
     var count: usize = 0;
-    var iter = scope.childScopeIterator();
-    while (iter.next()) |child_scope| {
+    for (scope.children.items) |child_scope| {
         count += 1;
         // Verify it's actually a child scope
         try std.testing.expect(child_scope.parent == scope);
     }
 
     try std.testing.expectEqual(3, count);
-
-    // Compare with existing childScopes method
-    var children = try scope.childScopes(allocator);
-    defer children.deinit(allocator);
-    try std.testing.expectEqual(3, children.items.len);
 }

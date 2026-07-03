@@ -2,7 +2,7 @@ const std = @import("std");
 const cmp = @import("compiler.zig");
 const cfg = @import("cfg.zig");
 const Scope = @import("scope.zig").Scope;
-const BasicBlock = cfg.BasicBlock;
+const BasicBlock = @import("basic_block.zig").BasicBlock;
 const BitMap = std.DynamicBitSetUnmanaged;
 const Insn = @import("ir.zig").Instruction;
 

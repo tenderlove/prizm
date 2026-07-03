@@ -368,60 +368,62 @@ pub const RegisterAllocator = struct {
     }
 
     fn rewriteWithLiveRanges(mem: std.mem.Allocator, cfg: *CFG, union_find: *UnionFind, range_map: *std.AutoHashMap(usize, *Var)) !void {
-        // Iterate through all instructions in the scope and replace variables with live ranges
-        var node = cfg.scope.insns.first;
+        for (cfg.blocks) |block| {
+            // Iterate through all instructions in the scope and replace variables with live ranges
+            var node = block.insns.first;
 
-        while (node) |insn_node| {
-            const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
-            const insn = &insn_list_node.data;
+            while (node) |insn_node| {
+                const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
+                const insn = &insn_list_node.data;
 
-            // Replace output variable if it exists
-            if (insn.getOut()) |out_var| {
-                const root = union_find.find(out_var.id);
-                if (range_map.get(root)) |live_range_var| {
-                    insn.setOut(live_range_var);
-                    live_range_var.setDefinition(insn);
-                    switch (insn.*) {
-                        .getparam => |param| {
-                            if (param.index < MAX_PARAM_REGISTERS) {
-                                live_range_var.setSpecificRegister(param.index);
-                            } else {
-                                // Transform getparam into load_stack_param
-                                const stack_index = param.index - MAX_PARAM_REGISTERS;
-                                insn.* = .{ .load_stack_param = .{
-                                    .out = live_range_var,
-                                    .offset = stack_index,
-                                } };
-                            }
-                        },
-                        .setparam => |param| {
-                            if (param.index < MAX_PARAM_REGISTERS) {
-                                live_range_var.setSpecificRegister(param.index);
-                            }
-                        },
-                        .call, .leave => {
-                            live_range_var.setSpecificRegister(RETURN_REGISTER);
-                        },
-                        else => {},
+                // Replace output variable if it exists
+                if (insn.getOut()) |out_var| {
+                    const root = union_find.find(out_var.id);
+                    if (range_map.get(root)) |live_range_var| {
+                        insn.setOut(live_range_var);
+                        live_range_var.setDefinition(insn);
+                        switch (insn.*) {
+                            .getparam => |param| {
+                                if (param.index < MAX_PARAM_REGISTERS) {
+                                    live_range_var.setSpecificRegister(param.index);
+                                } else {
+                                    // Transform getparam into load_stack_param
+                                    const stack_index = param.index - MAX_PARAM_REGISTERS;
+                                    insn.* = .{ .load_stack_param = .{
+                                        .out = live_range_var,
+                                        .offset = stack_index,
+                                    } };
+                                }
+                            },
+                            .setparam => |param| {
+                                if (param.index < MAX_PARAM_REGISTERS) {
+                                    live_range_var.setSpecificRegister(param.index);
+                                }
+                            },
+                            .call, .leave => {
+                                live_range_var.setSpecificRegister(RETURN_REGISTER);
+                            },
+                            else => {},
+                        }
+                    } else {
+                        unreachable;
                     }
-                } else {
-                    unreachable;
                 }
-            }
 
-            // Replace input operands
-            var op_iter = insn.opIter();
-            while (op_iter.next()) |operand| {
-                const root = union_find.find(operand.id);
-                if (range_map.get(root)) |live_range_var| {
-                    insn.replaceOpnd(operand, live_range_var);
-                    try live_range_var.addUse(mem, insn);
-                } else {
-                    unreachable;
+                // Replace input operands
+                var op_iter = insn.opIter();
+                while (op_iter.next()) |operand| {
+                    const root = union_find.find(operand.id);
+                    if (range_map.get(root)) |live_range_var| {
+                        insn.replaceOpnd(operand, live_range_var);
+                        try live_range_var.addUse(mem, insn);
+                    } else {
+                        unreachable;
+                    }
                 }
-            }
 
-            node = insn_node.next;
+                node = insn_node.next;
+            }
         }
     }
 
@@ -438,39 +440,42 @@ pub const RegisterAllocator = struct {
         defer replacements.deinit(cfg.mem);
 
         // First pass: collect all replacements
-        var node = cfg.scope.insns.first;
-        while (node) |insn_node| {
-            const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
-            const insn = &insn_list_node.data;
+        for (cfg.blocks) |block| {
+            // Iterate through all instructions in the scope and replace variables with live ranges
+            var node = block.insns.first;
+            while (node) |insn_node| {
+                const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
+                const insn = &insn_list_node.data;
 
-            // Collect output variable replacement
-            if (insn.getOut()) |out_var| {
-                assert(out_var.data == .live_range);
-                const lr_id = out_var.getLocalId();
-                const physical_reg_var = register_mapping.items[lr_id];
-                replacements.append(cfg.mem, .{
-                    .insn = insn,
-                    .old_var = out_var,
-                    .new_var = physical_reg_var,
-                    .is_output = true,
-                }) catch unreachable;
+                // Collect output variable replacement
+                if (insn.getOut()) |out_var| {
+                    assert(out_var.data == .live_range);
+                    const lr_id = out_var.getLocalId();
+                    const physical_reg_var = register_mapping.items[lr_id];
+                    replacements.append(cfg.mem, .{
+                        .insn = insn,
+                        .old_var = out_var,
+                        .new_var = physical_reg_var,
+                        .is_output = true,
+                    }) catch unreachable;
+                }
+
+                // Collect input operand replacements
+                var op_iter = insn.opIter();
+                while (op_iter.next()) |operand| {
+                    assert(operand.data == .live_range);
+                    const lr_id = operand.getLocalId();
+                    const physical_reg_var = register_mapping.items[lr_id];
+                    replacements.append(cfg.mem, .{
+                        .insn = insn,
+                        .old_var = operand,
+                        .new_var = physical_reg_var,
+                        .is_output = false,
+                    }) catch unreachable;
+                }
+
+                node = insn_node.next;
             }
-
-            // Collect input operand replacements
-            var op_iter = insn.opIter();
-            while (op_iter.next()) |operand| {
-                assert(operand.data == .live_range);
-                const lr_id = operand.getLocalId();
-                const physical_reg_var = register_mapping.items[lr_id];
-                replacements.append(cfg.mem, .{
-                    .insn = insn,
-                    .old_var = operand,
-                    .new_var = physical_reg_var,
-                    .is_output = false,
-                }) catch unreachable;
-            }
-
-            node = insn_node.next;
         }
 
         // Second pass: apply all replacements
@@ -485,30 +490,33 @@ pub const RegisterAllocator = struct {
 
     fn assertAllVariablesAreLiveRanges(cfg: *CFG) void {
         // Iterate through all instructions and assert that all variables are live ranges
-        var node = cfg.scope.insns.first;
+        for (cfg.blocks) |block| {
+            // Iterate through all instructions in the scope and replace variables with live ranges
+            var node = block.insns.first;
 
-        while (node) |insn_node| {
-            const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
-            const insn = &insn_list_node.data;
+            while (node) |insn_node| {
+                const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
+                const insn = &insn_list_node.data;
 
-            // Check output variable if it exists
-            if (insn.getOut()) |out_var| {
-                if (out_var.data != .live_range) {
-                    std.debug.print("Non-live-range output variable: {} in instruction: {}\n", .{ out_var.data, insn.* });
-                    assert(out_var.data == .live_range);
+                // Check output variable if it exists
+                if (insn.getOut()) |out_var| {
+                    if (out_var.data != .live_range) {
+                        std.debug.print("Non-live-range output variable: {} in instruction: {}\n", .{ out_var.data, insn.* });
+                        assert(out_var.data == .live_range);
+                    }
                 }
-            }
 
-            // Check input operands
-            var op_iter = insn.opIter();
-            while (op_iter.next()) |operand| {
-                if (operand.data != .live_range) {
-                    std.debug.print("Non-live-range operand: {} in instruction: {}\n", .{ operand.data, insn.* });
-                    assert(operand.data == .live_range);
+                // Check input operands
+                var op_iter = insn.opIter();
+                while (op_iter.next()) |operand| {
+                    if (operand.data != .live_range) {
+                        std.debug.print("Non-live-range operand: {} in instruction: {}\n", .{ operand.data, insn.* });
+                        assert(operand.data == .live_range);
+                    }
                 }
-            }
 
-            node = insn_node.next;
+                node = insn_node.next;
+            }
         }
     }
 };
@@ -566,8 +574,7 @@ test "params use specific registers" {
     const ra = try RegisterAllocator.allocateRegisters(allocator, cfg);
     defer ra.deinit();
 
-    var iter = scope.childScopeIterator();
-    const method_scope = iter.next().?;
+    const method_scope = scope.children.items[0];
 
     // Build CFG for the method scope to get register allocation
     const method_cfg = try CFG.build(allocator, method_scope);
@@ -577,7 +584,7 @@ test "params use specific registers" {
     defer method_ra.deinit();
 
     // Find getparam instructions and verify their register assignments
-    var insn_node = method_scope.insns.first;
+    var insn_node = method_scope.blocks.items[0].insns.first;
     var param_count: usize = 0;
     var leave_count: usize = 0;
     var call_count: usize = 0;
@@ -640,8 +647,7 @@ test "N params use N specific registers" {
     const ra = try RegisterAllocator.allocateRegisters(allocator, cfg);
     defer ra.deinit();
 
-    var iter = scope.childScopeIterator();
-    const method_scope = iter.next().?;
+    const method_scope = scope.children.items[0];
 
     // Build CFG for the method scope to get register allocation
     const method_cfg = try CFG.build(allocator, method_scope);
@@ -651,7 +657,7 @@ test "N params use N specific registers" {
     defer method_ra.deinit();
 
     // Find getparam instructions and verify their register assignments
-    var insn_node = method_scope.insns.first;
+    var insn_node = method_scope.blocks.items[0].insns.first;
     var param_count: usize = 0;
     var leave_count: usize = 0;
     var call_count: usize = 0;
@@ -723,30 +729,32 @@ test "setparam and call can share R0 register" {
     var setparam_found = false;
     var call_found = false;
 
-    var node = cfg.scope.insns.first;
-    while (node) |insn_node| {
-        const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
-        const insn = &insn_list_node.data;
+    for (cfg.blocks) |block| {
+        var node = block.insns.first;
+        while (node) |insn_node| {
+            const insn_list_node: *ir.InstructionListNode = @fieldParentPtr("node", insn_node);
+            const insn = &insn_list_node.data;
 
-        switch (insn.*) {
-            .setparam => |param| {
-                if (param.index == 0) {
-                    setparam_found = true;
-                    // setparam(0) should be assigned to R0
-                    try std.testing.expect(param.out.data == .physical_register);
-                    try std.testing.expectEqual(0, param.out.data.physical_register.register);
-                }
-            },
-            .call => |call| {
-                call_found = true;
-                // call return value should be assigned to R0
-                try std.testing.expect(call.out.data == .physical_register);
-                try std.testing.expectEqual(0, call.out.data.physical_register.register);
-            },
-            else => {},
+            switch (insn.*) {
+                .setparam => |param| {
+                    if (param.index == 0) {
+                        setparam_found = true;
+                        // setparam(0) should be assigned to R0
+                        try std.testing.expect(param.out.data == .physical_register);
+                        try std.testing.expectEqual(0, param.out.data.physical_register.register);
+                    }
+                },
+                .call => |call| {
+                    call_found = true;
+                    // call return value should be assigned to R0
+                    try std.testing.expect(call.out.data == .physical_register);
+                    try std.testing.expectEqual(0, call.out.data.physical_register.register);
+                },
+                else => {},
+            }
+
+            node = insn_node.next;
         }
-
-        node = insn_node.next;
     }
 
     // Both setparam(0) and call should have been found

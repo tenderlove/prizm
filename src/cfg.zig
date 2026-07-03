@@ -6,6 +6,7 @@ const compiler = @import("compiler.zig");
 const Scope = @import("scope.zig").Scope;
 const Globals = @import("globals.zig").Globals;
 const printer = @import("printer.zig");
+const BasicBlock = @import("basic_block.zig").BasicBlock;
 const assert = @import("std").debug.assert;
 const BitMap = std.DynamicBitSetUnmanaged;
 const bitmatrix = @import("utils/bitmatrix.zig");
@@ -37,6 +38,10 @@ pub const CFG = struct {
     scope: *Scope,
     state: State = .start,
 
+    pub fn build(mem: std.mem.Allocator, scope: *Scope) !*CFG {
+        return try scope.cfg(mem);
+    }
+
     pub fn init(mem: std.mem.Allocator, scope: *Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
         const cfg = try mem.create(CFG);
 
@@ -56,41 +61,8 @@ pub const CFG = struct {
         return self.scope.varCount();
     }
 
-    const DepthFirstIterator = struct {
-        seen: std.AutoHashMap(u64, *BasicBlock),
-        work: std.ArrayList(*BasicBlock),
-
-        pub fn next(self: *DepthFirstIterator, alloc: std.mem.Allocator) !?*BasicBlock {
-            while (self.work.pop()) |bb| {
-                if (!self.seen.contains(bb.name)) {
-                    try self.seen.put(bb.name, bb);
-                    if (bb.jump_dest) |bb2| {
-                        try self.work.append(alloc, bb2);
-                    }
-                    if (bb.fall_through_dest) |bb1| {
-                        try self.work.append(alloc, bb1);
-                    }
-                    return bb;
-                }
-            }
-
-            return null;
-        }
-
-        pub fn deinit(self: *DepthFirstIterator, alloc: std.mem.Allocator) void {
-            self.work.deinit(alloc);
-            self.seen.deinit();
-        }
-    };
-
-    pub fn depthFirstIterator(self: *CFG, alloc: std.mem.Allocator) !DepthFirstIterator {
-        var worklist: std.ArrayList(*BasicBlock) = .empty;
-        try worklist.append(alloc, self.head);
-
-        return .{
-            .seen = std.AutoHashMap(u64, *BasicBlock).init(alloc),
-            .work = worklist,
-        };
+    pub fn depthFirstIterator(self: *CFG, alloc: std.mem.Allocator) !BasicBlock.DepthFirstIterator {
+        return try self.head.depthFirstIterator(alloc);
     }
 
     // Fill in VarKilled and UE var sets for all BBs
@@ -251,15 +223,8 @@ pub const CFG = struct {
             block.reachable = false;
         }
 
-        var worklist: std.ArrayList(*BasicBlock) = .empty;
-        defer worklist.deinit(alloc);
-        try worklist.append(alloc, head);
-
-        var iter: DepthFirstIterator = .{
-            .seen = std.AutoHashMap(u64, *BasicBlock).init(alloc),
-            .work = worklist,
-        };
-        defer iter.seen.deinit();
+        var iter = try head.depthFirstIterator(alloc);
+        defer iter.dealloc(alloc);
 
         while (try iter.next(alloc)) |bb| {
             bb.reachable = true;
@@ -619,25 +584,7 @@ pub const CFG = struct {
     pub fn removePhi(self: *CFG) !void {
         for (self.blocks) |bb| {
             if (!bb.reachable) continue;
-
-            var iter: ?*std.DoublyLinkedList.Node = &bb.start.node;
-
-            while (iter) |insn| {
-                const next_insn = insn.next; // Save next before potentially removing current
-                const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
-
-                switch (insn_node.data) {
-                    .putlabel => {}, // Skip putlabel
-                    .phi => {
-                        bb.removeInstruction(insn_node, self.scope);
-                    },
-                    // Quit after we've passed phi's
-                    else => break,
-                }
-
-                if (insn == &bb.finish.node) break;
-                iter = next_insn;
-            }
+            bb.removePhi(self.scope.allocator);
         }
         self.state = .phi_removed;
     }
@@ -739,605 +686,14 @@ pub const CFG = struct {
             _ = try self.nextCompileStep();
         }
     }
-
-    pub fn build(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
-        var builder = CFGBuilder{ .scope = scope };
-        return try builder.build(allocator, scope);
-    }
-};
-
-pub const BasicBlock = struct {
-    name: u64,
-    entry: bool,
-    reachable: bool = false,
-    has_pcopy: bool = false,
-    scope: *Scope,
-    start: *ir.InstructionListNode,
-    finish: *ir.InstructionListNode,
-    predecessors: std.ArrayList(*BasicBlock),
-    killed_set: BitMap,
-    redefined_set: BitMap,
-    upward_exposed_set: BitMap,
-    liveout_set: BitMap,
-    livein_set: BitMap,
-    dom: BitMap,
-    df: BitMap,
-    fall_through_dest: ?*BasicBlock = null,
-    jump_dest: ?*BasicBlock = null,
-    idom: ?u64 = null,
-
-    fn initBlock(alloc: std.mem.Allocator, name: u64, scope: *Scope, start: anytype, finish: anytype, entry: bool) !*BasicBlock {
-        const block = try alloc.create(BasicBlock);
-
-        block.* = .{
-            .name = name,
-            .start = start,
-            .finish = finish,
-            .entry = entry,
-            .scope = scope,
-            .killed_set = try BitMap.initEmpty(alloc, 0),
-            .redefined_set = try BitMap.initEmpty(alloc, 0),
-            .upward_exposed_set = try BitMap.initEmpty(alloc, 0),
-            .liveout_set = try BitMap.initEmpty(alloc, 0),
-            .livein_set = try BitMap.initEmpty(alloc, 0),
-            .dom = try BitMap.initEmpty(alloc, 0),
-            .df = try BitMap.initEmpty(alloc, 0),
-            .predecessors = .empty,
-        };
-
-        return block;
-    }
-
-    pub fn resetSets(self: *BasicBlock, vars: usize, alloc: std.mem.Allocator) !void {
-        try self.killed_set.resize(alloc, vars, false);
-        try self.redefined_set.resize(alloc, vars, false);
-        try self.upward_exposed_set.resize(alloc, vars, false);
-        try self.liveout_set.resize(alloc, vars, false);
-        try self.livein_set.resize(alloc, vars, false);
-
-        self.killed_set.unsetAll();
-        self.redefined_set.unsetAll();
-        self.upward_exposed_set.unsetAll();
-        self.liveout_set.unsetAll();
-        self.livein_set.unsetAll();
-        self.df.unsetAll();
-        self.dom.unsetAll();
-    }
-
-    pub fn killedVariableCount(self: *BasicBlock) usize {
-        return self.killed_set.count();
-    }
-
-    pub fn upwardExposedCount(self: *BasicBlock) usize {
-        return self.upward_exposed_set.count();
-    }
-
-    pub fn startInsn(self: *BasicBlock) ?*ir.InstructionListNode {
-        return self.start;
-    }
-
-    pub fn finishInsn(self: *BasicBlock) ?*ir.InstructionListNode {
-        return self.finish;
-    }
-
-    pub fn replace(self: *BasicBlock, old: *ir.InstructionListNode, new: *ir.InstructionListNode) void {
-        self.scope.insns.insertAfter(&old.node, &new.node);
-        self.scope.insns.remove(&old.node);
-        if (self.start == old) {
-            self.start = new;
-        }
-        if (self.finish == old) {
-            self.finish = new;
-        }
-    }
-
-    pub fn makeMov(self: *BasicBlock, out: *Var, in: *Var) !*ir.InstructionListNode {
-        return try self.scope.makeMov(out, in);
-    }
-
-    pub fn serializeCopyGroups(self: *@This()) !void {
-        if (!self.has_pcopy) {
-            return;
-        }
-
-        var iter = self.instructionIter(.{});
-        var current_group: usize = 0xFFFFF;
-
-        var copy_group: std.ArrayList(*ir.InstructionListNode) = .empty;
-        defer copy_group.deinit(self.scope.allocator);
-
-        var start: ?*ir.InstructionListNode = null;
-
-        while (iter.next()) |insn| {
-            if (insn.data.isPMov()) {
-                if (insn.data.pmov.group != current_group) {
-                    current_group = insn.data.pmov.group;
-                    if (start) |snode| {
-                        try self.serializeCopyGroup(snode, snode.data.pmov.group);
-                    }
-                    start = insn;
-                }
-                try copy_group.append(self.scope.allocator, insn);
-            }
-        }
-
-        if (start) |snode| {
-            try self.serializeCopyGroup(snode, snode.data.pmov.group);
-        }
-    }
-
-    pub fn serializeCopyGroup(block: *BasicBlock, insn: *ir.InstructionListNode, group: usize) !void {
-        // There shouldn't be any cycles, so we should be able to just insert
-        // copies.
-        var cursor = insn;
-        while (cursor.data.pmov.group == group) {
-            const src = cursor.data.pmov.in;
-            const dst = cursor.data.pmov.out;
-            const old = cursor;
-
-            cursor = @fieldParentPtr("node", cursor.node.next.?);
-
-            const copy = try block.makeMov(dst, src);
-            block.replace(old, copy);
-            if (@as(ir.InstructionName, cursor.data) != ir.InstructionName.pmov) break;
-        }
-    }
-
-    fn childLo(_: *BasicBlock, child: *BasicBlock, alloc: std.mem.Allocator) !BitMap {
-        const ue = child.upward_exposed_set;
-        const lo = child.liveout_set;
-        const varkill = child.killed_set;
-
-        // Bitwise NOT the kill list
-        var notkill = try varkill.clone(alloc);
-        notkill.toggleAll();
-        defer notkill.deinit(alloc);
-
-        var lonk = try lo.clone(alloc);
-        lonk.setIntersection(notkill);
-        defer lonk.deinit(alloc);
-
-        var newlo = try ue.clone(alloc);
-        newlo.setUnion(lonk);
-        return newlo;
-    }
-
-    pub fn insertParallelCopy(self: *BasicBlock, scope: *Scope, node: *ir.InstructionListNode, dest: *Var, src: *Var, group: usize) !*ir.InstructionListNode {
-        self.has_pcopy = true;
-
-        const ret = try scope.insertParallelCopy(node, dest, src, group);
-
-        if (node == self.finish) {
-            self.finish = ret;
-        }
-
-        if (node == self.start) {
-            self.start = ret;
-        }
-
-        return ret;
-    }
-
-    pub fn appendParallelCopy(self: *BasicBlock, scope: *Scope, dest: *Var, src: *Var, group: usize) !*ir.InstructionListNode {
-        var node = self.finish;
-
-        if (self.finish.data.isJump()) {
-            node = @fieldParentPtr("node", self.finish.node.prev.?);
-        }
-
-        return self.insertParallelCopy(scope, node, dest, src, group);
-    }
-
-    // Update the LiveOut set.  If the set changes, returns true
-    pub fn updateLiveOut(self: *BasicBlock, alloc: std.mem.Allocator) !bool {
-        // Engineering a compiler, 3rd ed, 8.6, "Defining the Data-Flow Problem" (page 419)
-        // Also Figure 8.15
-        if (self.fall_through_dest) |child1| {
-            var newlo = try self.childLo(child1, alloc);
-            defer newlo.deinit(alloc);
-
-            if (self.jump_dest) |child2| {
-                var newlo2 = try self.childLo(child2, alloc);
-                defer newlo2.deinit(alloc);
-
-                var bothlo = try newlo.clone(alloc);
-                bothlo.setUnion(newlo2);
-                defer bothlo.deinit(alloc);
-
-                if (self.liveout_set.eql(bothlo)) {
-                    return false;
-                } else {
-                    self.liveout_set.unsetAll();
-                    self.liveout_set.setUnion(bothlo);
-                    return true;
-                }
-            } else {
-                if (self.liveout_set.eql(newlo)) {
-                    return false;
-                } else {
-                    self.liveout_set.unsetAll();
-                    self.liveout_set.setUnion(newlo);
-                    return true;
-                }
-            }
-        } else {
-            if (self.jump_dest) |child2| {
-                var newlo = try self.childLo(child2, alloc);
-                defer newlo.deinit(alloc);
-
-                if (self.liveout_set.eql(newlo)) {
-                    return false;
-                } else {
-                    self.liveout_set.unsetAll();
-                    self.liveout_set.setUnion(newlo);
-                    return true;
-                }
-            } else {
-                return false;
-            }
-        }
-    }
-
-    pub const IteratorOptions = struct {
-        direction: Direction = .forward,
-
-        pub const Direction = enum {
-            forward,
-            reverse,
-        };
-    };
-
-    pub fn Iterator(comptime options: IteratorOptions) type {
-        return struct {
-            const Self = @This();
-
-            current: ?*std.DoublyLinkedList.Node,
-            finish: *std.DoublyLinkedList.Node,
-            done: bool,
-
-            pub fn next(self: *Self) ?*ir.InstructionListNode {
-                if (self.done) return null;
-
-                if (self.current) |node| {
-                    if (node == self.finish) {
-                        self.done = true;
-                        return @fieldParentPtr("node", node);
-                    }
-
-                    // Move to next node based on direction
-                    switch (options.direction) {
-                        .forward => self.current = node.next,
-                        .reverse => self.current = node.prev,
-                    }
-                    return @fieldParentPtr("node", node);
-                } else {
-                    return null;
-                }
-            }
-        };
-    }
-
-    pub fn instructionIter(self: *BasicBlock, comptime options: IteratorOptions) Iterator(options) {
-        return switch (options.direction) {
-            .forward => Iterator(options){
-                .current = &self.start.node,
-                .finish = &self.finish.node,
-                .done = false,
-            },
-            .reverse => Iterator(options){
-                .current = &self.finish.node,
-                .finish = &self.start.node,
-                .done = false,
-            },
-        };
-    }
-
-    pub fn fillVarSets(self: *BasicBlock) !void {
-        var iter = self.instructionIter(.{});
-
-        while (iter.next()) |insn| {
-            // Fill the UE set.
-            var opiter = insn.data.opIter();
-            while (opiter.next()) |op| {
-                // Special case: if this operand is the same as the output of this instruction,
-                // it should always be considered upward exposed (use before redefine)
-
-                if (!self.killed_set.isSet(op.id)) {
-                    self.upward_exposed_set.set(op.id);
-                }
-            }
-
-            if (insn.data.outVar()) |v| {
-                if (self.killed_set.isSet(v.id)) {
-                    self.redefined_set.set(v.id);
-                }
-                self.killed_set.set(v.id);
-            }
-        }
-    }
-
-    fn addInstruction(self: *BasicBlock, insn: *ir.InstructionListNode) void {
-        // Set the definition block for the outvar on the instruction.
-        // We need this for phi placement / renaming etc
-        if (insn.data.getOut()) |outvar| {
-            outvar.setDefinitionBlock(self);
-        }
-        self.finish = insn;
-    }
-
-    pub fn removeInstruction(self: *BasicBlock, insn: *ir.InstructionListNode, scope: *Scope) void {
-        // Remove the instruction from the global instruction list
-        scope.insns.remove(&insn.node);
-        // Free anything the instruction payload owns (e.g. .phi/.call params ArrayList).
-        insn.data.deinit(scope.allocator);
-
-        // Update BasicBlock start/finish pointers if necessary
-        if (self.start == insn) {
-            // Removing the first instruction in the block
-            if (insn.node.next) |next_node| {
-                self.start = @fieldParentPtr("node", next_node);
-            } else {
-                // This was the only instruction - block becomes empty
-                // This shouldn't happen in well-formed CFGs, but handle it gracefully
-                unreachable;
-            }
-        }
-
-        if (self.finish == insn) {
-            // Removing the last instruction in the block
-            if (insn.node.prev) |prev_node| {
-                self.finish = @fieldParentPtr("node", prev_node);
-            } else {
-                // This was the only instruction - block becomes empty
-                unreachable;
-            }
-        }
-    }
-
-    fn fallsThrough(self: *BasicBlock) bool {
-        return switch (self.finish.data) {
-            .jump, .leave => false,
-            else => true,
-        };
-    }
-
-    pub fn hasPhiFor(self: *BasicBlock, opnd: *Var) bool {
-        var iter = self.instructionIter(.{});
-        while (iter.next()) |insn| {
-            switch (insn.data) {
-                .putlabel => {}, // Skip putlabel
-                .phi => |p| {
-                    if (p.out == opnd) return true;
-                },
-                else => {
-                    return false;
-                },
-            }
-        }
-        return false;
-    }
-
-    pub fn addPhi(self: *BasicBlock, scope: *Scope, opnd: *Var) !void {
-        var iter = self.instructionIter(.{});
-        while (iter.next()) |insn| {
-            switch (insn.data) {
-                inline .phi, .putlabel => {}, // Skip phi and putlabel
-                else => {
-                    if (insn.node.prev) |prev| {
-                        const phi_insn = try scope.insertPhi(@fieldParentPtr("node", prev), opnd);
-                        if (insn == self.start) {
-                            self.start = phi_insn;
-                        }
-                    } else {
-                        unreachable;
-                    }
-                    return;
-                },
-            }
-        }
-        unreachable;
-    }
-
-    fn hasJumpTarget(self: *BasicBlock) bool {
-        return self.finish.data.isJump();
-    }
-
-    fn hasLabeledEntry(self: *BasicBlock) bool {
-        return ir.InstructionName.putlabel == @as(ir.InstructionName, self.start.data);
-    }
-
-    fn instructionCount(self: *BasicBlock) u32 {
-        var count: u32 = 0;
-        var iter = self.instructionIter(.{});
-
-        while (iter.next()) |_| {
-            count += 1;
-        }
-
-        return count;
-    }
-
-    fn jumpTarget(self: *BasicBlock) ir.Label {
-        return self.finish.data.jumpTarget();
-    }
-
-    fn addPredecessor(self: *BasicBlock, alloc: std.mem.Allocator, predecessor: *BasicBlock) !void {
-        try self.predecessors.append(alloc, predecessor);
-    }
-
-    fn setJumpDest(self: *BasicBlock, child: *BasicBlock) void {
-        if (self.jump_dest) |_| {
-            unreachable;
-        } else {
-            self.jump_dest = child;
-        }
-    }
-
-    fn setFallThroughDest(self: *BasicBlock, child: *BasicBlock) void {
-        if (self.fall_through_dest) |_| {
-            unreachable;
-        } else {
-            self.fall_through_dest = child;
-        }
-    }
-
-    pub fn uninitializedSet(self: *BasicBlock, mem: std.mem.Allocator) !BitMap {
-        if (!self.entry) return error.ArgumentError;
-
-        var uninit = try self.killed_set.clone(mem);
-        uninit.toggleAll();
-        uninit.setIntersection(self.liveout_set);
-        uninit.setUnion(self.upward_exposed_set);
-
-        return uninit;
-    }
-
-    pub fn deinit(self: *BasicBlock, alloc: std.mem.Allocator) void {
-        self.df.deinit(alloc);
-        self.dom.deinit(alloc);
-        self.killed_set.deinit(alloc);
-        self.redefined_set.deinit(alloc);
-        self.upward_exposed_set.deinit(alloc);
-        self.liveout_set.deinit(alloc);
-        self.livein_set.deinit(alloc);
-        self.predecessors.deinit(alloc);
-        alloc.destroy(self);
-    }
 };
 
 pub const CompileError = error{
     EmptyInstructionSequence,
 };
 
-const CFGBuilder = struct {
-    block_name: u32 = 0,
-    scope: *Scope,
-
-    fn makeBlock(self: *CFGBuilder, mem: std.mem.Allocator, scope: *Scope, start: *ir.InstructionListNode, finish: *ir.InstructionListNode, entry: bool) !*BasicBlock {
-        const block = try BasicBlock.initBlock(mem, self.block_name, scope, start, finish, entry);
-
-        self.block_name += 1;
-
-        return block;
-    }
-
-    fn build(self: *CFGBuilder, alloc: std.mem.Allocator, scope: *Scope) !*CFG {
-        const insns = scope.insns;
-        var node = insns.first;
-
-        // If we don't have any nodes to process, just return the empty CFG.
-        if (node == null) {
-            return CompileError.EmptyInstructionSequence;
-        }
-
-        var wants_label: std.ArrayList(*BasicBlock) = .empty;
-        defer wants_label.deinit(alloc);
-
-        var all_blocks: std.ArrayList(*BasicBlock) = .empty;
-        defer {
-            for (all_blocks.items) |b| {
-                if (!b.reachable) {
-                    b.deinit(alloc);
-                }
-            }
-            all_blocks.deinit(alloc);
-        }
-
-        var last_block: ?*BasicBlock = null;
-        var head: ?*BasicBlock = null;
-
-        var label_to_block_lut: []?*BasicBlock = try alloc.alloc(?*BasicBlock, scope.label_id);
-        @memset(label_to_block_lut, null);
-        defer alloc.free(label_to_block_lut);
-
-        var entry = true;
-
-        // For all of our instructions
-        while (node) |insn| {
-            // Create a new block
-            const current_block = try self.makeBlock(alloc, scope, @ptrCast(insn), @ptrCast(insn), entry);
-            try all_blocks.append(alloc, current_block);
-            entry = false;
-
-            // Scan through following instructions until we find an instruction
-            // that should end the block.
-            while (node) |finish_insn| {
-                // Add each instruction to the current block
-                current_block.addInstruction(@fieldParentPtr("node", finish_insn));
-
-                node = finish_insn.next;
-
-                const insn_node_: *ir.InstructionListNode = @fieldParentPtr("node", finish_insn);
-                const insn_node = insn_node_.data;
-
-                // If the last instruction is a jump we should end the block
-                if (insn_node.isJump() or insn_node.isReturn()) {
-                    break;
-                }
-
-                // If the next instruction is a label we should end the block
-                if (node) |next_insn| {
-                    if (@as(*ir.InstructionListNode, @fieldParentPtr("node", next_insn)).data.isLabel()) {
-                        break;
-                    }
-                }
-            }
-
-            // If the previous block falls through, then we should add the
-            // current block as a outgoing edge, and add the last block
-            // as a predecessor to this block.
-            if (current_block.entry) {
-                head = current_block;
-            } else {
-                if (last_block.?.fallsThrough()) {
-                    last_block.?.setFallThroughDest(current_block);
-                    try current_block.addPredecessor(alloc, last_block.?);
-                }
-            }
-
-            // If this block has a label at the top, register it so that
-            // we can link other blocks to this one
-            if (current_block.hasLabeledEntry()) {
-                const label_name = current_block.start.data.putlabel.name.id;
-                label_to_block_lut[label_name] = current_block;
-            }
-
-            // If this block jumps to a label, register it so that we can link
-            // it to the block with the label later.
-            if (current_block.hasJumpTarget()) {
-                try wants_label.append(alloc, current_block);
-            }
-
-            last_block = current_block;
-        }
-
-        for (wants_label.items) |want_label| {
-            const dest_label = want_label.jumpTarget();
-            const target = label_to_block_lut[dest_label.id].?;
-            want_label.setJumpDest(target);
-            try target.addPredecessor(alloc, want_label);
-        }
-
-        const live_blocks = try CFG.sweepUnreachableBlocks(alloc, head.?, all_blocks);
-
-        const cfg = try CFG.init(alloc, scope, head.?, live_blocks);
-
-        // TODO: We could calculate the killed set and the upward exposed set
-        // while building the basic blocks, rather than here.  But then we
-        // wouldn't have the opportunity to do a peephole optimization step before
-        // calculating the VarKilled and UEVars.  Haven't implemented the
-        // peephole optimization step yet. Maybe we don't need it and can avoid
-        // the extra loops here?
-
-        return cfg;
-    }
-};
-
-fn buildCFG(allocator: std.mem.Allocator, scope: *Scope) !*CFG {
-    const cfg = try CFG.build(allocator, scope);
-    _ = try cfg.nextCompileStep();
-    _ = try cfg.nextCompileStep();
-    return cfg;
+fn buildCFG(mem: std.mem.Allocator, scope: *Scope) !*CFG {
+    return try scope.cfg(mem);
 }
 
 test "empty basic block" {
@@ -1358,26 +714,7 @@ test "basic block one instruction" {
 
     const bb = cfg.head;
 
-    try std.testing.expectEqual(scope.insns.first.?, &bb.start.node);
-    try std.testing.expectEqual(scope.insns.first.?, &bb.finish.node);
-    try std.testing.expectEqual(null, bb.fall_through_dest);
-    try std.testing.expectEqual(null, bb.jump_dest);
-}
-
-test "basic block two instruction" {
-    const scope = try Scope.init(std.testing.allocator, 0, "empty", null);
-    defer scope.deinit();
-
-    _ = try scope.pushLoadi(null, 123);
-    _ = try scope.pushLoadi(null, 234);
-
-    const cfg = try buildCFG(std.testing.allocator, scope);
-    defer cfg.deinit();
-
-    const bb = cfg.head;
-
-    try std.testing.expectEqual(scope.insns.first.?, &bb.start.node);
-    try std.testing.expectEqual(scope.insns.last.?, &bb.finish.node);
+    try std.testing.expectEqual(1, bb.instructionCount());
 }
 
 test "CFG from compiler" {
@@ -1393,10 +730,10 @@ test "CFG from compiler" {
     defer cfg.deinit();
 
     const bb = cfg.head;
-    const start_type: ir.InstructionName = bb.start.data;
+    const start_type: ir.InstructionName = bb.startInsn().?.data;
     try std.testing.expectEqual(ir.InstructionName.getparam, start_type);
 
-    const finish_type: ir.InstructionName = bb.finish.data;
+    const finish_type: ir.InstructionName = bb.finishInsn().?.data;
     try std.testing.expectEqual(ir.InstructionName.leave, finish_type);
 }
 
@@ -1428,8 +765,7 @@ test "if statement should have 2 children blocks" {
     defer scope.deinit();
 
     // Get the scope for the method
-    var scopes = try scope.childScopes(allocator);
-    defer scopes.deinit(allocator);
+    const scopes = scope.childScopes();
 
     const method_scope = scopes.items[0];
 
@@ -1459,8 +795,8 @@ test "if statement should have 2 children blocks" {
 
     child = block.jump_dest.?;
     try std.testing.expectEqual(2, child.instructionCount());
-    try std.testing.expectEqual(ir.Instruction.putlabel, @as(ir.InstructionName, child.start.data));
-    try std.testing.expectEqual(ir.Instruction.loadi, @as(ir.InstructionName, child.finish.data));
+    try std.testing.expectEqual(ir.Instruction.putlabel, @as(ir.InstructionName, child.startInsn().?.data));
+    try std.testing.expectEqual(ir.Instruction.loadi, @as(ir.InstructionName, child.finishInsn().?.data));
 
     // Last block via fallthrough then jump
     const last_block = block.fall_through_dest.?.jump_dest.?;
@@ -1791,8 +1127,7 @@ test "method definitions" {
     const scope = try compileScope(mem, globals, code);
     defer scope.deinit();
 
-    var children = try scope.childScopes(mem);
-    defer children.deinit(mem);
+    const children = scope.childScopes();
     try std.testing.expectEqual(1, children.items.len);
 
     // Get a CFG for the foo method
@@ -1820,8 +1155,7 @@ test "dead code removal" {
     const scope = try compileScope(mem, globals, code);
     defer scope.deinit();
 
-    var children = try scope.childScopes(mem);
-    defer children.deinit(mem);
+    const children = scope.childScopes();
     try std.testing.expectEqual(1, children.items.len);
 
     const method_scope = children.items[0];
@@ -1837,8 +1171,6 @@ test "dead code removal" {
 
     // Number all instructions
     method_scope.numberAllInstructions();
-    // Manually sweep unused instructions
-    try method_scope.sweepUnusedInstructions(mem, blocks);
 
     try std.testing.expectEqual(4, method_scope.insnCount());
 }
@@ -2036,7 +1368,7 @@ fn compileScope(allocator: std.mem.Allocator, globals: *Globals, code: []const u
 }
 
 fn expectInstructionList(expected: []const ir.InstructionName, block: *BasicBlock) !void {
-    var insn: ?*ir.InstructionListNode = block.start;
+    var insn: ?*ir.InstructionListNode = block.startInsn();
     for (expected) |expected_insn| {
         try std.testing.expectEqual(expected_insn, @as(ir.InstructionName, insn.?.data));
         if (insn.?.node.next) |n| {

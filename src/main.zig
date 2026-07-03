@@ -110,7 +110,7 @@ fn runCompile(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterat
     const scope = try cc.compile(&scope_node);
     defer scope.deinit();
 
-    const cfg = try CFG.build(gpa, scope);
+    const cfg = try scope.cfg(gpa);
     defer cfg.deinit();
 
     if (res.args.cfg != 0) {
