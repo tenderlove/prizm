@@ -25,9 +25,9 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        .yazap = .{
-            .url = "git+https://github.com/tenderlove/yazap.git#523423277485e23b2571a0b9176b4097dc530f08",
-            .hash = "yazap-0.6.3-Z1t-Em3mAQDDDEVmRBQ3cNtgYk1X-sTJpP5wAdg-RT5A",
+        .clap = .{
+            .url = "git+https://github.com/Hejsil/zig-clap#e91d66b1abba2024cd2e816426f14d233d3dad9a",
+            .hash = "clap-0.12.0-oBajB2LpAQD1BQpAukHcuwhIUoHWYNy2DzU6lDW2v2N8",
         },
     },
     .paths = .{

@@ -204,6 +204,7 @@ pub const InstructionName = enum {
     jumpunless,
     leave,
     loadi,
+    loadstr,
     loadnil,
     load_stack_param,
     mov,
@@ -293,6 +294,15 @@ pub const Instruction = union(InstructionName) {
         const Self = @This();
         out: *Variable,
         val: u64,
+        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
+            unreachable;
+        }
+    },
+
+    loadstr: struct {
+        const Self = @This();
+        out: *Variable,
+        val: []const u8,
         pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
             unreachable;
         }
@@ -568,11 +578,11 @@ pub const Instruction = union(InstructionName) {
         }
     }
 
-    pub fn deinit(self: Instruction) void {
-        switch (self) {
-            .call => |x| x.params.deinit(),
-            .phi => |x| x.params.deinit(),
-            .define_method => |x| x.func.deinit(),
+    pub fn deinit(self: *Instruction, alloc: std.mem.Allocator) void {
+        switch (self.*) {
+            .call => |*x| x.params.deinit(alloc),
+            .phi => |*x| x.params.deinit(alloc),
+            .define_method => |*x| x.func.deinit(),
             else => {},
         }
     }

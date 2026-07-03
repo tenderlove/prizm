@@ -43,22 +43,6 @@ pub const VM = struct {
 
     allocator: std.mem.Allocator,
     top_frame: *Frame,
-    strings: std.StringHashMapUnmanaged([]const u8),
-
-    // Looks up a string from the string pool and returns it.
-    // If the string isn't found in the string pool, copies it with
-    // the vm's allocator, inserts it in to the pool, and returns the copy.
-    // All strings in the pool are owned by the VM.
-    pub fn getString(self: *VM, str: []const u8) ![]const u8 {
-        const value = self.strings.get(str);
-        if (value) |v| {
-            return v;
-        } else {
-            const v = try self.allocator.dupe(u8, str);
-            try self.strings.put(self.allocator, v, v);
-            return v;
-        }
-    }
 
     pub fn eval(self: *VM, iseq: *cmp.InstructionSequence) !void {
         std.debug.print("iseq len {d}\n", .{iseq.insns.len});
@@ -87,11 +71,6 @@ pub const VM = struct {
     }
 
     pub fn deinit(self: *VM, allocator: std.mem.Allocator) void {
-        var it = self.strings.valueIterator();
-        while (it.next()) |val| {
-            allocator.free(val.*);
-        }
-        self.strings.deinit(allocator);
         self.top_frame.deinit();
         allocator.destroy(self.top_frame);
         allocator.destroy(self);
@@ -124,7 +103,6 @@ pub const VM = struct {
 pub fn init(allocator: std.mem.Allocator) !*VM {
     const self = try allocator.create(VM);
     const top_frame = try allocator.create(VM.Frame);
-    const strings = std.StringHashMapUnmanaged([]const u8){};
 
     top_frame.* = .{
         .reg_stack = std.ArrayList(usize).init(allocator),
@@ -137,7 +115,6 @@ pub fn init(allocator: std.mem.Allocator) !*VM {
     self.* = .{
         .allocator = allocator,
         .top_frame = top_frame,
-        .strings = strings,
     };
     return self;
 }

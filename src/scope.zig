@@ -42,7 +42,7 @@ pub const Scope = struct {
     }
 
     fn addVar(self: *Scope, var_: *Var) !*Var {
-        try self.variables.append(var_);
+        try self.variables.append(self.allocator, var_);
         return var_;
     }
 
@@ -190,6 +190,14 @@ pub const Scope = struct {
         } });
     }
 
+    pub fn pushLoadString(self: *Scope, out: ?*Var, val: []const u8) !*Var {
+        const outreg = if (out) |o| o else try self.newTemp();
+        return try self.pushInsn(.{ .loadstr = .{
+            .out = outreg,
+            .val = val,
+        } });
+    }
+
     pub fn pushLoadNil(self: *Scope, out: ?*Var) !*Var {
         const outreg = if (out) |o| o else try self.newTemp();
         return try self.pushInsn(.{ .loadnil = .{ .out = outreg } });
@@ -232,7 +240,7 @@ pub const Scope = struct {
             .name = name,
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(*Var){},
-            .variables = std.ArrayList(*Var).init(alloc),
+            .variables = .empty,
             .allocator = alloc,
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
@@ -337,10 +345,10 @@ pub const Scope = struct {
         var it = self.insns.first;
         while (it) |insn| {
             it = insn.next;
-            @as(*ir.InstructionListNode, @fieldParentPtr("node", insn)).data.deinit();
+            @as(*ir.InstructionListNode, @fieldParentPtr("node", insn)).data.deinit(self.allocator);
         }
         self.locals.deinit(self.allocator);
-        self.variables.deinit();
+        self.variables.deinit(self.allocator);
         self.arena.deinit();
         self.allocator.destroy(self);
     }

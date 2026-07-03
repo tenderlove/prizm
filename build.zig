@@ -1,25 +1,27 @@
 const std = @import("std");
 
 pub fn addPrismSource(b: *std.Build,
-    exe: *std.Build.Step.Compile,
+    mod: *std.Build.Module,
     prism_path: []const u8) void
 {
-    var iter_dir = std.fs.cwd().openDir(
+    const io = b.graph.io;
+    var iter_dir = std.Io.Dir.cwd().openDir(
+        io,
         prism_path,
         .{ .iterate = true },
     ) catch return;
 
     defer {
-        iter_dir.close();
+        iter_dir.close(io);
     }
     var it = iter_dir.iterate();
-    while (it.next() catch return) |file| {
+    while (it.next(io) catch return) |file| {
         if (file.kind == .directory) {
             const dirname = std.fs.path.join(b.allocator, &.{
                 prism_path,
                 file.name
             }) catch return;
-            addPrismSource(b, exe, dirname);
+            addPrismSource(b, mod, dirname);
         }
 
         if (file.kind != .file) {
@@ -31,7 +33,7 @@ pub fn addPrismSource(b: *std.Build,
             file.name
         }) catch return;
 
-        exe.addCSourceFile(.{ .file = .{ .cwd_relative = fname } });
+        mod.addCSourceFile(.{ .file = .{ .cwd_relative = fname } });
     }
 }
 
@@ -40,12 +42,7 @@ pub fn addPrismSource(b: *std.Build,
 // runner.
 pub fn build(b: *std.Build) void {
     const rake = b.addSystemCommand(&.{"rake"});
-    const prism_path = std.fs.path.join(b.allocator, &.{b.build_root.path orelse "",
-        "prism"
-    }) catch return;
-
-    rake.addArg("-C");
-    rake.addArg(prism_path);
+    rake.setCwd(b.path("prism"));
     rake.addArg("templates");
 
     // Standard target options allows the person running `zig build` to choose
@@ -65,25 +62,32 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Import yazap
-    const yazap = b.dependency("yazap", .{ });
+    const translate_prism = b.addTranslateC(.{
+        .root_source_file = b.path("prism/include/prism.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    translate_prism.addIncludePath(b.path("prism/include"));
+    translate_prism.step.dependOn(&rake.step);
+    const prism_c = translate_prism.addModule("prism_c");
+
+    const exe_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{
+            .{ .name = "zigtest", .module = mod },
+            .{ .name = "prism_c", .module = prism_c },
+        },
+    });
+    exe_mod.addIncludePath(b.path("prism/include"));
+    addPrismSource(b, exe_mod, "prism/src");
 
     const exe = b.addExecutable(.{
         .name = "prizm",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zigtest", .module = mod },
-                .{ .name = "yazap", .module = yazap.module("yazap") },
-            },
-        }),
+        .root_module = exe_mod,
     });
-
-    exe.addIncludePath(b.path("prism/include"));
-    addPrismSource(b, exe, "prism/src");
-    exe.linkLibC();
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -103,9 +107,7 @@ pub fn build(b: *std.Build) void {
 
     // This allows the user to pass arguments to the application in the build
     // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     // This creates a build step. It will be visible in the `zig build --help` menu,
     // and can be selected like this: `zig build run`
@@ -115,41 +117,45 @@ pub fn build(b: *std.Build) void {
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
+    const lib_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{
+            .{ .name = "zigtest", .module = mod },
+            .{ .name = "prism_c", .module = prism_c },
+        },
+    });
+    lib_test_mod.addIncludePath(b.path("prism/include"));
+    addPrismSource(b, lib_test_mod, "prism/src");
+
     const lib_unit_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zigtest", .module = mod },
-                .{ .name = "yazap", .module = yazap.module("yazap") },
-            },
-        }),
+        .root_module = lib_test_mod,
     });
 
     lib_unit_tests.step.dependOn(&rake.step);
-    lib_unit_tests.addIncludePath(b.path("prism/include"));
-    addPrismSource(b, lib_unit_tests, "prism/src");
-    lib_unit_tests.linkLibC();
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
+    const exe_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{
+            .{ .name = "zigtest", .module = mod },
+            .{ .name = "prism_c", .module = prism_c },
+        },
+    });
+    exe_test_mod.addIncludePath(b.path("prism/include"));
+    addPrismSource(b, exe_test_mod, "prism/src");
+
     const exe_unit_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zigtest", .module = mod },
-                .{ .name = "yazap", .module = yazap.module("yazap") },
-            },
-        }),
+        .root_module = exe_test_mod,
     });
 
     exe_unit_tests.step.dependOn(&rake.step);
-    exe_unit_tests.addIncludePath(b.path("prism/include"));
-    addPrismSource(b, exe_unit_tests, "prism/src");
-    exe_unit_tests.linkLibC();
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
@@ -159,4 +165,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    const clap = b.dependency("clap", .{});
+    exe.root_module.addImport("clap", clap.module("clap"));
 }

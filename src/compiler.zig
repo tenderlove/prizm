@@ -1,21 +1,19 @@
 const std = @import("std");
 const prism = @import("prism.zig");
-const vm = @import("vm.zig");
+const Globals = @import("globals.zig").Globals;
 const ir = @import("ir.zig");
 const cfg = @import("cfg.zig");
 const BasicBlock = cfg.BasicBlock;
 const Var = ir.Variable;
 const Scope = @import("scope.zig").Scope;
 
-const c = @cImport({
-    @cInclude("prism.h");
-});
+const c = @import("prism_c");
 
 pub const Compiler = struct {
     parser: *c.pm_parser_t,
     scope: ?*Scope,
     allocator: std.mem.Allocator,
-    vm: *vm.VM,
+    globals: *Globals,
     scope_ids: u32 = 0,
 
     pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{ EmptyInstructionSequence, NotImplementedError, OutOfMemory }!*Scope {
@@ -38,6 +36,7 @@ pub const Compiler = struct {
             c.PM_REQUIRED_PARAMETER_NODE => try cc.compileRequiredParameterNode(@ptrCast(node), op, popped),
             c.PM_SCOPE_NODE => return error.NotImplementedError,
             c.PM_STATEMENTS_NODE => try cc.compileStatementsNode(@ptrCast(node), op, popped),
+            c.PM_STRING_NODE => try cc.compileStringNode(@ptrCast(node), op, popped),
             c.PM_WHILE_NODE => try cc.compileWhileNode(@ptrCast(node), op, popped),
             else => {
                 std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
@@ -69,7 +68,7 @@ pub const Compiler = struct {
     }
 
     fn compileDefNode(cc: *Compiler, node: *const c.pm_def_node_t, out: ?*Var, _: bool) !*ir.Variable {
-        const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        const method_name = try cc.globals.getString(cc.stringFromId(node.*.name));
         const scope_node = try prism.pmNewScopeNode(@ptrCast(node));
         const method_scope = try cc.compileScopeNode(&scope_node, out, false);
 
@@ -77,36 +76,36 @@ pub const Compiler = struct {
     }
 
     fn compileCallNode(cc: *Compiler, node: *const c.pm_call_node_t, out: ?*Var, _: bool) !*Var {
-        const method_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        const method_name = try cc.globals.getString(cc.stringFromId(node.*.name));
 
         // If there's a receiver, compile it. Otherwise we know it's a
         // "getself". In the case of a "getself" we want to do that right
         // next to the call in order to reduce register interference
         const recv_op = if (node.*.receiver) |_|
             try cc.compileRecv(node.*.receiver, null, false)
-        else
-            null;
+            else
+                null;
 
-        var params = std.ArrayList(*Var).init(cc.scope.?.arena.allocator());
+            var params: std.ArrayList(*Var) = .empty;
 
-        if (node.*.arguments) |argnode| {
-            const arg_size = argnode.*.arguments.size;
-            const args = argnode.*.arguments.nodes[0..arg_size];
+            if (node.*.arguments) |argnode| {
+                const arg_size = argnode.*.arguments.size;
+                const args = argnode.*.arguments.nodes[0..arg_size];
 
-            for (args) |arg| {
-                try params.append((try cc.compileNode(arg, null, false)).?);
+                for (args) |arg| {
+                    try params.append(cc.allocator, (try cc.compileNode(arg, null, false)).?);
+                }
             }
-        }
 
-        // Get a pooled string that's owned by the VM
-        const name = try cc.vm.getString(method_name);
-        const outvar = if (out) |o| o else try cc.newTemp();
+            // Get a pooled string that's owned by the VM
+            const name = try cc.globals.getString(method_name);
+            const outvar = if (out) |o| o else try cc.newTemp();
 
-        if (recv_op) |r| {
-            return try cc.pushCall(outvar, r, name, params);
-        } else {
-            return try cc.pushCall(outvar, try cc.pushGetself(), name, params);
-        }
+            if (recv_op) |r| {
+                return try cc.pushCall(outvar, r, name, params);
+            } else {
+                return try cc.pushCall(outvar, try cc.pushGetself(), name, params);
+            }
     }
 
     fn compileElseNode(cc: *Compiler, node: *const c.pm_else_node_t, op: ?*Var, popped: bool) !?*ir.Variable {
@@ -140,7 +139,7 @@ pub const Compiler = struct {
             c.PM_PROGRAM_NODE => "main",
             c.PM_DEF_NODE => blk: {
                 const cast: *const c.pm_def_node_t = @ptrCast(ast_node);
-                const name = try cc.vm.getString(cc.stringFromId(cast.*.name));
+                const name = try cc.globals.getString(cc.stringFromId(cast.*.name));
                 break :blk name;
             },
             else => {
@@ -156,7 +155,7 @@ pub const Compiler = struct {
         cc.scope = scope;
 
         // Every scope gets a "self" as a parameter
-        const lvar_name = try cc.vm.getString("self");
+        const lvar_name = try cc.globals.getString("self");
         //_ = try scope.pushGetParam(try cc.scope.?.getLocalName(lvar_name), 0);
         _ = try cc.pushMov(try cc.scope.?.getLocalName(lvar_name),
             try scope.pushGetParam(try cc.newTemp(), 0));
@@ -276,18 +275,27 @@ pub const Compiler = struct {
         }
     }
 
+    fn compileStringNode(cc: *Compiler, node: *const c.pm_string_node_t, out: ?*Var, popped: bool) !?*ir.Variable {
+        if (popped) {
+            return null;
+        } else {
+            const str = try cc.globals.getString(prism.Prism.unwrapString(node));
+            return try cc.pushLoadString(out, str);
+        }
+    }
+
     fn compileLocalVariableReadNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t, _: ?*Var, _: bool) !*Var {
-        const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        const lvar_name = try cc.globals.getString(cc.stringFromId(node.*.name));
         return try cc.scope.?.getLocalName(lvar_name);
     }
 
     fn compileLocalVariableOperatorWriteNode(cc: *Compiler, node: *const c.pm_local_variable_operator_write_node_t, _: ?*Var, _: bool) !*ir.Variable {
-        const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        const lvar_name = try cc.globals.getString(cc.stringFromId(node.*.name));
         const recv = try cc.scope.?.getLocalName(lvar_name);
 
         const op = cc.stringFromId(node.*.binary_operator);
-        var params = std.ArrayList(*ir.Variable).init(cc.allocator);
-        try params.append((try cc.compileNode(node.*.value, null, false)).?);
+        var params: std.ArrayList(*ir.Variable) = .empty;
+        try params.append(cc.allocator, (try cc.compileNode(node.*.value, null, false)).?);
 
         if (op.len == 1) {
             switch (op[0]) {
@@ -301,7 +309,7 @@ pub const Compiler = struct {
     }
 
     fn compileLocalVariableWriteNode(cc: *Compiler, node: *const c.pm_local_variable_write_node_t, _: ?*Var, _: bool) !*ir.Variable {
-        const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        const lvar_name = try cc.globals.getString(cc.stringFromId(node.*.name));
         const name = try cc.scope.?.getLocalName(lvar_name);
         const out = try cc.compileNode(node.*.value, name, false);
         if (out != name) {
@@ -333,7 +341,7 @@ pub const Compiler = struct {
     }
 
     fn compileRequiredParameterNode(cc: *Compiler, node: *const c.pm_required_parameter_node, _: ?*Var, _: bool) !*ir.Variable {
-        const lvar_name = try cc.vm.getString(cc.stringFromId(node.*.name));
+        const lvar_name = try cc.globals.getString(cc.stringFromId(node.*.name));
         return try cc.scope.?.getLocalName(lvar_name);
     }
 
@@ -467,6 +475,10 @@ pub const Compiler = struct {
         return try self.scope.?.pushLoadi(out, val);
     }
 
+    fn pushLoadString(self: *Compiler, out: ?*Var, val: []const u8) !*ir.Variable {
+        return try self.scope.?.pushLoadString(out, val);
+    }
+
     fn pushLoadNil(self: *Compiler, out: ?*Var) !*ir.Variable {
         return try self.scope.?.pushLoadNil(out);
     }
@@ -489,18 +501,18 @@ pub const Compiler = struct {
     }
 };
 
-pub fn init(allocator: std.mem.Allocator, m: *vm.VM, parser: *prism.Prism) !*Compiler {
+pub fn init(allocator: std.mem.Allocator, m: *Globals, parser: *prism.Prism) !*Compiler {
     const cc = try allocator.create(Compiler);
     cc.* = Compiler{
         .parser = @ptrCast(parser.parser),
-        .vm = m,
+        .globals = m,
         .allocator = allocator,
         .scope = null,
     };
     return cc;
 }
 
-pub fn compileString(allocator: std.mem.Allocator, machine: *vm.VM, code: []const u8) !*Scope {
+pub fn compileString(allocator: std.mem.Allocator, globals: *Globals, code: []const u8) !*Scope {
     const parser = try prism.Prism.newParserCtx(allocator);
     defer parser.deinit();
     parser.init(code, code.len, null);
@@ -508,7 +520,7 @@ pub fn compileString(allocator: std.mem.Allocator, machine: *vm.VM, code: []cons
     defer parser.nodeDestroy(root);
 
     var scope_node = try prism.pmNewScopeNode(root);
-    const cc = try init(allocator, machine, parser);
+    const cc = try init(allocator, globals, parser);
     defer cc.deinit(allocator);
     return try cc.compile(&scope_node);
 }
@@ -516,11 +528,10 @@ pub fn compileString(allocator: std.mem.Allocator, machine: *vm.VM, code: []cons
 test "compile math" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "5 + 7");
+    const scope = try compileString(allocator, globals, "5 + 7");
     defer scope.deinit();
 
     try std.testing.expectEqual(null, scope.parent);
@@ -536,11 +547,10 @@ fn expectInstructionType(expected: ir.InstructionName, actual: ir.InstructionNam
 test "compile local set" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "foo = 5; foo");
+    const scope = try compileString(allocator, globals, "foo = 5; foo");
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
@@ -554,11 +564,10 @@ test "compile local set" {
 test "compile local get w/ return" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "foo = 5; return foo");
+    const scope = try compileString(allocator, globals, "foo = 5; return foo");
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
@@ -585,11 +594,10 @@ test "pushing instruction adds value" {
 test "compile local get w/ nil return" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "foo = 5; return");
+    const scope = try compileString(allocator, globals, "foo = 5; return");
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
@@ -612,11 +620,10 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 test "compile ternary statement" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "5 < 7 ? 123 : 456");
+    const scope = try compileString(allocator, globals, "5 < 7 ? 123 : 456");
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
@@ -641,11 +648,10 @@ test "compile ternary statement" {
 test "compile def method" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "def foo; end");
+    const scope = try compileString(allocator, globals, "def foo; end");
     defer scope.deinit();
 
     const scopes = try scope.childScopes(allocator);
@@ -660,11 +666,10 @@ test "compile def method" {
 test "compile call no params" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "foo");
+    const scope = try compileString(allocator, globals, "foo");
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
@@ -680,11 +685,10 @@ test "compile call no params" {
 test "compile def method 2 params" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "def foo(a, b); end");
+    const scope = try compileString(allocator, globals, "def foo(a, b); end");
     defer scope.deinit();
 
     const scopes = try scope.childScopes(allocator);
@@ -699,11 +703,10 @@ test "compile def method 2 params" {
 test "compile def method 2 params 3 locals" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "def foo(a, b); c = 123; d = a; e = d + b; end");
+    const scope = try compileString(allocator, globals, "def foo(a, b); c = 123; d = a; e = d + b; end");
     defer scope.deinit();
 
     const scopes = try scope.childScopes(allocator);
@@ -718,11 +721,10 @@ test "compile def method 2 params 3 locals" {
 test "method returns param" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "def foo(a); a; end");
+    const scope = try compileString(allocator, globals, "def foo(a); a; end");
     defer scope.deinit();
 
     const scopes = try scope.childScopes(allocator);
@@ -742,11 +744,10 @@ test "method returns param" {
 test "always true ternary" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "6 ? 7 : 8");
+    const scope = try compileString(allocator, globals, "6 ? 7 : 8");
     defer scope.deinit();
 
     try std.testing.expectEqual(4, scope.insns.len());
@@ -763,11 +764,10 @@ test "always true ternary" {
 test "always false ternary" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "false ? 7 : 8");
+    const scope = try compileString(allocator, globals, "false ? 7 : 8");
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
@@ -783,11 +783,10 @@ test "always false ternary" {
 test "always nil ternary" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "nil ? 7 : 8");
+    const scope = try compileString(allocator, globals, "nil ? 7 : 8");
     defer scope.deinit();
 
     try std.testing.expectEqual(4, scope.insns.len());
@@ -804,11 +803,10 @@ test "always nil ternary" {
 test "local ternary" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "def foo(x); x ? 7 : 8; end");
+    const scope = try compileString(allocator, globals, "def foo(x); x ? 7 : 8; end");
     defer scope.deinit();
 
     const scopes = try scope.childScopes(allocator);
@@ -837,11 +835,10 @@ test "local ternary" {
 test "popped if body" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "def foo(x); x ? 7 : 8; x; end");
+    const scope = try compileString(allocator, globals, "def foo(x); x ? 7 : 8; x; end");
     defer scope.deinit();
 
     const scopes = try scope.childScopes(allocator);
@@ -864,11 +861,10 @@ test "popped if body" {
 test "simple function" {
     const mem = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(mem);
-    defer machine.deinit(mem);
+    const globals = try Globals.init(mem);
+    defer globals.deinit(mem);
 
-    const scope = try compileString(mem, machine, "def foo(x); x; end");
+    const scope = try compileString(mem, globals, "def foo(x); x; end");
     defer scope.deinit();
 
     const scopes = try scope.childScopes(mem);
@@ -888,11 +884,10 @@ test "simple function" {
 test "while loop" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "def foo(x); while x; puts x; end; end");
+    const scope = try compileString(allocator, globals, "def foo(x); while x; puts x; end; end");
     defer scope.deinit();
 
     const scopes = try scope.childScopes(allocator);
@@ -920,11 +915,10 @@ test "while loop" {
 test "empty while loop" {
     const allocator = std.testing.allocator;
 
-    // Create a new VM
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "def foo; while true; end; end");
+    const scope = try compileString(allocator, globals, "def foo; while true; end; end");
     defer scope.deinit();
 
     const scopes = try scope.childScopes(allocator);
@@ -945,10 +939,10 @@ test "empty while loop" {
 test "+=" {
     const allocator = std.testing.allocator;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "x = 1; x += 1");
+    const scope = try compileString(allocator, globals, "x = 1; x += 1");
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{
@@ -967,10 +961,10 @@ test "+=" {
 test "local variable write" {
     const allocator = std.testing.allocator;
 
-    const machine = try vm.init(allocator);
-    defer machine.deinit(allocator);
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
 
-    const scope = try compileString(allocator, machine, "x = 1; a = x");
+    const scope = try compileString(allocator, globals, "x = 1; a = x");
     defer scope.deinit();
 
     try expectInstructionList(&[_]ir.InstructionName{

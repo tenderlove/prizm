@@ -1,7 +1,5 @@
 const std = @import("std");
-const c = @cImport({
-    @cInclude("prism.h");
-});
+const c = @import("prism_c");
 const Allocator = std.mem.Allocator;
 
 pub const pm_scope_node_t = extern struct {
@@ -500,6 +498,10 @@ pub const Prism = struct {
 
     pub fn nodeDestroy(self: *Prism, node: *c.pm_node_t) void {
         c.pm_node_destroy(self.parser, node);
+    }
+
+    pub fn unwrapString(node: *const c.pm_string_node_t) []const u8 {
+        return c.pm_string_source(&node.unescaped)[0..(c.pm_string_length(&node.unescaped))];
     }
 };
 

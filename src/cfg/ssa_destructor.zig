@@ -32,13 +32,13 @@ pub const SSADestructor = struct {
         const self = try mem.create(SSADestructor);
         self.* = SSADestructor{
             .mem = mem,
-            .phi_copies = ParallelCopyList.init(mem),
+            .phi_copies = .empty,
         };
         return self;
     }
 
     pub fn deinit(self: *SSADestructor) void {
-        self.phi_copies.deinit();
+        self.phi_copies.deinit(self.mem);
         self.mem.destroy(self);
     }
 
@@ -75,7 +75,7 @@ pub const SSADestructor = struct {
                             try predecessor_copies.append(.{ .source_block = bb, .dest_block = cfg.blocks[param.data.redef.defblock.name], .output = prime_in, .input = param });
 
                             const def_block = param.getDefinitionBlock();
-                            try self.phi_copies.append(.{ .source_block = bb, .dest_block = def_block, .output = prime_out, .input = prime_in });
+                            try self.phi_copies.append(self.mem, .{ .source_block = bb, .dest_block = def_block, .output = prime_out, .input = prime_in });
                         }
 
                         try isolation_copies.append(.{

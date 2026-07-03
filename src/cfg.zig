@@ -62,15 +62,15 @@ pub const CFG = struct {
         seen: std.AutoHashMap(u64, *BasicBlock),
         work: std.ArrayList(*BasicBlock),
 
-        pub fn next(self: *DepthFirstIterator) !?*BasicBlock {
+        pub fn next(self: *DepthFirstIterator, alloc: std.mem.Allocator) !?*BasicBlock {
             while (self.work.pop()) |bb| {
                 if (!self.seen.contains(bb.name)) {
                     try self.seen.put(bb.name, bb);
                     if (bb.jump_dest) |bb2| {
-                        try self.work.append(bb2);
+                        try self.work.append(alloc, bb2);
                     }
                     if (bb.fall_through_dest) |bb1| {
-                        try self.work.append(bb1);
+                        try self.work.append(alloc, bb1);
                     }
                     return bb;
                 }
@@ -79,15 +79,15 @@ pub const CFG = struct {
             return null;
         }
 
-        pub fn deinit(self: *DepthFirstIterator) void {
-            self.work.deinit();
+        pub fn deinit(self: *DepthFirstIterator, alloc: std.mem.Allocator) void {
+            self.work.deinit(alloc);
             self.seen.deinit();
         }
     };
 
-    pub fn depthFirstIterator(self: *CFG) !DepthFirstIterator {
-        var worklist = std.ArrayList(*BasicBlock).init(self.mem);
-        try worklist.append(self.head);
+    pub fn depthFirstIterator(self: *CFG, alloc: std.mem.Allocator) !DepthFirstIterator {
+        var worklist: std.ArrayList(*BasicBlock) = .empty;
+        try worklist.append(alloc, self.head);
 
         return .{
             .seen = std.AutoHashMap(u64, *BasicBlock).init(self.mem),
@@ -245,34 +245,34 @@ pub const CFG = struct {
         }
     }
 
-    pub fn sweepUnreachableBlocks(mem: std.mem.Allocator, head: *BasicBlock, blocks: std.ArrayList(*BasicBlock)) ![]const *BasicBlock {
+    pub fn sweepUnreachableBlocks(alloc: std.mem.Allocator, head: *BasicBlock, blocks: std.ArrayList(*BasicBlock)) ![]const *BasicBlock {
         for (blocks.items) |block| {
             block.reachable = false;
         }
 
-        var worklist = std.ArrayList(*BasicBlock).init(mem);
-        defer worklist.deinit();
-        try worklist.append(head);
+        var worklist: std.ArrayList(*BasicBlock) = .empty;
+        defer worklist.deinit(alloc);
+        try worklist.append(alloc, head);
 
         var iter: DepthFirstIterator = .{
-            .seen = std.AutoHashMap(u64, *BasicBlock).init(mem),
+            .seen = std.AutoHashMap(u64, *BasicBlock).init(alloc),
             .work = worklist,
         };
         defer iter.seen.deinit();
 
-        while (try iter.next()) |bb| {
+        while (try iter.next(alloc)) |bb| {
             bb.reachable = true;
         }
 
-        var live_blocks = std.ArrayList(*BasicBlock).init(mem);
-        defer live_blocks.deinit();
+        var live_blocks: std.ArrayList(*BasicBlock) = .empty;
+        defer live_blocks.deinit(alloc);
 
         for (blocks.items) |block| {
             if (block.reachable) {
-                try live_blocks.append(block);
+                try live_blocks.append(alloc, block);
             }
         }
-        return try live_blocks.toOwnedSlice();
+        return try live_blocks.toOwnedSlice(alloc);
     }
 
     // Analyze the CFG.
@@ -685,9 +685,12 @@ pub const CFG = struct {
     }
 
     pub fn deinit(self: *CFG) void {
+        self.ssa_destructor.deinit();
+        for (self.blocks) |blk| {
+            blk.deinit(self.mem);
+        }
         self.mem.free(self.blocks);
         self.arena.deinit();
-        self.ssa_destructor.deinit();
         self.mem.destroy(self);
     }
 
@@ -773,7 +776,7 @@ pub const BasicBlock = struct {
             .livein_set = try BitMap.initEmpty(alloc, 0),
             .dom = try BitMap.initEmpty(alloc, 0),
             .df = try BitMap.initEmpty(alloc, 0),
-            .predecessors = std.ArrayList(*BasicBlock).init(alloc),
+            .predecessors = .empty,
         };
 
         return block;
@@ -1150,8 +1153,8 @@ pub const BasicBlock = struct {
         return self.finish.data.jumpTarget();
     }
 
-    fn addPredecessor(self: *BasicBlock, predecessor: *BasicBlock) !void {
-        try self.predecessors.append(predecessor);
+    fn addPredecessor(self: *BasicBlock, alloc: std.mem.Allocator, predecessor: *BasicBlock) !void {
+        try self.predecessors.append(alloc, predecessor);
     }
 
     fn setJumpDest(self: *BasicBlock, child: *BasicBlock) void {
@@ -1180,6 +1183,11 @@ pub const BasicBlock = struct {
 
         return uninit;
     }
+
+    pub fn deinit(self: *BasicBlock, alloc: std.mem.Allocator) void {
+        self.predecessors.deinit(alloc);
+        alloc.destroy(self);
+    }
 };
 
 pub const CompileError = error{
@@ -1198,7 +1206,7 @@ const CFGBuilder = struct {
         return block;
     }
 
-    fn build(self: *CFGBuilder, allocator: std.mem.Allocator, scope: *Scope) !*CFG {
+    fn build(self: *CFGBuilder, alloc: std.mem.Allocator, scope: *Scope) !*CFG {
         const insns = scope.insns;
         var node = insns.first;
 
@@ -1207,28 +1215,26 @@ const CFGBuilder = struct {
             return CompileError.EmptyInstructionSequence;
         }
 
-        var arena = std.heap.ArenaAllocator.init(allocator);
+        var wants_label: std.ArrayList(*BasicBlock) = .empty;
+        defer wants_label.deinit(alloc);
 
-        var wants_label = std.ArrayList(*BasicBlock).init(allocator);
-        defer wants_label.deinit();
-
-        var all_blocks = std.ArrayList(*BasicBlock).init(allocator);
-        defer all_blocks.deinit();
+        var all_blocks: std.ArrayList(*BasicBlock) = .empty;
+        defer all_blocks.deinit(alloc);
 
         var last_block: ?*BasicBlock = null;
         var head: ?*BasicBlock = null;
 
-        var label_to_block_lut: []?*BasicBlock = try allocator.alloc(?*BasicBlock, scope.label_id);
+        var label_to_block_lut: []?*BasicBlock = try alloc.alloc(?*BasicBlock, scope.label_id);
         @memset(label_to_block_lut, null);
-        defer allocator.free(label_to_block_lut);
+        defer alloc.free(label_to_block_lut);
 
         var entry = true;
 
         // For all of our instructions
         while (node) |insn| {
             // Create a new block
-            const current_block = try self.makeBlock(arena.allocator(), scope, @ptrCast(insn), @ptrCast(insn), entry);
-            try all_blocks.append(current_block);
+            const current_block = try self.makeBlock(alloc, scope, @ptrCast(insn), @ptrCast(insn), entry);
+            try all_blocks.append(alloc, current_block);
             entry = false;
 
             // Scan through following instructions until we find an instruction
@@ -1263,7 +1269,7 @@ const CFGBuilder = struct {
             } else {
                 if (last_block.?.fallsThrough()) {
                     last_block.?.setFallThroughDest(current_block);
-                    try current_block.addPredecessor(last_block.?);
+                    try current_block.addPredecessor(alloc, last_block.?);
                 }
             }
 
@@ -1277,7 +1283,7 @@ const CFGBuilder = struct {
             // If this block jumps to a label, register it so that we can link
             // it to the block with the label later.
             if (current_block.hasJumpTarget()) {
-                try wants_label.append(current_block);
+                try wants_label.append(alloc, current_block);
             }
 
             last_block = current_block;
@@ -1287,12 +1293,13 @@ const CFGBuilder = struct {
             const dest_label = want_label.jumpTarget();
             const target = label_to_block_lut[dest_label.id].?;
             want_label.setJumpDest(target);
-            try target.addPredecessor(want_label);
+            try target.addPredecessor(alloc, want_label);
         }
 
-        const live_blocks = try CFG.sweepUnreachableBlocks(allocator, head.?, all_blocks);
+        const live_blocks = try CFG.sweepUnreachableBlocks(alloc, head.?, all_blocks);
 
-        const cfg = try CFG.init(allocator, arena, scope, head.?, live_blocks);
+        const arena = std.heap.ArenaAllocator.init(alloc);
+        const cfg = try CFG.init(alloc, arena, scope, head.?, live_blocks);
 
         // TODO: We could calculate the killed set and the upward exposed set
         // while building the basic blocks, rather than here.  But then we
