@@ -3,14 +3,12 @@ const prism = @import("prism.zig");
 const compiler = @import("compiler.zig");
 const g = @import("globals.zig");
 const cfg_z = @import("cfg.zig");
-const IonGraph = @import("iongraph.zig").IonGraph;
+const IonGraph = @import("printers/iongraph.zig").IonGraph;
+const ascii_printer = @import("printers/ascii.zig");
 const CFG = cfg_z.CFG;
 const Scope = @import("scope.zig").Scope;
 const Allocator = std.mem.Allocator;
 const clap = @import("clap");
-const printer = @import("printer.zig");
-const RegisterAllocator = @import("register_allocator.zig").RegisterAllocator;
-const RegisterMapping = @import("register_allocator.zig").RegisterMapping;
 
 const SubCommands = enum {
     run,
@@ -126,12 +124,7 @@ fn runCompile(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterat
         const w = &fw.interface;
         switch (format) {
             .iongraph => try IonGraph.print(cfg, gpa, w),
-            .ascii => {
-                // TODO: printer.zig still uses the pre-migration
-                // std.fs.File.Writer API. Wire this up once printer.Output
-                // is migrated to std.Io.
-                try w.writeAll("ascii CFG output not yet implemented\n");
-            },
+            .ascii => try ascii_printer.print(cfg, w),
         }
         try w.flush();
     }

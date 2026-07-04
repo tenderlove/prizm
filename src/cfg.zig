@@ -5,15 +5,12 @@ const prism = @import("prism.zig");
 const compiler = @import("compiler.zig");
 const Scope = @import("scope.zig").Scope;
 const Globals = @import("globals.zig").Globals;
-const printer = @import("printer.zig");
 const BasicBlock = @import("basic_block.zig").BasicBlock;
 const assert = @import("std").debug.assert;
 const BitMap = std.DynamicBitSetUnmanaged;
 const bitmatrix = @import("utils/bitmatrix.zig");
 const BitMatrix = bitmatrix.BitMatrix;
 const SSADestructor = @import("cfg/ssa_destructor.zig").SSADestructor;
-const RegisterAllocator = @import("register_allocator.zig").RegisterAllocator;
-const RegisterMapping = @import("register_allocator.zig").RegisterMapping;
 
 pub const CFG = struct {
     pub const State = enum {
@@ -21,7 +18,6 @@ pub const CFG = struct {
         analyzed,
         phi_placed,
         renamed,
-        registers_allocated,
         phi_isolated,
         phi_copies_inserted,
         copy_groups_serialized,
@@ -522,12 +518,6 @@ pub const CFG = struct {
         self.state = .renamed;
     }
 
-    fn allocateRegisters(self: *CFG) !void {
-        const ra = try RegisterAllocator.allocateRegisters(self.mem, self);
-        defer ra.deinit();
-        self.state = .registers_allocated;
-    }
-
     pub fn isolatePhi(self: *CFG) !void {
         try self.ssa_destructor.isolatePhi(self);
         self.state = .phi_isolated;
@@ -659,9 +649,6 @@ pub const CFG = struct {
                 try self.rename();
             },
             .renamed => {
-                try self.allocateRegisters();
-            },
-            .registers_allocated => {
                 try self.isolatePhi();
             },
             .phi_isolated => {
@@ -881,7 +868,6 @@ test "upward exposed bits get set" {
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
-    //printer.printCFG(allocator, method_scope, std.debug);
 
     const bb = (try findBBWithInsn(methodcfg, ir.InstructionName.call)).?;
     // One for x
