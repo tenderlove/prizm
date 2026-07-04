@@ -199,9 +199,8 @@ pub const InstructionName = enum {
     call,
     define_method,
     getparam,
+    cond,
     jump,
-    jumpif,
-    jumpunless,
     leave,
     loadi,
     loadstr,
@@ -210,9 +209,9 @@ pub const InstructionName = enum {
     mov,
     phi,
     pmov, // parallel move group
-    putlabel,
     setlocal,
     setparam,
+    tst,
 };
 
 pub const Instruction = union(InstructionName) {
@@ -255,29 +254,21 @@ pub const Instruction = union(InstructionName) {
         }
     },
 
-    jump: struct {
+    cond: struct {
         const Self = @This();
-        label: Label,
+        condition: *Variable,
+        truthy: *BasicBlock,
+        falsy: *BasicBlock,
         pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
             unreachable;
         }
     },
 
-    jumpif: struct {
+    jump: struct {
         const Self = @This();
-        in: *Variable,
-        label: Label,
-        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
-            if (self.in == old) self.in = new;
-        }
-    },
-
-    jumpunless: struct {
-        const Self = @This();
-        in: *Variable,
-        label: Label,
-        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
-            if (self.in == old) self.in = new;
+        target: *BasicBlock,
+        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
+            unreachable;
         }
     },
 
@@ -357,14 +348,6 @@ pub const Instruction = union(InstructionName) {
         }
     },
 
-    putlabel: struct {
-        const Self = @This();
-        name: Label,
-        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
-            unreachable;
-        }
-    },
-
     setlocal: struct {
         const Self = @This();
         name: *Variable,
@@ -379,6 +362,15 @@ pub const Instruction = union(InstructionName) {
         out: *Variable,
         in: *Variable,
         index: usize,
+        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
+            if (self.in == old) self.in = new;
+        }
+    },
+
+    tst: struct {
+        const Self = @This();
+        out: *Variable,
+        in: *Variable,
         pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
             if (self.in == old) self.in = new;
         }
@@ -515,14 +507,7 @@ pub const Instruction = union(InstructionName) {
 
     pub fn isJump(self: Instruction) bool {
         return switch (self) {
-            .jump, .jumpunless, .jumpif => true,
-            else => false,
-        };
-    }
-
-    pub fn isLabel(self: Instruction) bool {
-        return switch (self) {
-            .putlabel => true,
+            .jump, .cond => true,
             else => false,
         };
     }
@@ -590,7 +575,8 @@ pub const Instruction = union(InstructionName) {
         switch (self.*) {
             .call => |*x| x.params.deinit(alloc),
             .phi => |*x| x.params.deinit(alloc),
-            .define_method => |*x| x.func.deinit(),
+            // .define_method carries a *Scope reference; ownership lives in
+            // the parent Scope's `children` list, which handles its deinit.
             else => {},
         }
     }

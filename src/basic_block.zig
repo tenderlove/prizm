@@ -20,8 +20,6 @@ pub const BasicBlock = struct {
     livein_set: BitMap,
     dom: BitMap,
     df: BitMap,
-    fall_through_dest: ?*BasicBlock = null,
-    jump_dest: ?*BasicBlock = null,
     idom: ?u64 = null,
 
     pub const DepthFirstIterator = struct {
@@ -32,11 +30,9 @@ pub const BasicBlock = struct {
             while (self.work.pop()) |bb| {
                 if (!self.seen.contains(bb.name)) {
                     try self.seen.put(bb.name, bb);
-                    if (bb.jump_dest) |bb2| {
-                        try self.work.append(alloc, bb2);
-                    }
-                    if (bb.fall_through_dest) |bb1| {
-                        try self.work.append(alloc, bb1);
+                    for (bb.successors()) |maybe| {
+                        const succ = maybe orelse continue;
+                        try self.work.append(alloc, succ);
                     }
                     return bb;
                 }
@@ -118,6 +114,16 @@ pub const BasicBlock = struct {
     pub fn finishInsn(self: *BasicBlock) ?*ir.InstructionListNode {
         const node = self.insns.last orelse return null;
         return @fieldParentPtr("node", node);
+    }
+
+    pub fn successors(self: *BasicBlock) [2]?*BasicBlock {
+        const terminator = self.finishInsn() orelse @panic("successors() on empty block");
+        return switch (terminator.data) {
+            .cond => |c| .{ c.truthy, c.falsy },
+            .jump => |j| .{ j.target, null },
+            .leave => .{ null, null },
+            else => @panic("last instruction is not a terminator"),
+        };
     }
 
     pub fn replace(self: *BasicBlock, old: *ir.InstructionListNode, new: *ir.InstructionListNode) void {
@@ -218,51 +224,24 @@ pub const BasicBlock = struct {
     // Update the LiveOut set.  If the set changes, returns true
     pub fn updateLiveOut(self: *BasicBlock, alloc: std.mem.Allocator) !bool {
         // Engineering a compiler, 3rd ed, 8.6, "Defining the Data-Flow Problem" (page 419)
-        // Also Figure 8.15
-        if (self.fall_through_dest) |child1| {
-            var newlo = try self.childLo(child1, alloc);
-            defer newlo.deinit(alloc);
+        // Figure 8.15:
+        //   LiveOut(B) = union over successors S of
+        //     UEVar(S) ∪ (LiveOut(S) − VarKill(S))
 
-            if (self.jump_dest) |child2| {
-                var newlo2 = try self.childLo(child2, alloc);
-                defer newlo2.deinit(alloc);
+        var new_liveout = try BitMap.initEmpty(alloc, self.liveout_set.bit_length);
+        defer new_liveout.deinit(alloc);
 
-                var bothlo = try newlo.clone(alloc);
-                bothlo.setUnion(newlo2);
-                defer bothlo.deinit(alloc);
-
-                if (self.liveout_set.eql(bothlo)) {
-                    return false;
-                } else {
-                    self.liveout_set.unsetAll();
-                    self.liveout_set.setUnion(bothlo);
-                    return true;
-                }
-            } else {
-                if (self.liveout_set.eql(newlo)) {
-                    return false;
-                } else {
-                    self.liveout_set.unsetAll();
-                    self.liveout_set.setUnion(newlo);
-                    return true;
-                }
-            }
-        } else {
-            if (self.jump_dest) |child2| {
-                var newlo = try self.childLo(child2, alloc);
-                defer newlo.deinit(alloc);
-
-                if (self.liveout_set.eql(newlo)) {
-                    return false;
-                } else {
-                    self.liveout_set.unsetAll();
-                    self.liveout_set.setUnion(newlo);
-                    return true;
-                }
-            } else {
-                return false;
-            }
+        for (self.successors()) |maybe| {
+            const child = maybe orelse continue;
+            var contribution = try self.childLo(child, alloc);
+            defer contribution.deinit(alloc);
+            new_liveout.setUnion(contribution);
         }
+
+        if (self.liveout_set.eql(new_liveout)) return false;
+        self.liveout_set.unsetAll();
+        self.liveout_set.setUnion(new_liveout);
+        return true;
     }
 
     pub const IteratorOptions = struct {
@@ -397,24 +376,8 @@ pub const BasicBlock = struct {
         return self.finish.data.jumpTarget();
     }
 
-    fn addPredecessor(self: *BasicBlock, alloc: std.mem.Allocator, predecessor: *BasicBlock) !void {
+    pub fn addPredecessor(self: *BasicBlock, alloc: std.mem.Allocator, predecessor: *BasicBlock) !void {
         try self.predecessors.append(alloc, predecessor);
-    }
-
-    fn setJumpDest(self: *BasicBlock, child: *BasicBlock) void {
-        if (self.jump_dest) |_| {
-            unreachable;
-        } else {
-            self.jump_dest = child;
-        }
-    }
-
-    fn setFallThroughDest(self: *BasicBlock, child: *BasicBlock) void {
-        if (self.fall_through_dest) |_| {
-            unreachable;
-        } else {
-            self.fall_through_dest = child;
-        }
     }
 
     pub fn uninitializedSet(self: *BasicBlock, mem: std.mem.Allocator) !BitMap {
@@ -436,7 +399,14 @@ pub const BasicBlock = struct {
     }
 
     pub fn pushVoidInsn(self: *BasicBlock, mem: std.mem.Allocator, insn: ir.Instruction) !void {
-        _ = try self.pushInsn(mem, insn);
+        switch (insn) {
+            .jump, .cond, .mov, .setlocal => {},
+            else => unreachable,
+        }
+
+        const node = try mem.create(ir.InstructionListNode);
+        node.* = .{ .node = .{}, .data = insn };
+        self.insns.append(&node.node);
     }
 
     pub fn pushInsn(self: *BasicBlock, mem: std.mem.Allocator, insn: ir.Instruction) !*Var {
@@ -445,10 +415,8 @@ pub const BasicBlock = struct {
         self.insns.append(&node.node);
 
         return switch (insn) {
-            .putlabel => unreachable,
             .jump => unreachable,
-            .jumpif => unreachable,
-            .jumpunless => unreachable,
+            .cond => unreachable,
             .setlocal => unreachable,
             inline else => |payload| payload.out,
         };
@@ -468,7 +436,6 @@ pub const BasicBlock = struct {
     }
 
     pub fn deinit(self: *BasicBlock, alloc: std.mem.Allocator) void {
-        self.predecessors.deinit(alloc);
         var it = self.insns.first;
         while (it) |insn| {
             it = insn.next;

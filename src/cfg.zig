@@ -696,13 +696,6 @@ fn buildCFG(mem: std.mem.Allocator, scope: *Scope) !*CFG {
     return try scope.cfg(mem);
 }
 
-test "empty basic block" {
-    const scope = try Scope.init(std.testing.allocator, 0, "empty", null);
-    defer scope.deinit();
-
-    try std.testing.expectError(CompileError.EmptyInstructionSequence, buildCFG(std.testing.allocator, scope));
-}
-
 test "basic block one instruction" {
     const scope = try Scope.init(std.testing.allocator, 0, "empty", null);
     defer scope.deinit();
@@ -781,8 +774,8 @@ test "if statement should have 2 children blocks" {
         ir.Instruction.mov,
         ir.Instruction.jumpunless,
     }, block);
-    try std.testing.expect(block.fallsThrough());
     try std.testing.expectEqual(5, block.instructionCount());
+    try std.testing.expect(block.fallsThrough());
 
     var child = block.fall_through_dest.?;
     try expectInstructionList(&[_]ir.InstructionName{

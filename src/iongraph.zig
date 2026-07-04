@@ -98,7 +98,8 @@ pub const IonGraph = struct {
             const b = be.*;
             // Successor of a back-edge block is its header. Ours always has
             // exactly one successor, but be defensive.
-            const header = if (b.fall_through_dest) |s| s else b.jump_dest.?;
+            const succs = b.successors();
+            const header = succs[0] orelse succs[1].?;
 
             var body: BlockSet = .empty;
             defer body.deinit(a);
@@ -137,7 +138,7 @@ pub const IonGraph = struct {
     ) !void {
         try visited.put(a, block, {});
         try on_stack.put(a, block, {});
-        for ([_]?*BasicBlock{ block.fall_through_dest, block.jump_dest }) |maybe| {
+        for (block.successors()) |maybe| {
             const succ = maybe orelse continue;
             if (on_stack.contains(succ)) {
                 try info.backedges.put(a, block, {});
@@ -179,12 +180,15 @@ pub const IonGraph = struct {
         const preds = try a.alloc(u32, block.predecessors.items.len);
         for (block.predecessors.items, 0..) |p, i| preds[i] = @intCast(p.name);
 
-        // successors — fall-through first, then jump target. Convention
-        // matches how "true" arm is drawn as the jump edge in most viewers.
+        // successors — taken/jump target first, not-taken second. iongraph
+        // relies on positional order for edge labeling.
         var succ_buf: [2]u32 = undefined;
         var n_succ: usize = 0;
-        if (block.fall_through_dest) |s| { succ_buf[n_succ] = @intCast(s.name); n_succ += 1; }
-        if (block.jump_dest) |s|         { succ_buf[n_succ] = @intCast(s.name); n_succ += 1; }
+        for (block.successors()) |maybe| {
+            const s = maybe orelse continue;
+            succ_buf[n_succ] = @intCast(s.name);
+            n_succ += 1;
+        }
         const succs = try a.dupe(u32, succ_buf[0..n_succ]);
 
         // attributes — mark entry, loop headers, and back-edge blocks.

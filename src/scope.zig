@@ -110,11 +110,6 @@ pub const Scope = struct {
         return try self.addVar(try Var.initPhysicalRegister(self.arena.allocator(), self.nextVarId(), self.physical_register_id, register));
     }
 
-    pub fn newLabel(self: *Scope) ir.Label {
-        defer self.label_id += 1;
-        return .{ .id = self.label_id };
-    }
-
     fn makeInsn(self: *Scope, insn: ir.Instruction) !*ir.InstructionListNode {
         const node = try self.arena.allocator().create(ir.InstructionListNode);
         node.* = .{ .node = .{}, .data = insn };
@@ -165,20 +160,19 @@ pub const Scope = struct {
         } });
     }
 
-    pub fn pushJump(self: *Scope, label: ir.Label) !void {
-        try self.pushVoidInsn(.{ .jump = .{ .label = label } });
+    pub fn pushJump(self: *Scope, target: *BasicBlock) !void {
+        try self.pushVoidInsn(.{ .jump = .{ .target = target } });
+        try target.addPredecessor(self.allocator, self.current_block);
     }
 
-    pub fn pushJumpIf(self: *Scope, in: *Var, label: ir.Label) !void {
-        try self.pushVoidInsn(.{ .jumpif = .{ .in = in, .label = label } });
+    pub fn pushCond(self: *Scope, cond: *Var, truthy: *BasicBlock, falsy: *BasicBlock) !void {
+        try self.pushVoidInsn(.{ .cond = .{ .condition = cond, .truthy = truthy, .falsy = falsy } });
+        try truthy.addPredecessor(self.allocator, self.current_block);
+        try falsy.addPredecessor(self.allocator, self.current_block);
     }
 
-    pub fn pushJumpUnless(self: *Scope, in: *Var, label: ir.Label) !void {
-        try self.pushVoidInsn(.{ .jumpunless = .{ .in = in, .label = label } });
-    }
-
-    pub fn pushLabel(self: *Scope, name: ir.Label) !void {
-        try self.pushVoidInsn(.{ .putlabel = .{ .name = name } });
+    pub fn pushTest(self: *Scope, in: *Var) !*Var {
+        return try self.pushInsn(.{ .tst = .{ .in = in, .out = try self.newTemp() } });
     }
 
     pub fn pushLeave(self: *Scope, in: *Var) !*Var {
@@ -219,6 +213,17 @@ pub const Scope = struct {
         return try self.pushVoidInsn(.{ .setlocal = .{ .name = name, .val = val } });
     }
 
+    pub fn newBlock(self: *Scope) !*BasicBlock {
+        defer self.block_name += 1;
+        const bb = try BasicBlock.initBlock(self.allocator, self.block_name, self, false);
+        try self.blocks.append(self.allocator, bb);
+        return bb;
+    }
+
+    pub fn setCurrentBlock(self: *Scope, block: *BasicBlock) void {
+        self.current_block = block;
+    }
+
     pub fn init(alloc: std.mem.Allocator, id: u32, name: []const u8, parent: ?*Scope) !*Scope {
         const scope = try alloc.create(Scope);
 
@@ -237,6 +242,10 @@ pub const Scope = struct {
             .current_block = entry_block,
             .arena = std.heap.ArenaAllocator.init(alloc),
         };
+
+        // Invariant: `self.blocks` owns every block including the entry.
+        // `Scope.deinit` frees each block from this list.
+        try scope.blocks.append(alloc, entry_block);
 
         scope.block_name += 1;
 
@@ -263,7 +272,14 @@ pub const Scope = struct {
     pub fn deinit(self: *Scope) void {
         self.locals.deinit(self.allocator);
         self.variables.deinit(self.allocator);
+        for (self.children.items) |scope| {
+            scope.deinit();
+        }
         self.children.deinit(self.allocator);
+        for (self.blocks.items) |block| {
+            block.deinit(self.allocator);
+        }
+        self.blocks.deinit(self.allocator);
         self.arena.deinit();
         self.allocator.destroy(self);
     }

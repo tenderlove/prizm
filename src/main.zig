@@ -61,17 +61,24 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
+const CfgFormat = enum { iongraph, ascii };
+
 fn runCompile(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help  Display this help and exit.
         \\--ir        Show the IR
-        \\--cfg       Show the CFG
+        \\--cfg <FORMAT>  Show the CFG in the given format (iongraph or ascii)
         \\<str>       Ruby file to compile
         \\
     );
 
+    const compile_parsers = .{
+        .str = clap.parsers.string,
+        .FORMAT = clap.parsers.enumeration(CfgFormat),
+    };
+
     var diag = clap.Diagnostic{};
-    var res = clap.parseEx(clap.Help, &params, clap.parsers.default, iter, .{
+    var res = clap.parseEx(clap.Help, &params, compile_parsers, iter, .{
         .diagnostic = &diag,
         .allocator = gpa
     }) catch |err| {
@@ -113,11 +120,19 @@ fn runCompile(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterat
     const cfg = try scope.cfg(gpa);
     defer cfg.deinit();
 
-    if (res.args.cfg != 0) {
+    if (res.args.cfg) |format| {
         var buf: [4096]u8 = undefined;
         var fw = std.Io.File.stdout().writer(io, &buf);
         const w = &fw.interface;
-        try IonGraph.print(cfg, gpa, w);
+        switch (format) {
+            .iongraph => try IonGraph.print(cfg, gpa, w),
+            .ascii => {
+                // TODO: printer.zig still uses the pre-migration
+                // std.fs.File.Writer API. Wire this up once printer.Output
+                // is migrated to std.Io.
+                try w.writeAll("ascii CFG output not yet implemented\n");
+            },
+        }
         try w.flush();
     }
 

@@ -3,7 +3,7 @@ const prism = @import("prism.zig");
 const Globals = @import("globals.zig").Globals;
 const ir = @import("ir.zig");
 const cfg = @import("cfg.zig");
-const BasicBlock = cfg.BasicBlock;
+const BasicBlock = @import("basic_block.zig").BasicBlock;
 const Var = ir.Variable;
 const Scope = @import("scope.zig").Scope;
 
@@ -190,70 +190,48 @@ pub const Compiler = struct {
     }
 
     fn compileIfNode(cc: *Compiler, node: *const c.pm_if_node_t, out: ?*Var, popped: bool) !?*ir.Variable {
-        const then_label = cc.newLabel();
-        // const else_label = cc.newLabel();
-        const end_label = cc.newLabel();
+        const predicate = try cc.compilePredicate(node.*.predicate, null, false);
 
-        // If predicate is false, jump to then label
-        const predicate = try cc.compilePredicate(node.*.predicate, then_label, JumpType.jump_unless, null, false);
+        // If someone cares about the return value (in other words,
+        // we're _not_ popped), but the output variable is null,
+        // then create a new temp and assign it.
+        const ret = if (!popped and out == null) try cc.newTemp() else out;
 
-        switch (predicate) {
-            .always_true => {
-                // Compile the true branch and get a return value
-                return try cc.compileNode(@ptrCast(node.*.statements), out, popped);
-            },
-            .always_false => {
-                // Compile the true branch and get a return value
-                return try cc.compileNode(@ptrCast(node.*.subsequent), out, popped);
-            },
-            .unknown => {
-                // If someone cares about the return value (in other words,
-                // we're _not_ popped), but the output variable is null,
-                // then create a new temp and assign it.
-                const ret = if (!popped and out == null) try cc.newTemp() else out;
+        const true_block = try cc.newBlock();
+        const false_block = try cc.newBlock();
+        const join_block = try cc.newBlock();
 
-                // Compile the true branch and get a return value
-                _ = try cc.compileNode(@ptrCast(node.*.statements), ret, popped);
+        try cc.pushCond(predicate, true_block, false_block);
 
-                // Jump to the end of the if statement
-                try cc.pushJump(end_label);
+        cc.setCurrentBlock(true_block);
+        // Compile the true branch and get a return value
+        _ = try cc.compileNode(@ptrCast(node.*.statements), ret, popped);
+        try cc.pushJump(join_block);
 
-                // Push the then label so the false case has a place to jump
-                try cc.pushLabel(then_label);
 
-                _ = try cc.compileNode(@ptrCast(node.*.subsequent), ret, popped);
+        cc.setCurrentBlock(false_block);
+        _ = try cc.compileNode(@ptrCast(node.*.subsequent), ret, popped);
+        try cc.pushJump(join_block);
 
-                try cc.pushLabel(end_label);
+        cc.setCurrentBlock(join_block);
 
-                return ret;
-            },
-        }
+        return ret;
     }
 
-    const PredicateType = enum {
-        always_true,
-        always_false,
-        unknown,
-    };
-
-    const JumpType = enum { jump_if, jump_unless };
-
-    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, label: ir.Label, jump_type: JumpType, out: ?*Var, popped: bool) !PredicateType {
+    fn compilePredicate(cc: *Compiler, node: *const c.pm_node_t, out: ?*Var, popped: bool) !*Var {
         while (true) {
             switch (node.*.type) {
                 c.PM_CALL_NODE, c.PM_LOCAL_VARIABLE_READ_NODE => {
                     const val = try cc.compileNode(node, out, popped);
-                    switch (jump_type) {
-                        .jump_if => try cc.pushJumpIf(val.?, label),
-                        .jump_unless => try cc.pushJumpUnless(val.?, label),
-                    }
-                    return PredicateType.unknown;
+                    return try cc.pushTest(val.?);
                 },
                 c.PM_INTEGER_NODE, c.PM_TRUE_NODE => {
-                    return PredicateType.always_true;
+                    const val = try cc.compileNode(node, out, popped);
+                    return try cc.pushTest(val.?);
                 },
                 c.PM_NIL_NODE, c.PM_FALSE_NODE => {
-                    return PredicateType.always_false;
+                    const val = try cc.compileNode(node, out, popped);
+                    return try cc.pushTest(val.?);
                 },
                 else => {
                     std.debug.print("unknown type {s}\n", .{c.pm_node_type_to_str(node.*.type)});
@@ -300,6 +278,7 @@ pub const Compiler = struct {
         if (op.len == 1) {
             switch (op[0]) {
                 '+' => _ = try cc.pushCall(recv, recv, op, params),
+                '-' => _ = try cc.pushCall(recv, recv, op, params),
                 else => return error.NotImplementedError,
             }
             return recv;
@@ -379,35 +358,46 @@ pub const Compiler = struct {
     }
 
     fn compileWhileNode(cc: *Compiler, node: *const c.pm_while_node_t, out: ?*Var, popped: bool) !?*ir.Variable {
-        const loop_entry = cc.newLabel();
-        try cc.pushLabel(loop_entry);
-
+        // Handle while loops with begin / end:
+        // begin
+        //   puts x
+        //   x -= 1
+        // end while x > 0
         if ((node.*.base.flags & c.PM_LOOP_FLAGS_BEGIN_MODIFIER) == c.PM_LOOP_FLAGS_BEGIN_MODIFIER) {
-            const ret = if (node.*.statements) |stmt|
-                try cc.compileNode(@ptrCast(stmt), null, popped)
-            else
-                try cc.pushLoadNil(null);
+            const body = try cc.newBlock();
+            try cc.pushJump(body);
+            cc.setCurrentBlock(body);
 
-            _ = try cc.compilePredicate(node.*.predicate, loop_entry, JumpType.jump_if, null, false);
-            return ret;
+            if (node.*.statements) |stmt| {
+                _ = try cc.compileNode(@ptrCast(stmt), null, popped);
+            }
+
+            const cmp = try cc.compilePredicate(node.*.predicate, null, false);
+            const exit = try cc.newBlock();
+            try cc.pushCond(cmp, body, exit);
+            cc.setCurrentBlock(exit);
+        } else { // Regular while loops
+            const header = try cc.newBlock();
+            const body = try cc.newBlock();
+            const exit = try cc.newBlock();
+
+            try cc.pushJump(header);
+            cc.setCurrentBlock(header);
+
+            // If predicate is false, jump to then label
+            const predicate = try cc.compilePredicate(node.*.predicate, null, false);
+
+            try cc.pushCond(predicate, body, exit);
+
+            // Compile the loop body
+            cc.setCurrentBlock(body);
+            if (node.*.statements) |stmt| {
+                _ = try cc.compileNode(@ptrCast(stmt), null, popped);
+            }
+            try cc.pushJump(header);
+
+            cc.setCurrentBlock(exit);
         }
-
-        const loop_end = cc.newLabel();
-
-        // If predicate is false, jump to then label
-        const predicate = try cc.compilePredicate(node.*.predicate, loop_end, JumpType.jump_unless, null, false);
-
-        switch (predicate) {
-            .always_false => {},
-            .always_true, .unknown => {
-                if (node.*.statements) |stmt| {
-                    _ = try cc.compileNode(@ptrCast(stmt), null, popped);
-                }
-            },
-        }
-
-        try cc.pushJump(loop_entry);
-        try cc.pushLabel(loop_end);
 
         if (!popped) {
             return try cc.pushLoadNil(out);
@@ -416,12 +406,12 @@ pub const Compiler = struct {
         }
     }
 
-    pub fn deinit(self: *Compiler, allocator: std.mem.Allocator) void {
-        allocator.destroy(self);
+    fn setCurrentBlock(self: *Compiler, block: *BasicBlock) void {
+        return self.scope.?.setCurrentBlock(block);
     }
 
-    fn newLabel(self: *Compiler) ir.Label {
-        return self.scope.?.newLabel();
+    pub fn deinit(self: *Compiler, allocator: std.mem.Allocator) void {
+        allocator.destroy(self);
     }
 
     fn newTemp(self: *Compiler) !*ir.Variable {
@@ -451,20 +441,20 @@ pub const Compiler = struct {
         return try self.scope.?.getLocalName("self");
     }
 
-    fn pushJump(self: *Compiler, label: ir.Label) !void {
-        try self.scope.?.pushJump(label);
+    fn newBlock(self: *Compiler) !*BasicBlock {
+        return try self.scope.?.newBlock();
     }
 
-    fn pushJumpIf(self: *Compiler, in: *ir.Variable, label: ir.Label) !void {
-        return try self.scope.?.pushJumpIf(in, label);
+    fn pushJump(self: *Compiler, target: *BasicBlock) !void {
+        try self.scope.?.pushJump(target);
     }
 
-    fn pushJumpUnless(self: *Compiler, in: *ir.Variable, label: ir.Label) !void {
-        return try self.scope.?.pushJumpUnless(in, label);
+    fn pushCond(self: *Compiler, cond: *Var, truthy: *BasicBlock, falsy: *BasicBlock) !void {
+        try self.scope.?.pushCond(cond, truthy, falsy);
     }
 
-    fn pushLabel(self: *Compiler, label: ir.Label) !void {
-        try self.scope.?.pushLabel(label);
+    fn pushTest(self: *Compiler, in: *Var) !*Var {
+        return try self.scope.?.pushTest(in);
     }
 
     fn pushLeave(self: *Compiler, in: *ir.Variable) !*ir.Variable {
