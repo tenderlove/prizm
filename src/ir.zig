@@ -4,194 +4,18 @@ const cfg = @import("cfg.zig");
 const Scope = @import("scope.zig").Scope;
 const BasicBlock = @import("basic_block.zig").BasicBlock;
 const BitMap = std.DynamicBitSetUnmanaged;
-const Insn = @import("ir.zig").Instruction;
+const Insn = @import("ir.zig").InstructionListNode;
 
 pub const InstructionList = std.DoublyLinkedList;
 
-pub const VariableType = enum {
-    local,
-    temp,
-    redef,
-    prime,
-    live_range,
-    physical_register,
-};
-
-pub const RegisterClass = enum {
-    parameter, // R0-R3 (for flexible parameter allocation)
-    caller_saved, // R0-R3
-    callee_saved, // R4-R7
-};
-
-pub const RegisterConstraint = union(enum) {
-    // Ordered from easiest to hardest to color (for allocation priority)
-    general_purpose, // Can use any available register (easiest)
-    register_class: RegisterClass, // Must use one from this class (medium)
-    specific_register: usize, // Must use this exact register (hardest)
-};
-
-pub const VariableData = union(VariableType) {
-    local: struct { id: usize, source_name: []const u8 },
-    temp: struct {
-        id: usize,
-        defblock: ?*BasicBlock = null,
-    },
-    redef: struct { id: usize, variant: usize, orig: *Variable, defblock: *BasicBlock },
-    prime: struct { id: usize, orig: *Variable },
-    live_range: struct {
-        id: usize,
-        variables: BitMap, // All variables in this live range
-        constraint: RegisterConstraint,
-        def: ?*Insn = null,
-        last_use: std.DoublyLinkedList,
-    },
-    physical_register: struct {
-        id: usize,
-        register: usize,
-    },
-};
-
-pub const Label = struct {
-    id: usize,
-};
-
 pub const Variable = struct {
     id: usize,
-    data: VariableData,
+    source_name: []const u8,
 
-    pub fn initLocal(alloc: std.mem.Allocator, id: usize, name: anytype, source_name: anytype) !*Variable {
+    pub fn initLocal(alloc: std.mem.Allocator, id: usize, source_name: anytype) !*Variable {
         const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .local = .{ .id = name, .source_name = source_name } } };
+        opnd.* = .{ .id = id, .source_name = source_name };
         return opnd;
-    }
-
-    pub fn initRedef(alloc: std.mem.Allocator, id: usize, local_id: usize, variant: usize, orig: *Variable, defblock: *BasicBlock) !*Variable {
-        const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .redef = .{ .id = local_id, .variant = variant, .orig = orig, .defblock = defblock } } };
-        return opnd;
-    }
-
-    pub fn initPrime(alloc: std.mem.Allocator, id: usize, local_id: usize, orig: *Variable) !*Variable {
-        const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .prime = .{ .id = local_id, .orig = orig } } };
-        return opnd;
-    }
-
-    pub fn initPhysicalRegister(alloc: std.mem.Allocator, id: usize, local_id: usize, register: usize) !*Variable {
-        const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .physical_register = .{ .id = local_id, .register = register } } };
-        return opnd;
-    }
-
-    pub fn initTemp(alloc: std.mem.Allocator, id: usize, local_id: anytype) !*Variable {
-        const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .data = .{ .temp = .{ .id = local_id } } };
-        return opnd;
-    }
-
-    pub fn initLiveRange(alloc: std.mem.Allocator, id: usize, local_id: usize, varcount: usize) !*Variable {
-        const opnd = try alloc.create(Variable);
-        // Default to general purpose register, set to more specific later
-        opnd.* = .{ .id = id, .data = .{ .live_range = .{ .id = local_id, .variables = try BitMap.initEmpty(alloc, varcount), .constraint = .general_purpose, .last_use = std.DoublyLinkedList{} } } };
-        return opnd;
-    }
-
-    pub fn number(self: Variable) usize {
-        return switch (self.data) {
-            .redef => unreachable,
-            .prime => unreachable,
-            inline else => |payload| payload.name,
-        };
-    }
-
-    pub fn setDefinition(self: *Variable, insn: *Insn) void {
-        return switch (self.data) {
-            .live_range => |*v| v.def = insn,
-            inline else => unreachable,
-        };
-    }
-
-    pub fn addUse(self: *Variable, alloc: std.mem.Allocator, insn: *Insn) !void {
-        return switch (self.data) {
-            .live_range => |*v| {
-                const use = try alloc.create(Use);
-                use.*.insn = insn;
-                v.last_use.append(&use.node);
-            },
-            inline else => unreachable,
-        };
-    }
-
-    pub fn addVariable(self: *Variable, id: usize) void {
-        return switch (self.data) {
-            .live_range => |*lr| lr.variables.set(id),
-            else => unreachable,
-        };
-    }
-
-    pub fn getVar(self: *Variable) *Variable {
-        return switch (self.data) {
-            .temp, .local => self,
-            .redef => |r| getVar(r.orig),
-            .prime => |p| getVar(p.orig),
-            .live_range => unreachable,
-            .physical_register => unreachable,
-        };
-    }
-
-    pub fn setSpecificRegister(self: *Variable, reg: usize) void {
-        switch (self.data) {
-            .live_range => |*lr| lr.constraint = .{ .specific_register = reg },
-            else => unreachable,
-        }
-    }
-
-    pub fn getGlobalId(self: Variable) usize {
-        return self.id;
-    }
-
-    pub fn getLocalId(self: Variable) usize {
-        return switch (self.data) {
-            inline else => |payload| payload.id,
-        };
-    }
-
-    pub fn isTemp(self: Variable) bool {
-        return switch (self.data) {
-            .temp => true,
-            else => false,
-        };
-    }
-
-    pub fn isPrime(self: Variable) bool {
-        return switch (self.data) {
-            .prime => true,
-            else => false,
-        };
-    }
-
-    pub fn isRedef(self: Variable) bool {
-        return switch (self.data) {
-            .redef => true,
-            else => false,
-        };
-    }
-
-    pub fn getDefinitionBlock(self: Variable) *BasicBlock {
-        return switch (self.data) {
-            .redef => |r| r.defblock,
-            .temp => |t| t.defblock.?,
-            .prime => |p| p.orig.getDefinitionBlock(),
-            else => unreachable,
-        };
-    }
-
-    pub fn setDefinitionBlock(self: *Variable, block: *BasicBlock) void {
-        switch (self.data) {
-            .redef => |*r| r.defblock = block,
-            .temp => |*t| t.defblock = block,
-            else => {},
-        }
     }
 };
 
@@ -205,12 +29,7 @@ pub const InstructionName = enum {
     loadi,
     loadstr,
     loadnil,
-    load_stack_param,
-    mov,
     phi,
-    pmov, // parallel move group
-    setlocal,
-    setparam,
     tst,
 };
 
@@ -218,28 +37,25 @@ pub const Instruction = union(InstructionName) {
     call: struct {
         const Self = @This();
 
-        out: *Variable,
-        recv: *Variable,
+        recv: *Insn,
         name: []const u8,
-        params: std.ArrayList(*Variable),
+        params: std.ArrayList(*Insn),
     },
 
     define_method: struct {
         const Self = @This();
-        out: *Variable,
         name: []const u8,
         func: *Scope,
     },
 
     getparam: struct {
         const Self = @This();
-        out: *Variable,
         index: usize,
     },
 
     cond: struct {
         const Self = @This();
-        condition: *Variable,
+        condition: *Insn,
         truthy: *BasicBlock,
         falsy: *BasicBlock,
     },
@@ -251,193 +67,32 @@ pub const Instruction = union(InstructionName) {
 
     leave: struct {
         const Self = @This();
-        out: *Variable,
-        in: *Variable,
+        in: *Insn,
     },
 
     loadi: struct {
         const Self = @This();
-        out: *Variable,
         val: u64,
     },
 
     loadstr: struct {
         const Self = @This();
-        out: *Variable,
         val: []const u8,
     },
 
     loadnil: struct {
         const Self = @This();
-        out: *Variable,
-    },
-
-    load_stack_param: struct {
-        const Self = @This();
-        out: *Variable,
-        offset: usize, // Stack index
-    },
-
-    mov: struct {
-        const Self = @This();
-        out: *Variable,
-        in: *Variable,
     },
 
     phi: struct {
         const Self = @This();
-        out: *Variable,
-        params: std.ArrayList(*Variable),
-    },
-
-    pmov: struct {
-        const Self = @This();
-        out: *Variable,
-        in: *Variable,
-        group: usize,
-    },
-
-    setlocal: struct {
-        const Self = @This();
-        name: *Variable,
-        val: *Variable,
-    },
-
-    setparam: struct {
-        const Self = @This();
-        out: *Variable,
-        in: *Variable,
-        index: usize,
+        params: std.ArrayList(*Insn),
     },
 
     tst: struct {
         const Self = @This();
-        out: *Variable,
-        in: *Variable,
+        in: *Insn,
     },
-
-    fn nth_field(comptime T: type, comptime F: type, t: *const T, index: usize) ?*const F {
-        const names = comptime std.meta.fieldNames(T);
-        const types = comptime std.meta.fieldTypes(T);
-        inline for (names, types, 0..) |name, ftype, field_index| {
-            if (ftype == (*F)) {
-                if (index == field_index) {
-                    return @field(t, name);
-                }
-            }
-        }
-        return null;
-    }
-
-    fn nth_union_field(e: *const Instruction, index: usize) ?*const Variable {
-        switch (e.*) {
-            inline else => |*variant| return nth_field(@TypeOf(variant.*), Variable, variant, index),
-        }
-    }
-
-    fn nth_list(comptime T: type, comptime F: type, t: *const T, index: usize) ?std.ArrayList(*F) {
-        const names = comptime std.meta.fieldNames(T);
-        const types = comptime std.meta.fieldTypes(T);
-        inline for (names, types, 0..) |name, ftype, field_index| {
-            if (ftype == (std.ArrayList(*F))) {
-                if (index == field_index) {
-                    return @field(t, name);
-                }
-            }
-        }
-        return null;
-    }
-
-    fn nth_union_list(e: *const Instruction, index: usize) ?std.ArrayList(*Variable) {
-        switch (e.*) {
-            inline else => |*variant| return nth_list(@TypeOf(variant.*), Variable, variant, index),
-        }
-    }
-
-    fn item_fields_sub(comptime T: type) u64 {
-        var mask: u64 = 0;
-
-        const names = comptime std.meta.fieldNames(T);
-        const types = comptime std.meta.fieldTypes(T);
-        inline for (names, types, 0..) |name, ftype, field_index| {
-            if (ftype == (*Variable) and !std.mem.eql(u8, name, "out")) {
-                mask |= (1 << field_index);
-            }
-        }
-        return mask;
-    }
-
-    fn item_fields(e: *const Instruction) usize {
-        switch (e.*) {
-            inline else => |*variant| return item_fields_sub(@TypeOf(variant.*)),
-        }
-    }
-
-    fn array_fields_sub(comptime T: type, comptime F: type) u64 {
-        var fields: u64 = 0;
-
-        const names = comptime std.meta.fieldNames(T);
-        const types = comptime std.meta.fieldTypes(T);
-        inline for (names, types, 0..) |name, ftype, field_index| {
-            if (ftype == (std.ArrayList(*F)) and !std.mem.eql(u8, name, "out")) {
-                fields |= (1 << field_index);
-            }
-        }
-        return fields;
-    }
-
-    fn array_fields(e: *const Instruction) usize {
-        switch (e.*) {
-            inline else => |*variant| return array_fields_sub(@TypeOf(variant.*), Variable),
-        }
-    }
-
-    const OpIter = struct {
-        item_index: usize = 0,
-        item_fields: u64,
-        array_fields: u64,
-        array_index: usize = 0,
-        insn: *const Instruction,
-
-        fn advance(self: *OpIter) void {
-            self.item_index += 1;
-            self.item_fields >>= 1;
-            self.array_fields >>= 1;
-            self.array_index = 0;
-        }
-
-        pub fn next(self: *OpIter) ?*const Variable {
-            if (self.item_fields > 0 or self.array_fields > 0) {
-                while ((self.item_fields & 0x1) != 0x1 and (self.array_fields & 0x1) != 0x1) {
-                    self.advance();
-                }
-                if (self.array_fields & 0x1 == 0x1) {
-                    const item_idx = self.item_index;
-                    const ary_idx = self.array_index;
-                    const list = self.insn.nth_union_list(item_idx).?;
-                    self.array_index += 1;
-                    if (ary_idx >= list.items.len) {
-                        self.advance();
-                        return next(self);
-                    } else {
-                        return list.items[ary_idx];
-                    }
-                } else if (self.item_fields & 0x1 == 0x1) {
-                    const idx = self.item_index;
-                    self.advance();
-                    return self.insn.nth_union_field(idx);
-                }
-            }
-            return null;
-        }
-    };
-
-    pub fn opIter(self: *const Instruction) OpIter {
-        const if_mask = self.item_fields();
-        const af_mask = self.array_fields();
-
-        return .{ .insn = self, .item_fields = if_mask, .array_fields = af_mask };
-    }
 
     pub fn isJump(self: Instruction) bool {
         return switch (self) {
@@ -465,44 +120,6 @@ pub const Instruction = union(InstructionName) {
             .phi => true,
             else => false,
         };
-    }
-
-    pub fn isPMov(self: Instruction) bool {
-        return switch (self) {
-            .pmov => true,
-            else => false,
-        };
-    }
-
-    pub fn jumpTarget(self: Instruction) Label {
-        return switch (self) {
-            .jump => |payload| payload.label,
-            .jumpif => |payload| payload.label,
-            .jumpunless => |payload| payload.label,
-            else => unreachable,
-        };
-    }
-
-    pub fn outVar(self: Instruction) ?*Variable {
-        return switch (self) {
-            .putlabel => null,
-            .jump => null,
-            .jumpif => null,
-            .jumpunless => null,
-            .setlocal => null,
-            inline else => |payload| payload.out,
-        };
-    }
-
-    pub fn getOut(self: Instruction) ?*Variable {
-        return self.outVar();
-    }
-
-    pub fn setOut(self: *Instruction, opnd: *Variable) void {
-        switch (self.*) {
-            .putlabel, .jump, .jumpif, .jumpunless, .setlocal => unreachable,
-            inline else => |*payload| payload.out = opnd,
-        }
     }
 
     pub fn deinit(self: *Instruction, alloc: std.mem.Allocator) void {

@@ -1,8 +1,8 @@
 const std = @import("std");
-const cfg_mod = @import("cfg.zig");
+const cfg_mod = @import("../cfg.zig");
 const CFG = cfg_mod.CFG;
-const BasicBlock = @import("basic_block.zig").BasicBlock;
-const ir = @import("ir.zig");
+const BasicBlock = @import("../basic_block.zig").BasicBlock;
+const ir = @import("../ir.zig");
 
 // ion.json schema, version 1. Mirrors mozilla-spidermonkey/iongraph's
 // src/iongraph.ts — when that schema bumps, diff against this file.

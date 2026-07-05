@@ -1,4 +1,5 @@
 const ir = @import("ir.zig");
+const Insn = ir.InstructionListNode;
 const std = @import("std");
 const cfg = @import("cfg.zig");
 const CFG = cfg.CFG;
@@ -8,11 +9,9 @@ const BitMap = std.DynamicBitSetUnmanaged;
 const assert = @import("std").debug.assert;
 
 pub const Scope = struct {
+    const Key = struct { local: usize, block: *BasicBlock };
+
     tmp_id: u32 = 0,
-    local_id: u32 = 0,
-    param_id: u32 = 0,
-    label_id: usize = 0,
-    live_range_id: usize = 0,
     redef_id: usize = 0,
     physical_register_id: usize = 0,
     param_size: usize = 0,
@@ -30,6 +29,7 @@ pub const Scope = struct {
     entry_block: *BasicBlock,
     current_block: *BasicBlock,
     blocks: std.ArrayList(*BasicBlock),
+    currentDef: std.AutoHashMapUnmanaged(Key, *Insn),
 
     pub fn getName(self: *Scope) []const u8 {
         return self.name;
@@ -46,6 +46,21 @@ pub const Scope = struct {
         }
     }
 
+    pub fn writeVariable(self: *Scope, name: []const u8, block: *BasicBlock, value: *Insn) !void {
+        const lname = try self.getLocalName(name);
+        try self.currentDef.put(self.allocator, .{ .local = lname.id, .block = block }, value);
+    }
+
+    pub fn readVariable(self: *Scope, name: []const u8, block: *BasicBlock) !*Insn {
+        const lname = try self.getLocalName(name);
+        const insn = self.currentDef.get(.{ .local = lname.id, .block = block });
+        if (insn) |v| {
+            return v;
+        } else {
+            @panic("FIXME: implement ReadVariableRecursive");
+        }
+    }
+
     fn addVar(self: *Scope, var_: *Var) !*Var {
         try self.variables.append(self.allocator, var_);
         return var_;
@@ -57,10 +72,6 @@ pub const Scope = struct {
 
     pub fn varCount(self: Scope) usize {
         return self.variables.items.len;
-    }
-
-    pub fn liveRangeCount(self: Scope) usize {
-        return self.live_range_id;
     }
 
     pub fn insnCount(self: *Scope) usize {
@@ -75,42 +86,11 @@ pub const Scope = struct {
         return self.variables.items[id];
     }
 
-    pub fn getLiveRangeById(self: Scope, id: usize) *Var {
-        return self.variables.items[id];
-    }
-
     fn newLocal(self: *Scope, source_name: []const u8) !*Var {
-        defer self.local_id += 1;
-        return try self.addVar(try Var.initLocal(self.arena.allocator(), self.nextVarId(), self.local_id, source_name));
+        return try self.addVar(try Var.initLocal(self.arena.allocator(), self.nextVarId(), source_name));
     }
 
-    pub fn newDefinition(self: *Scope, opnd: *Var, bb: *BasicBlock, variant: usize) !*Var {
-        defer self.redef_id += 1;
-        const new = try Var.initRedef(self.arena.allocator(), self.nextVarId(), self.redef_id, variant, opnd, bb);
-        return try self.addVar(new);
-    }
-
-    pub fn newPrime(self: *Scope, op: *Var) !*Var {
-        defer self.primes += 1;
-        return try self.addVar(try Var.initPrime(self.arena.allocator(), self.nextVarId(), self.primes, op));
-    }
-
-    pub fn newLiveRange(self: *Scope, varcount: usize) !*Var {
-        defer self.live_range_id += 1;
-        return try self.addVar(try Var.initLiveRange(self.arena.allocator(), self.nextVarId(), self.live_range_id, varcount));
-    }
-
-    pub fn newTemp(self: *Scope) !*Var {
-        defer self.tmp_id += 1;
-        return try self.addVar(try Var.initTemp(self.arena.allocator(), self.nextVarId(), self.tmp_id));
-    }
-
-    pub fn newPhysicalRegister(self: *Scope, register: usize) !*Var {
-        defer self.physical_register_id += 1;
-        return try self.addVar(try Var.initPhysicalRegister(self.arena.allocator(), self.nextVarId(), self.physical_register_id, register));
-    }
-
-    fn makeInsn(self: *Scope, insn: ir.Instruction) !*ir.InstructionListNode {
+    fn makeInsn(self: *Scope, insn: ir.Instruction) !*Insn {
         const node = try self.arena.allocator().create(ir.InstructionListNode);
         node.* = .{ .node = .{}, .data = insn };
         return node;
@@ -120,7 +100,7 @@ pub const Scope = struct {
         return self.current_block.pushVoidInsn(self.arena.allocator(), insn);
     }
 
-    fn pushInsn(self: *Scope, insn: ir.Instruction) !*Var {
+    fn pushInsn(self: *Scope, insn: ir.Instruction) !*Insn {
         return self.current_block.pushInsn(self.arena.allocator(), insn);
     }
 
@@ -128,36 +108,30 @@ pub const Scope = struct {
         return try CFG.init(mem, self, self.entry_block, try self.blocks.toOwnedSlice(mem));
     }
 
-    pub fn pushDefineMethod(self: *Scope, name: []const u8, scope: *Scope) !*Var {
-        const outreg = try self.newTemp();
+    pub fn pushDefineMethod(self: *Scope, name: []const u8, scope: *Scope) !*Insn {
         try self.children.append(self.allocator, scope);
         return try self.pushInsn(.{ .define_method = .{
-            .out = outreg,
             .name = name,
             .func = scope,
         } });
     }
 
-    pub fn pushCall(self: *Scope, out: ?*Var, recv: *Var, name: []const u8, params: std.ArrayList(*Var)) !*Var {
-        const outreg = if (out) |o| o else try self.newTemp();
+    pub fn pushCall(self: *Scope, recv: *Insn, name: []const u8, params: std.ArrayList(*Insn)) !*Insn {
         return try self.pushInsn(.{ .call = .{
-            .out = outreg,
             .recv = recv,
             .name = name,
             .params = params,
         } });
     }
 
-    pub fn pushGetParam(self: *Scope, out: *Var, index: usize) !*Var {
-        return try self.pushInsn(.{ .getparam = .{ .out = out, .index = index } });
+    pub fn pushPhi(self: *Scope, params: std.ArrayList(*Insn)) !*Insn {
+        return try self.pushInsn(.{ .phi = .{
+            .params = params,
+        } });
     }
 
-    pub fn pushSetParam(self: *Scope, in: *Var, index: usize) !*Var {
-        return try self.pushInsn(.{ .setparam = .{
-            .out = try self.newTemp(),
-            .in = in,
-            .index = index,
-        } });
+    pub fn pushGetParam(self: *Scope, index: usize) !*Insn {
+        return try self.pushInsn(.{ .getparam = .{ .index = index } });
     }
 
     pub fn pushJump(self: *Scope, target: *BasicBlock) !void {
@@ -165,52 +139,30 @@ pub const Scope = struct {
         try target.addPredecessor(self.allocator, self.current_block);
     }
 
-    pub fn pushCond(self: *Scope, cond: *Var, truthy: *BasicBlock, falsy: *BasicBlock) !void {
+    pub fn pushCond(self: *Scope, cond: *Insn, truthy: *BasicBlock, falsy: *BasicBlock) !void {
         try self.pushVoidInsn(.{ .cond = .{ .condition = cond, .truthy = truthy, .falsy = falsy } });
         try truthy.addPredecessor(self.allocator, self.current_block);
         try falsy.addPredecessor(self.allocator, self.current_block);
     }
 
-    pub fn pushTest(self: *Scope, in: *Var) !*Var {
-        return try self.pushInsn(.{ .tst = .{ .in = in, .out = try self.newTemp() } });
+    pub fn pushTest(self: *Scope, in: *Insn) !*Insn {
+        return try self.pushInsn(.{ .tst = .{ .in = in } });
     }
 
-    pub fn pushLeave(self: *Scope, in: *Var) !*Var {
-        return try self.pushInsn(.{ .leave = .{ .in = in, .out = try self.newTemp() } });
+    pub fn pushLeave(self: *Scope, in: *Insn) !*Insn {
+        return try self.pushInsn(.{ .leave = .{ .in = in } });
     }
 
-    pub fn pushLoadi(self: *Scope, out: ?*Var, val: u64) !*Var {
-        const outreg = if (out) |o| o else try self.newTemp();
-        return try self.pushInsn(.{ .loadi = .{
-            .out = outreg,
-            .val = val,
-        } });
+    pub fn pushLoadi(self: *Scope, val: u64) !*Insn {
+        return try self.pushInsn(.{ .loadi = .{ .val = val } });
     }
 
-    pub fn pushLoadString(self: *Scope, out: ?*Var, val: []const u8) !*Var {
-        const outreg = if (out) |o| o else try self.newTemp();
-        return try self.pushInsn(.{ .loadstr = .{
-            .out = outreg,
-            .val = val,
-        } });
+    pub fn pushLoadString(self: *Scope, val: []const u8) !*Insn {
+        return try self.pushInsn(.{ .loadstr = .{ .val = val, } });
     }
 
-    pub fn pushLoadNil(self: *Scope, out: ?*Var) !*Var {
-        const outreg = if (out) |o| o else try self.newTemp();
-        return try self.pushInsn(.{ .loadnil = .{ .out = outreg } });
-    }
-
-    pub fn pushMov(self: *Scope, out: *Var, in: *Var) !*Var {
-        try self.pushVoidInsn(.{ .mov = .{ .out = out, .in = in } });
-        return out;
-    }
-
-    pub fn makeMov(self: *Scope, out: *Var, in: *Var) !*ir.InstructionListNode {
-        return try self.makeInsn(.{ .mov = .{ .out = out, .in = in } });
-    }
-
-    pub fn pushSetLocal(self: *Scope, name: *Var, val: *Var) !void {
-        return try self.pushVoidInsn(.{ .setlocal = .{ .name = name, .val = val } });
+    pub fn pushLoadNil(self: *Scope) !*Insn {
+        return try self.pushInsn(.{ .loadnil = .{} });
     }
 
     pub fn newBlock(self: *Scope) !*BasicBlock {
@@ -234,6 +186,7 @@ pub const Scope = struct {
             .name = name,
             .parent = parent,
             .locals = std.StringHashMapUnmanaged(*Var){},
+            .currentDef = .empty,
             .variables = .empty,
             .children = .empty,
             .blocks = .empty,

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Scope = @import("scope.zig").Scope;
 const ir = @import("ir.zig");
+const Insn = ir.InstructionListNode;
 const Var = ir.Variable;
 const BitMap = std.DynamicBitSetUnmanaged;
 const CFG = @import("cfg.zig").CFG;
@@ -400,7 +401,7 @@ pub const BasicBlock = struct {
 
     pub fn pushVoidInsn(self: *BasicBlock, mem: std.mem.Allocator, insn: ir.Instruction) !void {
         switch (insn) {
-            .jump, .cond, .mov, .setlocal => {},
+            .jump, .cond, => {},
             else => unreachable,
         }
 
@@ -409,17 +410,11 @@ pub const BasicBlock = struct {
         self.insns.append(&node.node);
     }
 
-    pub fn pushInsn(self: *BasicBlock, mem: std.mem.Allocator, insn: ir.Instruction) !*Var {
+    pub fn pushInsn(self: *BasicBlock, mem: std.mem.Allocator, insn: ir.Instruction) !*Insn {
         const node = try mem.create(ir.InstructionListNode);
         node.* = .{ .node = .{}, .data = insn };
         self.insns.append(&node.node);
-
-        return switch (insn) {
-            .jump => unreachable,
-            .cond => unreachable,
-            .setlocal => unreachable,
-            inline else => |payload| payload.out,
-        };
+        return node;
     }
 
     pub fn deinit(self: *BasicBlock, alloc: std.mem.Allocator) void {
