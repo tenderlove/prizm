@@ -137,6 +137,10 @@ pub const Scope = struct {
         self.current_block = block;
     }
 
+    pub fn currentBlock(self: *Scope) *BasicBlock {
+        return self.current_block;
+    }
+
     pub fn init(alloc: std.mem.Allocator, id: u32, name: []const u8, parent: ?*Scope) !*Scope {
         const scope = try alloc.create(Scope);
 

@@ -1,6 +1,6 @@
 const std = @import("std");
 const prism = @import("prism.zig");
-const compiler = @import("compiler.zig");
+const Compiler = @import("compiler.zig").Compiler;
 const g = @import("globals.zig");
 const cfg_z = @import("cfg.zig");
 const IonGraph = @import("printers/iongraph.zig").IonGraph;
@@ -109,7 +109,7 @@ fn runCompile(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterat
     defer globals.deinit(gpa);
 
     // Compile the parse tree
-    const cc = try compiler.init(gpa, globals, parser);
+    const cc = try Compiler.init(gpa, globals, parser);
     defer cc.deinit(gpa);
 
     const scope = try cc.compile(&scope_node);
@@ -170,7 +170,7 @@ fn compileFile(io: std.Io, alloc: std.mem.Allocator, path: []const u8, globals: 
     var scope_node = try prism.pmNewScopeNode(root_node);
 
     // Compile the parse tree
-    const cc = try compiler.init(alloc, globals, parser);
+    const cc = try Compiler.init(alloc, globals, parser);
     defer cc.deinit(alloc);
 
     return try cc.compile(&scope_node);
