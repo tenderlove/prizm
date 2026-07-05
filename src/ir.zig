@@ -222,17 +222,6 @@ pub const Instruction = union(InstructionName) {
         recv: *Variable,
         name: []const u8,
         params: std.ArrayList(*Variable),
-
-        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
-            if (self.recv == old) {
-                self.recv = new;
-            }
-            for (0..self.params.items.len) |i| {
-                if (self.params.items[i] == old) {
-                    self.params.items[i] = new;
-                }
-            }
-        }
     },
 
     define_method: struct {
@@ -240,18 +229,12 @@ pub const Instruction = union(InstructionName) {
         out: *Variable,
         name: []const u8,
         func: *Scope,
-        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
-            unreachable;
-        }
     },
 
     getparam: struct {
         const Self = @This();
         out: *Variable,
         index: usize,
-        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
-            unreachable;
-        }
     },
 
     cond: struct {
@@ -259,83 +242,52 @@ pub const Instruction = union(InstructionName) {
         condition: *Variable,
         truthy: *BasicBlock,
         falsy: *BasicBlock,
-        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
-            unreachable;
-        }
     },
 
     jump: struct {
         const Self = @This();
         target: *BasicBlock,
-        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
-            unreachable;
-        }
     },
 
     leave: struct {
         const Self = @This();
         out: *Variable,
         in: *Variable,
-        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
-            if (self.in == old) self.in = new;
-        }
     },
 
     loadi: struct {
         const Self = @This();
         out: *Variable,
         val: u64,
-        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
-            unreachable;
-        }
     },
 
     loadstr: struct {
         const Self = @This();
         out: *Variable,
         val: []const u8,
-        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
-            unreachable;
-        }
     },
 
     loadnil: struct {
         const Self = @This();
         out: *Variable,
-        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
-            unreachable;
-        }
     },
 
     load_stack_param: struct {
         const Self = @This();
         out: *Variable,
         offset: usize, // Stack index
-        pub fn replaceOpnd(_: *Self, _: *const Variable, _: *Variable) void {
-            unreachable;
-        }
     },
 
     mov: struct {
         const Self = @This();
         out: *Variable,
         in: *Variable,
-        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
-            if (self.in == old) self.in = new;
-        }
     },
 
     phi: struct {
         const Self = @This();
         out: *Variable,
         params: std.ArrayList(*Variable),
-        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
-            for (0..self.params.items.len) |i| {
-                if (self.params.items[i] == old) {
-                    self.params.items[i] = new;
-                }
-            }
-        }
     },
 
     pmov: struct {
@@ -343,18 +295,12 @@ pub const Instruction = union(InstructionName) {
         out: *Variable,
         in: *Variable,
         group: usize,
-        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
-            if (self.in == old) self.in = new;
-        }
     },
 
     setlocal: struct {
         const Self = @This();
         name: *Variable,
         val: *Variable,
-        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
-            if (self.val == old) self.val = new;
-        }
     },
 
     setparam: struct {
@@ -362,25 +308,13 @@ pub const Instruction = union(InstructionName) {
         out: *Variable,
         in: *Variable,
         index: usize,
-        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
-            if (self.in == old) self.in = new;
-        }
     },
 
     tst: struct {
         const Self = @This();
         out: *Variable,
         in: *Variable,
-        pub fn replaceOpnd(self: *Self, old: *const Variable, new: *Variable) void {
-            if (self.in == old) self.in = new;
-        }
     },
-
-    pub fn replaceOpnd(self: *Instruction, old: *const Variable, new: *Variable) void {
-        switch (self.*) {
-            inline else => |*variant| variant.replaceOpnd(old, new),
-        }
-    }
 
     fn nth_field(comptime T: type, comptime F: type, t: *const T, index: usize) ?*const F {
         const names = comptime std.meta.fieldNames(T);
