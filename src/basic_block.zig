@@ -399,20 +399,18 @@ pub const BasicBlock = struct {
         return new_node;
     }
 
-    pub fn pushVoidInsn(self: *BasicBlock, mem: std.mem.Allocator, insn: ir.Instruction) !void {
+    pub fn pushVoidInsn(self: *BasicBlock, insn: ir.Instruction) !void {
         switch (insn) {
             .jump, .cond, => {},
             else => unreachable,
         }
 
-        const node = try mem.create(ir.InstructionListNode);
-        node.* = .{ .node = .{}, .data = insn };
+        const node = try self.scope.makeInsn(insn);
         self.insns.append(&node.node);
     }
 
-    pub fn pushInsn(self: *BasicBlock, mem: std.mem.Allocator, insn: ir.Instruction) !*Insn {
-        const node = try mem.create(ir.InstructionListNode);
-        node.* = .{ .node = .{}, .data = insn };
+    pub fn pushInsn(self: *BasicBlock, insn: ir.Instruction) !*Insn {
+        const node = try self.scope.makeInsn(insn);
         self.insns.append(&node.node);
         return node;
     }

@@ -11,12 +11,7 @@ const assert = @import("std").debug.assert;
 pub const Scope = struct {
     const Key = struct { local: usize, block: *BasicBlock };
 
-    tmp_id: u32 = 0,
-    redef_id: usize = 0,
-    physical_register_id: usize = 0,
-    param_size: usize = 0,
-    local_storage: usize = 0,
-    primes: usize = 0,
+    insn_id: usize = 0,
     block_name: usize = 0,
     id: u32,
     name: []const u8,
@@ -90,18 +85,19 @@ pub const Scope = struct {
         return try self.addVar(try Var.initLocal(self.arena.allocator(), self.nextVarId(), source_name));
     }
 
-    fn makeInsn(self: *Scope, insn: ir.Instruction) !*Insn {
+    pub fn makeInsn(self: *Scope, insn: ir.Instruction) !*Insn {
         const node = try self.arena.allocator().create(ir.InstructionListNode);
-        node.* = .{ .node = .{}, .data = insn };
+        node.* = .{ .node = .{}, .id = self.insn_id, .data = insn };
+        self.insn_id += 1;
         return node;
     }
 
     fn pushVoidInsn(self: *Scope, insn: ir.Instruction) !void {
-        return self.current_block.pushVoidInsn(self.arena.allocator(), insn);
+        return self.current_block.pushVoidInsn(insn);
     }
 
     fn pushInsn(self: *Scope, insn: ir.Instruction) !*Insn {
-        return self.current_block.pushInsn(self.arena.allocator(), insn);
+        return self.current_block.pushInsn(insn);
     }
 
     pub fn cfg(self: *Scope, mem: std.mem.Allocator) !*CFG {
@@ -209,22 +205,10 @@ pub const Scope = struct {
         return self.children;
     }
 
-    pub fn numberAllInstructions(self: *Scope) void {
-        var counter: usize = 0;
-        for (self.blocks.items) |block| {
-            var it = block.insns.first;
-            while (it) |insn| {
-                const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
-                insn_node.number = counter;
-                counter += 1;
-                it = insn.next;
-            }
-        }
-    }
-
     pub fn deinit(self: *Scope) void {
         self.locals.deinit(self.allocator);
         self.variables.deinit(self.allocator);
+        self.currentDef.deinit(self.allocator);
         for (self.children.items) |scope| {
             scope.deinit();
         }
@@ -238,31 +222,20 @@ pub const Scope = struct {
     }
 };
 
-test "number instructions" {
+test "instructions are numbered at push time" {
     const alloc = std.testing.allocator;
 
-    // Create a scope with some instructions
     const scope = try Scope.init(alloc, 0, "test", null);
     defer scope.deinit();
 
-    // Add some instructions to the scope
-    _ = try scope.pushLoadi(null, 123);
-    _ = try scope.pushLoadi(null, 456);
-    _ = try scope.pushLoadi(null, 789);
+    const a = try scope.pushLoadi(123);
+    const b = try scope.pushLoadi(456);
+    const c = try scope.pushLoadi(789);
 
-    // Number all instructions
-    scope.numberAllInstructions();
-
-    // Verify instructions were numbered correctly
-    try std.testing.expectEqual(3, scope.insnCount());
-    var it = scope.current_block.insns.first;
-    var expected_number: usize = 0;
-    while (it) |insn| {
-        const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
-        try std.testing.expectEqual(expected_number, insn_node.number);
-        expected_number += 1;
-        it = insn.next;
-    }
+    // Each push should assign the next sequential id.
+    try std.testing.expectEqual(@as(usize, 0), a.id);
+    try std.testing.expectEqual(@as(usize, 1), b.id);
+    try std.testing.expectEqual(@as(usize, 2), c.id);
 }
 
 test "child scope iterator" {

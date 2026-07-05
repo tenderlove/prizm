@@ -158,15 +158,68 @@ pub const IonGraph = struct {
             info.depth.deinit(a);
         }
 
+        // IDs are assigned at push time on InstructionListNode.id. Find the
+        // max id in this function so we can size the inputs/uses arrays.
+        var max_id: usize = 0;
+        for (cfg.blocks) |bb| {
+            var it = bb.insns.first;
+            while (it) |raw| {
+                const node: *ir.InstructionListNode = @fieldParentPtr("node", raw);
+                if (node.id > max_id) max_id = node.id;
+                it = raw.next;
+            }
+        }
+        const n_slots = max_id + 1;
+
+        // Pass 1: per-instruction inputs. Walk operand fields per variant.
+        const inputs = try a.alloc(std.ArrayList(u32), n_slots);
+        for (inputs) |*x| x.* = .empty;
+        const uses = try a.alloc(std.ArrayList(u32), n_slots);
+        for (uses) |*x| x.* = .empty;
+
+        for (cfg.blocks) |bb| {
+            var it = bb.insns.first;
+            while (it) |raw| {
+                const node: *ir.InstructionListNode = @fieldParentPtr("node", raw);
+                try appendOperandIds(node.data, &inputs[node.id], a);
+                it = raw.next;
+            }
+        }
+
+        // Pass 2: invert inputs → uses.
+        for (inputs, 0..) |ins, my_id_usize| {
+            for (ins.items) |input_id| {
+                try uses[input_id].append(a, @intCast(my_id_usize));
+            }
+        }
+
         const out = try a.alloc(MIRBlock, cfg.blocks.len);
         for (cfg.blocks, 0..) |block, i| {
             out[i] = try buildMIRBlock(block, .{
                 .is_backedge = info.backedges.contains(block),
                 .is_header = info.headers.contains(block),
                 .loop_depth = info.depth.get(block) orelse 0,
-            }, a);
+            }, inputs, uses, a);
         }
         return out;
+    }
+
+    fn appendOperandIds(
+        insn: ir.Instruction,
+        out: *std.ArrayList(u32),
+        a: std.mem.Allocator,
+    ) !void {
+        switch (insn) {
+            .call => |cc| {
+                try out.append(a, @intCast(cc.recv.id));
+                for (cc.params.items) |p| try out.append(a, @intCast(p.id));
+            },
+            .cond => |co| try out.append(a, @intCast(co.condition.id)),
+            .leave => |l| try out.append(a, @intCast(l.in.id)),
+            .tst => |t| try out.append(a, @intCast(t.in.id)),
+            .phi => |p| for (p.params.items) |x| try out.append(a, @intCast(x.id)),
+            .define_method, .getparam, .jump, .loadi, .loadstr, .loadnil => {},
+        }
     }
 
     const BlockKind = struct {
@@ -175,7 +228,13 @@ pub const IonGraph = struct {
         loop_depth: u32,
     };
 
-    fn buildMIRBlock(block: *BasicBlock, kind: BlockKind, a: std.mem.Allocator) !MIRBlock {
+    fn buildMIRBlock(
+        block: *BasicBlock,
+        kind: BlockKind,
+        inputs: []std.ArrayList(u32),
+        uses: []std.ArrayList(u32),
+        a: std.mem.Allocator,
+    ) !MIRBlock {
         // predecessors — map each pred's stable name to u32.
         const preds = try a.alloc(u32, block.predecessors.items.len);
         for (block.predecessors.items, 0..) |p, i| preds[i] = @intCast(p.name);
@@ -207,27 +266,105 @@ pub const IonGraph = struct {
             .attributes = attrs,
             .predecessors = preds,
             .successors = succs,
-            .instructions = try buildMIRInsns(block, a),
+            .instructions = try buildMIRInsns(block, inputs, uses, a),
         };
     }
 
-    fn buildMIRInsns(block: *BasicBlock, a: std.mem.Allocator) ![]MIRInstruction {
+    fn buildMIRInsns(
+        block: *BasicBlock,
+        inputs: []std.ArrayList(u32),
+        uses: []std.ArrayList(u32),
+        a: std.mem.Allocator,
+    ) ![]MIRInstruction {
         var list: std.ArrayList(MIRInstruction) = .empty;
         var iter: ?*std.DoublyLinkedList.Node = block.insns.first;
         while (iter) |raw| {
             const node: *ir.InstructionListNode = @fieldParentPtr("node", raw);
             try list.append(a, .{
                 .ptr = @intFromPtr(node),
-                .id = @intCast(node.number),
-                .opcode = @tagName(node.data),
+                .id = @intCast(node.id),
+                .opcode = try formatOpcode(node.data, a),
                 .attributes = &.{},
-                .inputs = &.{},
-                .uses = &.{},
+                .inputs = inputs[node.id].items,
+                .uses = uses[node.id].items,
                 .@"type" = "None",
             });
             iter = raw.next;
         }
         return list.toOwnedSlice(a);
+    }
+
+    /// Display mnemonic for an instruction — used both as the leading verb
+    /// on its own row AND when other instructions reference it as an input
+    /// (via `<mnemonic>#<id>`, which iongraph recognizes as a clickable
+    /// use marker per Graph.ts's split on `/([A-Za-z0-9_]+)#(\d+)/`).
+    fn mnemonic(insn: ir.Instruction) []const u8 {
+        return switch (insn) {
+            .loadi => "iconst",
+            .loadstr => "sconst",
+            .loadnil => "nil",
+            .getparam => "param",
+            .call => "call",
+            .define_method => "def_method",
+            .jump => "jump",
+            .cond => "brif",
+            .leave => "return",
+            .tst => "tst",
+            .phi => "phi",
+        };
+    }
+
+    /// Renders `<mnemonic>#<id>` for an SSA operand reference. Matches the
+    /// convention Ion's own dumps use (e.g. `Add#12` refers to the Add
+    /// instruction with id 12).
+    fn writeRef(w: *std.Io.Writer, insn: *ir.InstructionListNode) !void {
+        try w.print("{s}#{d}", .{ mnemonic(insn.data), insn.id });
+    }
+
+    /// Renders the opcode + operand references into a display string.
+    fn formatOpcode(insn: ir.Instruction, a: std.mem.Allocator) ![]const u8 {
+        var buf: std.Io.Writer.Allocating = .init(a);
+        const w = &buf.writer;
+        try w.print("{s}", .{mnemonic(insn)});
+        switch (insn) {
+            .loadi => |i| try w.print(" {d}", .{i.val}),
+            .loadstr => |i| try w.print(" \"{s}\"", .{i.val}),
+            .loadnil => {},
+            .getparam => |i| try w.print(" {d}", .{i.index}),
+
+            .call => |i| {
+                try w.print(" ", .{});
+                try writeRef(w, i.recv);
+                try w.print(", %{s}", .{i.name});
+                for (i.params.items) |p| {
+                    try w.print(", ", .{});
+                    try writeRef(w, p);
+                }
+            },
+            .phi => |i| {
+                for (i.params.items, 0..) |p, idx| {
+                    if (idx == 0) try w.print(" ", .{}) else try w.print(", ", .{});
+                    try writeRef(w, p);
+                }
+            },
+
+            .define_method => |i| try w.print(" %{s}", .{i.name}),
+            .jump => |i| try w.print(" block{d}", .{i.target.name}),
+            .cond => |i| {
+                try w.print(" ", .{});
+                try writeRef(w, i.condition);
+                try w.print(", block{d}, block{d}", .{ i.truthy.name, i.falsy.name });
+            },
+            .leave => |i| {
+                try w.print(" ", .{});
+                try writeRef(w, i.in);
+            },
+            .tst => |i| {
+                try w.print(" ", .{});
+                try writeRef(w, i.in);
+            },
+        }
+        return buf.written();
     }
 
     pub fn print(cfg: *CFG, mem: std.mem.Allocator, w: *std.Io.Writer) !void {

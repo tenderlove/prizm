@@ -108,7 +108,6 @@ pub const Compiler = struct {
     }
 
     fn compileScopeNode(cc: *Compiler, node: *const prism.pm_scope_node_t) !*Scope {
-        const locals = node.locals;
         var optionals_list: ?*const c.pm_node_list_t = null;
         var requireds_list: ?*const c.pm_node_list_t = null;
         var keywords_list: ?*const c.pm_node_list_t = null;
@@ -142,7 +141,6 @@ pub const Compiler = struct {
         const scope = try Scope.init(cc.allocator, cc.scope_ids, scope_name, cc.scope);
         cc.scope_ids += 1;
 
-        scope.local_storage = locals.size;
         cc.scope = scope;
 
         // Every scope gets a "self" as a parameter
@@ -155,8 +153,7 @@ pub const Compiler = struct {
             posts_list = &params.*.posts;
 
             if (requireds_list) |listptr| {
-                scope.param_size = listptr.*.size;
-                const list = listptr.*.nodes[0..scope.param_size];
+                const list = listptr.*.nodes[0..listptr.*.size];
                 for (list, 0..) |param, i| {
                     _ = (try cc.compileNode(@ptrCast(param)));
                     _ = try scope.pushGetParam(i + 1);
