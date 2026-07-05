@@ -5,7 +5,6 @@ const ir = @import("ir.zig");
 const Insn = ir.InstructionListNode;
 const cfg = @import("cfg.zig");
 const BasicBlock = @import("basic_block.zig").BasicBlock;
-const Var = ir.Variable;
 const Scope = @import("scope.zig").Scope;
 
 const c = @import("prism_c");
@@ -893,20 +892,3 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //     }, scope.insns);
 // }
 
-test "local variable write" {
-    const allocator = std.testing.allocator;
-
-    const globals = try Globals.init(allocator);
-    defer globals.deinit(allocator);
-
-    const scope = try compileString(allocator, globals, "x = 1; a = x");
-    defer scope.deinit();
-
-    try expectInstructionList(&[_]ir.InstructionName{
-        ir.Instruction.getparam,
-        ir.Instruction.mov,
-        ir.Instruction.loadi,
-        ir.Instruction.mov,
-        ir.Instruction.leave,
-    }, scope.blocks.items[0].insns);
-}

@@ -3,70 +3,43 @@ const Insn = ir.InstructionListNode;
 const std = @import("std");
 const cfg = @import("cfg.zig");
 const CFG = cfg.CFG;
-const Var = ir.Variable;
 const BasicBlock = @import("basic_block.zig").BasicBlock;
-const BitMap = std.DynamicBitSetUnmanaged;
 const assert = @import("std").debug.assert;
 
 pub const Scope = struct {
-    const Key = struct { local: usize, block: *BasicBlock };
+    /// Per-local defs, keyed by source name (interned upstream) then block.
+    /// Outer StringHashMap handles content-based string hashing; inner
+    /// AutoHashMap uses block pointer identity.
+    const DefMap = std.StringHashMapUnmanaged(std.AutoHashMapUnmanaged(*BasicBlock, *Insn));
 
     insn_id: usize = 0,
     block_name: usize = 0,
     id: u32,
     name: []const u8,
     parent: ?*Scope,
-    locals: std.StringHashMapUnmanaged(*Var),
-    variables: std.ArrayList(*Var),
     children: std.ArrayList(*Scope),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
     entry_block: *BasicBlock,
     current_block: *BasicBlock,
     blocks: std.ArrayList(*BasicBlock),
-    currentDef: std.AutoHashMapUnmanaged(Key, *Insn),
+    currentDef: DefMap,
 
     pub fn getName(self: *Scope) []const u8 {
         return self.name;
     }
 
-    pub fn getLocalName(self: *Scope, name: []const u8) !*Var {
-        const info = self.locals.get(name);
-        if (info) |v| {
-            return v;
-        } else {
-            const lname = try self.newLocal(name);
-            try self.locals.put(self.allocator, name, lname);
-            return lname;
-        }
-    }
-
     pub fn writeVariable(self: *Scope, name: []const u8, block: *BasicBlock, value: *Insn) !void {
-        const lname = try self.getLocalName(name);
-        try self.currentDef.put(self.allocator, .{ .local = lname.id, .block = block }, value);
+        const gop = try self.currentDef.getOrPut(self.allocator, name);
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
+        try gop.value_ptr.put(self.allocator, block, value);
     }
 
     pub fn readVariable(self: *Scope, name: []const u8, block: *BasicBlock) !*Insn {
-        const lname = try self.getLocalName(name);
-        const insn = self.currentDef.get(.{ .local = lname.id, .block = block });
-        if (insn) |v| {
-            return v;
-        } else {
-            @panic("FIXME: implement ReadVariableRecursive");
+        if (self.currentDef.getPtr(name)) |inner| {
+            if (inner.get(block)) |v| return v;
         }
-    }
-
-    fn addVar(self: *Scope, var_: *Var) !*Var {
-        try self.variables.append(self.allocator, var_);
-        return var_;
-    }
-
-    pub fn nextVarId(self: *Scope) usize {
-        return self.variables.items.len;
-    }
-
-    pub fn varCount(self: Scope) usize {
-        return self.variables.items.len;
+        @panic("FIXME: implement ReadVariableRecursive");
     }
 
     pub fn insnCount(self: *Scope) usize {
@@ -75,14 +48,6 @@ pub const Scope = struct {
             count += block.insnCount();
         }
         return count;
-    }
-
-    pub fn getVariableById(self: Scope, id: usize) *Var {
-        return self.variables.items[id];
-    }
-
-    fn newLocal(self: *Scope, source_name: []const u8) !*Var {
-        return try self.addVar(try Var.initLocal(self.arena.allocator(), self.nextVarId(), source_name));
     }
 
     pub fn makeInsn(self: *Scope, insn: ir.Instruction) !*Insn {
@@ -181,9 +146,7 @@ pub const Scope = struct {
             .id = id,
             .name = name,
             .parent = parent,
-            .locals = std.StringHashMapUnmanaged(*Var){},
             .currentDef = .empty,
-            .variables = .empty,
             .children = .empty,
             .blocks = .empty,
             .allocator = alloc,
@@ -206,8 +169,8 @@ pub const Scope = struct {
     }
 
     pub fn deinit(self: *Scope) void {
-        self.locals.deinit(self.allocator);
-        self.variables.deinit(self.allocator);
+        var it = self.currentDef.iterator();
+        while (it.next()) |entry| entry.value_ptr.deinit(self.allocator);
         self.currentDef.deinit(self.allocator);
         for (self.children.items) |scope| {
             scope.deinit();

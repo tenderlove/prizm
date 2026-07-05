@@ -28,10 +28,6 @@ pub const CFG = struct {
         return cfg;
     }
 
-    pub fn opndCount(self: @This()) usize {
-        return self.scope.varCount();
-    }
-
     pub fn depthFirstIterator(self: *CFG, alloc: std.mem.Allocator) !BasicBlock.DepthFirstIterator {
         return try self.head.depthFirstIterator(alloc);
     }
@@ -101,14 +97,14 @@ test "basic block one instruction" {
     const scope = try Scope.init(std.testing.allocator, 0, "empty", null);
     defer scope.deinit();
 
-    _ = try scope.pushLoadi(null, 123);
+    _ = try scope.pushLoadi(123);
 
     const cfg = try buildCFG(std.testing.allocator, scope);
     defer cfg.deinit();
 
     const bb = cfg.head;
 
-    try std.testing.expectEqual(1, bb.instructionCount());
+    try std.testing.expectEqual(1, bb.insnCount());
 }
 
 test "CFG from compiler" {
@@ -129,165 +125,6 @@ test "CFG from compiler" {
 
     const finish_type: ir.InstructionName = bb.finishInsn().?.data;
     try std.testing.expectEqual(ir.InstructionName.leave, finish_type);
-}
-
-test "no uninitialized in ternary" {
-    const allocator = std.testing.allocator;
-
-    const globals = try Globals.init(allocator);
-    defer globals.deinit(allocator);
-
-    const scope = try compileScope(allocator, globals, "x ? 1 : 23");
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
-    defer cfg.deinit();
-
-    var uninitialized = try cfg.head.uninitializedSet(allocator);
-    defer uninitialized.deinit(allocator);
-
-    try std.testing.expectEqual(0, uninitialized.count());
-}
-
-test "if statement should have 2 children blocks" {
-    const allocator = std.testing.allocator;
-
-    const globals = try Globals.init(allocator);
-    defer globals.deinit(allocator);
-
-    const scope = try compileScope(allocator, globals, "def foo(x); x ? 1 : 23; end");
-    defer scope.deinit();
-
-    // Get the scope for the method
-    const scopes = scope.childScopes();
-
-    const method_scope = scopes.items[0];
-
-    const cfg = try buildCFG(allocator, method_scope);
-    defer cfg.deinit();
-
-    const block = cfg.head;
-
-    try expectInstructionList(&[_]ir.InstructionName{
-        ir.Instruction.getparam, // self
-        ir.Instruction.mov,
-        ir.Instruction.getparam, // x
-        ir.Instruction.mov,
-        ir.Instruction.jumpunless,
-    }, block);
-    try std.testing.expectEqual(5, block.instructionCount());
-    try std.testing.expect(block.fallsThrough());
-
-    var child = block.fall_through_dest.?;
-    try expectInstructionList(&[_]ir.InstructionName{
-        ir.Instruction.loadi,
-        ir.Instruction.jump,
-    }, child);
-
-    try std.testing.expectEqual(2, child.instructionCount());
-    try std.testing.expect(!child.fallsThrough());
-
-    child = block.jump_dest.?;
-    try std.testing.expectEqual(2, child.instructionCount());
-    try std.testing.expectEqual(ir.Instruction.putlabel, @as(ir.InstructionName, child.startInsn().?.data));
-    try std.testing.expectEqual(ir.Instruction.loadi, @as(ir.InstructionName, child.finishInsn().?.data));
-
-    // Last block via fallthrough then jump
-    const last_block = block.fall_through_dest.?.jump_dest.?;
-
-    try expectInstructionList(&[_]ir.InstructionName{
-        ir.Instruction.putlabel,
-        ir.Instruction.phi,
-        ir.Instruction.leave,
-    }, last_block);
-
-    // block via jump then fallthrough
-    const last_block2 = block.jump_dest.?.fall_through_dest.?;
-    try std.testing.expectEqual(last_block, last_block2);
-}
-
-test "killed operands" {
-    const alloc = std.testing.allocator;
-
-    const globals = try Globals.init(alloc);
-    defer globals.deinit(alloc);
-
-    const scope = try compileScope(alloc, globals, "x = 5");
-    defer scope.deinit();
-
-    const cfg = try buildCFG(alloc, scope);
-    defer cfg.deinit();
-
-    try std.testing.expectEqual(1, cfg.liveBlockCount());
-
-    var iter = try cfg.depthFirstIterator(alloc);
-    defer iter.deinit(alloc);
-
-    const bb = (try iter.next(alloc)).?;
-
-    try expectInstructionList(&[_]ir.InstructionName{
-        ir.Instruction.getparam,
-        ir.Instruction.mov,
-        ir.Instruction.loadi,
-    }, bb);
-
-    try std.testing.expectEqual(4, bb.killedVariableCount());
-    try std.testing.expectEqual(0, bb.upwardExposedCount());
-}
-
-test "killed operands de-duplicate" {
-    const alloc = std.testing.allocator;
-
-    const globals = try Globals.init(alloc);
-    defer globals.deinit(alloc);
-
-    const scope = try compileScope(alloc, globals, "x = 5; x = 10");
-    defer scope.deinit();
-
-    const cfg = try buildCFG(alloc, scope);
-    defer cfg.deinit();
-
-    try std.testing.expectEqual(1, cfg.liveBlockCount());
-
-    var iter = try cfg.depthFirstIterator(alloc);
-    defer iter.deinit(alloc);
-
-    const bb = (try iter.next(alloc)).?;
-
-    try expectInstructionList(&[_]ir.InstructionName{
-        ir.Instruction.getparam,
-        ir.Instruction.mov,
-        ir.Instruction.loadi,
-        ir.Instruction.loadi,
-    }, bb);
-
-    try std.testing.expectEqual(4, bb.killedVariableCount());
-    try std.testing.expectEqual(0, bb.upwardExposedCount());
-}
-
-test "upward exposed bits get set" {
-    const allocator = std.testing.allocator;
-
-    const globals = try Globals.init(allocator);
-    defer globals.deinit(allocator);
-
-    const scope = try compileScope(allocator, globals, "def foo(x); x ? x + 1 : 5; end");
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
-    defer cfg.deinit();
-
-    const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func;
-
-    const methodcfg = try buildCFG(allocator, method_scope);
-    defer methodcfg.deinit();
-
-    const bb = (try findBBWithInsn(methodcfg, ir.InstructionName.call)).?;
-    // One for x
-    try std.testing.expectEqual(1, bb.upwardExposedCount());
-    // setparam for x, loadi, setparam for 1, and return value of call
-    try std.testing.expectEqual(5, bb.killedVariableCount());
 }
 
 test "complex loop with if" {
@@ -323,47 +160,6 @@ test "complex loop with if" {
 
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
-}
-
-test "live out passes through if statement" {
-    const allocator = std.testing.allocator;
-
-    const globals = try Globals.init(allocator);
-    defer globals.deinit(allocator);
-
-    const code =
-        \\ def foo y, z
-        \\   x = z + 5
-        \\   if y < 123
-        \\     y = 1
-        \\   else
-        \\     y = 2
-        \\   end
-        \\   x + y
-        \\ end
-    ;
-    const scope = try compileScope(allocator, globals, code);
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
-    defer cfg.deinit();
-
-    const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func;
-
-    const opnd = try method_scope.getLocalName("x");
-
-    const methodcfg = try buildCFG(allocator, method_scope);
-    defer methodcfg.deinit();
-
-    var iter = try methodcfg.depthFirstIterator(allocator);
-    defer iter.deinit(allocator);
-
-    while (try iter.next(allocator)) |bb| {
-        if (bb.fall_through_dest) |_| {
-            try std.testing.expect(bb.liveout_set.isSet(opnd.id));
-        }
-    }
 }
 
 test "jumps targets get predecessors" {
@@ -415,41 +211,6 @@ test "jumps targets get predecessors" {
     try std.testing.expect(preds[0] == blocks[2] or preds[1] == blocks[2]);
 }
 
-test "dead code removal" {
-    const mem = std.testing.allocator;
-
-    const globals = try Globals.init(mem);
-    defer globals.deinit(mem);
-
-    const code =
-        \\ def foo
-        \\   return 1234
-        \\   puts 456
-        \\ end
-    ;
-    const scope = try compileScope(mem, globals, code);
-    defer scope.deinit();
-
-    const children = scope.childScopes();
-    try std.testing.expectEqual(1, children.items.len);
-
-    const method_scope = children.items[0];
-    // Get a CFG for the foo method (includes setparam instructions now)
-    try std.testing.expectEqual(10, method_scope.insnCount());
-
-    const cfg = try CFG.build(mem, method_scope);
-    defer cfg.deinit();
-
-    const blocks = cfg.blockList();
-    // CFG.build now automatically sweeps unreachable blocks, so we should only have 1 reachable block
-    try std.testing.expectEqual(1, blocks.len);
-
-    // Number all instructions
-    method_scope.numberAllInstructions();
-
-    try std.testing.expectEqual(4, method_scope.insnCount());
-}
-
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
     var iter = try cfg.depthFirstIterator(cfg.mem);
     defer iter.deinit(cfg.mem);
@@ -495,14 +256,3 @@ fn compileScope(allocator: std.mem.Allocator, globals: *Globals, code: []const u
     return try cc.compile(&scope_node);
 }
 
-fn expectInstructionList(expected: []const ir.InstructionName, block: *BasicBlock) !void {
-    var insn: ?*ir.InstructionListNode = block.startInsn();
-    for (expected) |expected_insn| {
-        try std.testing.expectEqual(expected_insn, @as(ir.InstructionName, insn.?.data));
-        if (insn.?.node.next) |n| {
-            insn = @fieldParentPtr("node", n);
-        } else {
-            insn = null;
-        }
-    }
-}

@@ -1,23 +1,9 @@
 const std = @import("std");
-const cmp = @import("compiler.zig");
-const cfg = @import("cfg.zig");
 const Scope = @import("scope.zig").Scope;
 const BasicBlock = @import("basic_block.zig").BasicBlock;
-const BitMap = std.DynamicBitSetUnmanaged;
 const Insn = @import("ir.zig").InstructionListNode;
 
 pub const InstructionList = std.DoublyLinkedList;
-
-pub const Variable = struct {
-    id: usize,
-    source_name: []const u8,
-
-    pub fn initLocal(alloc: std.mem.Allocator, id: usize, source_name: anytype) !*Variable {
-        const opnd = try alloc.create(Variable);
-        opnd.* = .{ .id = id, .source_name = source_name };
-        return opnd;
-    }
-};
 
 pub const InstructionName = enum {
     call,
@@ -138,77 +124,3 @@ pub const InstructionListNode = struct {
     id: usize,
     data: Instruction,
 };
-
-pub const Use = struct {
-    node: std.DoublyLinkedList.Node,
-    insn: *Instruction,
-};
-
-test "can iterate on ops" {
-    var out = Variable{
-        .id = 0,
-        .data = .{ .temp = .{ .id = 0 } },
-    };
-    var in = Variable{
-        .id = 1,
-        .data = .{ .temp = .{ .id = 1 } },
-    };
-    var insn = Instruction{
-        .mov = .{
-            .out = &out,
-            .in = &in,
-        },
-    };
-    var itr = insn.opIter();
-    var count: u32 = 0;
-    while (itr.next()) |op| {
-        try std.testing.expectEqual(1, op.getGlobalId());
-        count += 1;
-    }
-    try std.testing.expectEqual(1, count);
-}
-
-test "can iterate on ops with list" {
-    var out = Variable{
-        .id = 0,
-        .data = .{ .temp = .{ .id = 0 } },
-    };
-    var recv = Variable{
-        .id = 1,
-        .data = .{ .temp = .{ .id = 1 } },
-    };
-    const param1 = Variable{
-        .id = 3,
-        .data = .{ .temp = .{ .id = 3 } },
-    };
-    const param2 = Variable{
-        .id = 4,
-        .data = .{ .temp = .{ .id = 4 } },
-    };
-
-    var params: std.ArrayList(*Variable) = .empty;
-    defer params.deinit(std.testing.allocator);
-
-    try params.append(std.testing.allocator, @constCast(&param1));
-    try params.append(std.testing.allocator, @constCast(&param2));
-
-    var insn = Instruction{
-        .call = .{
-            .out = &out,
-            .recv = &recv,
-            .name = "test_method",
-            .params = params,
-        },
-    };
-    var itr = insn.opIter();
-    const expected_ids = [_]usize{ 1, 3, 4 }; // recv, param1, param2 variable IDs (name is now []const u8)
-    var var_count: u32 = 0;
-    var total_count: u32 = 0;
-    while (itr.next()) |op| {
-        try std.testing.expectEqual(expected_ids[var_count], op.getGlobalId());
-        var_count += 1;
-        total_count += 1;
-    }
-    try std.testing.expectEqual(3, total_count); // Now 3 instead of 4 since name is not an operand
-    try std.testing.expectEqual(3, var_count);
-}
