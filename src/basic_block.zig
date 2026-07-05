@@ -422,19 +422,6 @@ pub const BasicBlock = struct {
         };
     }
 
-    pub fn removePhi(self: *BasicBlock, mem: std.mem.Allocator) void {
-        var iter = self.insns.first;
-        while (iter) |insn| {
-            iter = insn.next;
-            const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
-            switch (insn_node.data) {
-                .putlabel => {},
-                .phi => self.removeInstruction(mem, insn_node),
-                else => break,
-            }
-        }
-    }
-
     pub fn deinit(self: *BasicBlock, alloc: std.mem.Allocator) void {
         var it = self.insns.first;
         while (it) |insn| {

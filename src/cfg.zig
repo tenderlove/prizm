@@ -10,19 +10,12 @@ const assert = @import("std").debug.assert;
 const BitMap = std.DynamicBitSetUnmanaged;
 const bitmatrix = @import("utils/bitmatrix.zig");
 const BitMatrix = bitmatrix.BitMatrix;
-const SSADestructor = @import("cfg/ssa_destructor.zig").SSADestructor;
-
 pub const CFG = struct {
     pub const State = enum {
         start,
         analyzed,
         phi_placed,
         renamed,
-        phi_isolated,
-        phi_copies_inserted,
-        copy_groups_serialized,
-        renamed_variables_removed,
-        phi_removed,
     };
 
     mem: std.mem.Allocator,
@@ -30,7 +23,6 @@ pub const CFG = struct {
     blocks: []const *BasicBlock,
     dom_tree: ?*BitMatrix = null,
     globals: BitMap,
-    ssa_destructor: *SSADestructor,
     scope: *Scope,
     state: State = .start,
 
@@ -47,7 +39,6 @@ pub const CFG = struct {
             .blocks = blocks,
             .scope = scope,
             .globals = try BitMap.initEmpty(mem, 0),
-            .ssa_destructor = try SSADestructor.init(mem),
         };
 
         return cfg;
@@ -518,75 +509,6 @@ pub const CFG = struct {
         self.state = .renamed;
     }
 
-    pub fn isolatePhi(self: *CFG) !void {
-        try self.ssa_destructor.isolatePhi(self);
-        self.state = .phi_isolated;
-    }
-
-    pub fn insertPhiCopies(self: *CFG) !void {
-        try self.ssa_destructor.insertPhiCopies(self);
-        self.state = .phi_copies_inserted;
-    }
-
-    pub fn serializeCopyGroups(self: *CFG) !void {
-        try self.ssa_destructor.serializeCopyGroups(self);
-        self.state = .copy_groups_serialized;
-    }
-
-    pub fn removeRenamedVariables(self: *CFG) !void {
-        try self.ssa_destructor.renameAllVariables(self);
-        self.state = .renamed_variables_removed;
-    }
-
-    pub fn removeUselessCopies(self: *CFG) void {
-        for (self.blocks) |bb| {
-            assert(bb.reachable);
-
-            var iter: ?*std.DoublyLinkedList.Node = &bb.start.node;
-
-            while (iter) |insn| {
-                const next_insn = insn.next; // Save next before potentially removing current
-                const insn_node: *ir.InstructionListNode = @fieldParentPtr("node", insn);
-
-                switch (insn_node.data) {
-                    .getparam => {
-                        bb.removeInstruction(insn_node, self.scope);
-                    },
-                    .mov => |mov| {
-                        if (mov.out == mov.in) {
-                            bb.removeInstruction(insn_node, self.scope);
-                        }
-                    },
-                    .setparam => |sp| {
-                        if (sp.out == sp.in) {
-                            bb.removeInstruction(insn_node, self.scope);
-                        }
-                    },
-                    else => {},
-                }
-
-                if (insn == &bb.finish.node) break;
-                iter = next_insn;
-            }
-        }
-    }
-
-    pub fn removePhi(self: *CFG) !void {
-        for (self.blocks) |bb| {
-            if (!bb.reachable) continue;
-            bb.removePhi(self.scope.allocator);
-        }
-        self.state = .phi_removed;
-    }
-
-    pub fn destructSSA(self: *CFG) !void {
-        if (self.state != .renamed) return error.CompilationError;
-
-        while (self.state != .phi_removed) {
-            _ = try self.nextCompileStep();
-        }
-    }
-
     fn traverseReversePostorder(blk: ?*BasicBlock, seen: *BitMap, list: []?*BasicBlock, counter: *usize) !void {
         if (blk) |bb| {
             if (seen.isSet(bb.name)) return;
@@ -625,7 +547,6 @@ pub const CFG = struct {
     }
 
     pub fn deinit(self: *CFG) void {
-        self.ssa_destructor.deinit();
         for (self.blocks) |blk| {
             blk.deinit(self.mem);
         }
@@ -639,31 +560,10 @@ pub const CFG = struct {
 
     pub fn nextCompileStep(self: *CFG) !CFG.State {
         switch (self.state) {
-            .start => {
-                try self.analyze();
-            },
-            .analyzed => {
-                try self.placePhis();
-            },
-            .phi_placed => {
-                try self.rename();
-            },
-            .renamed => {
-                try self.isolatePhi();
-            },
-            .phi_isolated => {
-                try self.insertPhiCopies();
-            },
-            .phi_copies_inserted => {
-                try self.serializeCopyGroups();
-            },
-            .copy_groups_serialized => {
-                try self.removeRenamedVariables();
-            },
-            .renamed_variables_removed => {
-                try self.removePhi();
-            },
-            .phi_removed => {},
+            .start => try self.analyze(),
+            .analyzed => try self.placePhis(),
+            .phi_placed => try self.rename(),
+            .renamed => {},
         }
         return self.state;
     }
@@ -1089,34 +989,6 @@ test "while loop dominators" {
     try std.testing.expectEqual(7, blocks.len);
     try std.testing.expectEqual(6, blocks[6].name);
     try std.testing.expect(blocks[6].dom.isSet(6));
-}
-
-test "method definitions" {
-    const mem = std.testing.allocator;
-
-    const globals = try Globals.init(mem);
-    defer globals.deinit(mem);
-
-    const code =
-        \\ def foo
-        \\   1234
-        \\ end
-        \\ foo
-    ;
-    const scope = try compileScope(mem, globals, code);
-    defer scope.deinit();
-
-    const children = scope.childScopes();
-    try std.testing.expectEqual(1, children.items.len);
-
-    // Get a CFG for the foo method
-    const cfg = try CFG.build(mem, children.items[0]);
-    try cfg.compileUntil(.phi_removed);
-    defer cfg.deinit();
-
-    const blocks = cfg.blockList();
-
-    try std.testing.expectEqual(1, blocks.len);
 }
 
 test "dead code removal" {
