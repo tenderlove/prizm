@@ -1,7 +1,7 @@
 const std = @import("std");
 const ir = @import("ir.zig");
 const prism = @import("prism.zig");
-const compiler = @import("compiler.zig");
+const Compiler = @import("compiler.zig").Compiler;
 const Scope = @import("scope.zig").Scope;
 const Globals = @import("globals.zig").Globals;
 const BasicBlock = @import("basic_block.zig").BasicBlock;
@@ -211,6 +211,75 @@ test "jumps targets get predecessors" {
     try std.testing.expect(preds[0] == blocks[2] or preds[1] == blocks[2]);
 }
 
+// `if` without an else branch. In Ruby this evaluates to nil on the false
+// path, so compileIfNode must synthesize a `loadnil` in the else arm rather
+// than dereferencing node.*.subsequent (which is null). Currently
+// compileIfNode does `@ptrCast(node.*.subsequent)` unconditionally and will
+// crash. Skip until we handle the missing-else case.
+test "if without else evaluates to nil on false path" {
+    return error.SkipZigTest;
+    // const allocator = std.testing.allocator;
+    //
+    // const globals = try Globals.init(allocator);
+    // defer globals.deinit(allocator);
+    //
+    // const scope = try compileScope(allocator, globals,
+    //     \\ x = if false then 1 end
+    // );
+    // defer scope.deinit();
+    //
+    // const cfg = try buildCFG(allocator, scope);
+    // defer cfg.deinit();
+    //
+    // Expected shape:
+    //   pre       → if_entry
+    //   if_entry  → then_entry, else_entry   (brif)
+    //   then_entry → if_exit                 (loadi 1, jump)
+    //   else_entry → if_exit                 (loadnil, jump)
+    //   if_exit                              (phi from then_entry, else_entry)
+    //
+    // Assertions to add once compileIfNode handles missing-else:
+    //   - if_exit has 2 predecessors.
+    //   - if_exit starts with a phi.
+    //   - one phi input traces back to a loadi(1), the other to a loadnil.
+}
+
+// A `return` inside a branch terminates that branch's current block with
+// `.leave`. compileIfNode currently pushes an unconditional `jump if_exit`
+// after each branch unconditionally — so a returning branch ends up with
+// TWO terminators AND if_exit gets a spurious predecessor for a control
+// flow edge that can never fire. Skip until pushJump becomes a no-op
+// after a terminator (or compileNode signals early termination).
+test "return in a branch doesn't emit a jump after leave" {
+    return error.SkipZigTest;
+    // const allocator = std.testing.allocator;
+    //
+    // const globals = try Globals.init(allocator);
+    // defer globals.deinit(allocator);
+    //
+    // const scope = try compileScope(allocator, globals,
+    //     \\ def foo x
+    //     \\   if x
+    //     \\     return 42
+    //     \\   else
+    //     \\     99
+    //     \\   end
+    //     \\ end
+    // );
+    // defer scope.deinit();
+    //
+    // const insn = (try findInsn(try buildCFG(allocator, scope),
+    //                            ir.InstructionName.define_method)).?;
+    // const method_scope = insn.data.define_method.func;
+    // const method_cfg = try buildCFG(allocator, method_scope);
+    // defer method_cfg.deinit();
+    //
+    // Assertions to add:
+    //   - Find the block whose terminator is `.leave`. It must have exactly
+    //     one terminator instruction (leave), not leave-then-jump.
+    //   - if_exit has ONE predecessor (the else side only), not two.
+}
+
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
     var iter = try cfg.depthFirstIterator(cfg.mem);
     defer iter.deinit(cfg.mem);
@@ -251,7 +320,7 @@ fn compileScope(allocator: std.mem.Allocator, globals: *Globals, code: []const u
     defer parser.nodeDestroy(root);
 
     var scope_node = try prism.pmNewScopeNode(root);
-    const cc = try compiler.init(allocator, globals, parser);
+    const cc = try Compiler.init(allocator, globals, parser);
     defer cc.deinit(allocator);
     return try cc.compile(&scope_node);
 }

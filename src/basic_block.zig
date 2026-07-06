@@ -11,6 +11,8 @@ pub const BasicBlock = struct {
     scope: *Scope,
     insns: ir.InstructionList,
     predecessors: std.ArrayList(*BasicBlock),
+    sealed: bool = false,
+    filled: bool = false,
 
     pub const DepthFirstIterator = struct {
         seen: std.AutoHashMap(u64, *BasicBlock),

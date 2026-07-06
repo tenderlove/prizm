@@ -24,6 +24,7 @@ pub const Scope = struct {
     current_block: *BasicBlock,
     blocks: std.ArrayList(*BasicBlock),
     currentDef: DefMap,
+    incomplete_phis: std.AutoHashMapUnmanaged(*BasicBlock, std.StringHashMapUnmanaged(*Insn)) = .empty,
 
     pub fn getName(self: *Scope) []const u8 {
         return self.name;
@@ -35,11 +36,60 @@ pub const Scope = struct {
         try gop.value_ptr.put(self.allocator, block, value);
     }
 
-    pub fn readVariable(self: *Scope, name: []const u8, block: *BasicBlock) !*Insn {
-        if (self.currentDef.getPtr(name)) |inner| {
-            if (inner.get(block)) |v| return v;
+    fn tryRemoveTrivialPhi(_: *Scope, phi: *Insn) !*Insn {
+        var same: ?*Insn = null;
+        for (phi.data.phi.params.items) |op| {
+            if (op == same or op == phi)
+                continue; // Unique value or self-reference
+            if (same != null)
+                return phi; // The phi merges at least two values: not trivial
+            same = op;
         }
-        @panic("FIXME: implement ReadVariableRecursive");
+
+        // FIXME: We need to finish this up with use lists.
+        return same orelse phi;
+    }
+
+    fn addPhiOperands(self: *Scope, name: []const u8, block: *BasicBlock, phi: *Insn) !*Insn {
+        for (block.predecessors.items) |pred| {
+            const operand = try self.readVariable(name, pred);
+            try phi.data.phi.params.append(self.allocator, operand);
+        }
+        return try self.tryRemoveTrivialPhi(phi);
+    }
+
+    fn readVariableRecursive(self: *Scope, name: []const u8, block: *BasicBlock) error{OutOfMemory}!*Insn {
+        var val: *Insn = undefined;
+
+        if (!block.sealed) {
+            // Incomplete CFG
+            val = try self.newPhiAtStart(block);
+            const outer = try self.incomplete_phis.getOrPut(self.allocator, block);
+            if (!outer.found_existing) outer.value_ptr.* = .empty;
+            try outer.value_ptr.put(self.allocator, name, val);
+        } else if (block.predecessors.items.len == 1) {
+            // Common case of 1 predecessor
+            val = try self.readVariable(name, block.predecessors.items[0]);
+        } else {
+            // Break potential cycles with operandless phi
+            val = try self.newPhiAtStart(block);
+            try self.writeVariable(name, block, val);
+            val = try self.addPhiOperands(name, block, val);
+        }
+
+        try self.writeVariable(name, block, val);
+        return val;
+    }
+
+    pub fn readVariable(self: *Scope, name: []const u8, block: *BasicBlock) error{OutOfMemory}!*Insn {
+        if (self.currentDef.getPtr(name)) |inner| {
+            if (inner.get(block)) |v|
+                return v
+            else
+                return try self.readVariableRecursive(name, block);
+        } else {
+            @panic("FIXME");
+        }
     }
 
     pub fn insnCount(self: *Scope) usize {
@@ -139,6 +189,28 @@ pub const Scope = struct {
 
     pub fn currentBlock(self: *Scope) *BasicBlock {
         return self.current_block;
+    }
+
+    pub fn blockFilled(_: *Scope, block: *BasicBlock) void {
+        block.filled = true;
+    }
+
+    pub fn sealBlock(self: *Scope, block: *BasicBlock) !void {
+        if (self.incomplete_phis.getPtr(block)) |inner| {
+            var it = inner.iterator();
+            while (it.next()) |entry| {
+                _ = try self.addPhiOperands(entry.key_ptr.*, block, entry.value_ptr.*);
+            }
+            inner.deinit(self.allocator);
+            _ = self.incomplete_phis.remove(block);
+        }
+        block.sealed = true;
+    }
+
+    fn newPhiAtStart(self: *Scope, block: *BasicBlock) !*Insn {
+        const node = try self.makeInsn(.{ .phi = .{ .params = .empty } });
+        block.insns.prepend(&node.node);
+        return node;
     }
 
     pub fn init(alloc: std.mem.Allocator, id: u32, name: []const u8, parent: ?*Scope) !*Scope {

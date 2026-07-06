@@ -15,11 +15,25 @@ pub const Compiler = struct {
     globals: *Globals,
     scope_ids: u32 = 0,
 
+    pub fn init(allocator: std.mem.Allocator, m: *Globals, parser: *prism.Prism) !*Compiler {
+        const cc = try allocator.create(Compiler);
+        cc.* = Compiler{
+            .parser = @ptrCast(parser.parser),
+            .globals = m,
+            .allocator = allocator,
+        };
+        return cc;
+    }
+
+    pub fn deinit(self: *Compiler, allocator: std.mem.Allocator) void {
+        allocator.destroy(self);
+    }
+
     pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{ EmptyInstructionSequence, NotImplementedError, OutOfMemory }!*Scope {
         return compileScopeNode(cc, null, node);
     }
 
-    pub fn compileNode(cc: *Compiler, scope: *Scope, node: *const c.pm_node_t) error{ NotImplementedError, OutOfMemory } !*Insn {
+    fn compileNode(cc: *Compiler, scope: *Scope, node: *const c.pm_node_t) error{ NotImplementedError, OutOfMemory } !*Insn {
         // std.debug.print("--> compiling type {s} {} op: {any}\n", .{c.pm_node_type_to_str(node.*.type), op});
         const opnd = switch (node.*.type) {
             c.PM_BEGIN_NODE => try cc.compileBeginNode(scope, @ptrCast(node)),
@@ -169,25 +183,41 @@ pub const Compiler = struct {
     }
 
     fn compileIfNode(cc: *Compiler, scope: *Scope, node: *const c.pm_if_node_t) !*Insn {
+        const if_entry = try scope.newBlock();
+        try scope.pushJump(if_entry);
+        scope.blockFilled(scope.currentBlock());
+
+        try scope.sealBlock(if_entry);
+        scope.setCurrentBlock(if_entry);
+
         const predicate = try cc.compilePredicate(scope, node.*.predicate);
 
-        const true_block = try scope.newBlock();
-        const false_block = try scope.newBlock();
-        const join_block = try scope.newBlock();
+        const then_entry = try scope.newBlock();
+        const else_entry = try scope.newBlock();
+        const if_exit = try scope.newBlock();
 
-        try scope.pushCond(predicate, true_block, false_block);
+        try scope.pushCond(predicate, then_entry, else_entry);
+        scope.blockFilled(if_entry);
 
-        scope.setCurrentBlock(true_block);
+        // Nobody else can jump to these two blocks
+        try scope.sealBlock(then_entry);
+        try scope.sealBlock(else_entry);
+
         // Compile the true branch and get a return value
+        scope.setCurrentBlock(then_entry);
         const truthy = try cc.compileNode(scope, @ptrCast(node.*.statements));
-        try scope.pushJump(join_block);
+        try scope.pushJump(if_exit);
+        scope.blockFilled(scope.currentBlock()); // Done pushing instructions
 
-
-        scope.setCurrentBlock(false_block);
+        // Compile the false branch and get a return value
+        scope.setCurrentBlock(else_entry);
         const falsy = try cc.compileNode(scope, @ptrCast(node.*.subsequent));
-        try scope.pushJump(join_block);
+        try scope.pushJump(if_exit);
+        scope.blockFilled(scope.currentBlock()); // Done pushing instructions
 
-        scope.setCurrentBlock(join_block);
+        // Nobody else can jump to if_exit now.
+        try scope.sealBlock(if_exit);
+        scope.setCurrentBlock(if_exit);
 
         var phi_params: std.ArrayList(*Insn) = .empty;
         try phi_params.appendSlice(cc.allocator, &.{ truthy, falsy });
@@ -235,19 +265,20 @@ pub const Compiler = struct {
     }
 
     fn compileLocalVariableOperatorWriteNode(cc: *Compiler, scope: *Scope, node: *const c.pm_local_variable_operator_write_node_t) !*Insn {
-        const recv = try scope.readVariable(try cc.dedupString(cc.stringFromId(node.*.name)), scope.currentBlock());
+        const name = try cc.dedupString(cc.stringFromId(node.*.name));
+        const recv = try scope.readVariable(name, scope.currentBlock());
 
         const op = cc.stringFromId(node.*.binary_operator);
         var params: std.ArrayList(*Insn) = .empty;
         try params.append(cc.allocator, (try cc.compileNode(scope, node.*.value)));
 
         if (op.len == 1) {
-            switch (op[0]) {
-                '+' => _ = try scope.pushCall(recv, op, params),
-                '-' => _ = try scope.pushCall(recv, op, params),
+            const result = switch (op[0]) {
+                '+', '-' => try scope.pushCall(recv, op, params),
                 else => return error.NotImplementedError,
-            }
-            return recv;
+            };
+            try scope.writeVariable(name, scope.currentBlock(), result);
+            return result;
         } else {
             return error.NotImplementedError;
         }
@@ -357,10 +388,6 @@ pub const Compiler = struct {
         return try scope.pushLoadNil();
     }
 
-    pub fn deinit(self: *Compiler, allocator: std.mem.Allocator) void {
-        allocator.destroy(self);
-    }
-
     fn stringFromId(cc: *Compiler, id: c.pm_constant_id_t) []const u8 {
         const constant = c.pm_constant_pool_id_to_constant(&cc.parser.*.constant_pool, id);
         return constant.*.start[0..(constant.*.length)];
@@ -374,16 +401,6 @@ pub const Compiler = struct {
         // deduplicate the string
         const dedup = try self.globals.getString(name);
         try self.scope.?.writeVariable(dedup, block, value);
-    }
-
-    pub fn init(allocator: std.mem.Allocator, m: *Globals, parser: *prism.Prism) !*Compiler {
-        const cc = try allocator.create(Compiler);
-        cc.* = Compiler{
-            .parser = @ptrCast(parser.parser),
-            .globals = m,
-            .allocator = allocator,
-        };
-        return cc;
     }
 };
 
