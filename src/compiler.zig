@@ -178,18 +178,12 @@ pub const Compiler = struct {
             try scope.pushLoadNil();
 
         _ = try scope.pushLeave(last_op);
+        scope.blockFilled(scope.currentBlock());
 
         return scope;
     }
 
     fn compileIfNode(cc: *Compiler, scope: *Scope, node: *const c.pm_if_node_t) !*Insn {
-        const if_entry = try scope.newBlock();
-        try scope.pushJump(if_entry);
-        scope.blockFilled(scope.currentBlock());
-
-        try scope.sealBlock(if_entry);
-        scope.setCurrentBlock(if_entry);
-
         const predicate = try cc.compilePredicate(scope, node.*.predicate);
 
         const then_entry = try scope.newBlock();
@@ -197,7 +191,7 @@ pub const Compiler = struct {
         const if_exit = try scope.newBlock();
 
         try scope.pushCond(predicate, then_entry, else_entry);
-        scope.blockFilled(if_entry);
+        scope.blockFilled(scope.currentBlock());
 
         // Nobody else can jump to these two blocks
         try scope.sealBlock(then_entry);

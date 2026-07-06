@@ -145,6 +145,7 @@ pub const BasicBlock = struct {
     }
 
     pub fn pushVoidInsn(self: *BasicBlock, insn: ir.Instruction) !void {
+        std.debug.assert(!self.filled);
         switch (insn) {
             .jump, .cond, => {},
             else => unreachable,
@@ -155,6 +156,7 @@ pub const BasicBlock = struct {
     }
 
     pub fn pushInsn(self: *BasicBlock, insn: ir.Instruction) !*Insn {
+        std.debug.assert(!self.filled);
         const node = try self.scope.makeInsn(insn);
         self.insns.append(&node.node);
         return node;
