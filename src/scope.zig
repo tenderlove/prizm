@@ -245,9 +245,16 @@ pub const Scope = struct {
     }
 
     pub fn deinit(self: *Scope) void {
-        var it = self.currentDef.iterator();
-        while (it.next()) |entry| entry.value_ptr.deinit(self.allocator);
+        var cd_it = self.currentDef.iterator();
+        while (cd_it.next()) |entry| entry.value_ptr.deinit(self.allocator);
         self.currentDef.deinit(self.allocator);
+
+        // Braun's invariant: every block must be sealed by end of compilation,
+        // which means sealBlock has drained every entry from incomplete_phis.
+        // A non-empty map here is a bug in the surrounding compiler flow.
+        std.debug.assert(self.incomplete_phis.count() == 0);
+        self.incomplete_phis.deinit(self.allocator);
+
         for (self.children.items) |scope| {
             scope.deinit();
         }

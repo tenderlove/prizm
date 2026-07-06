@@ -151,6 +151,7 @@ pub const Compiler = struct {
         };
 
         const scope = try Scope.init(cc.allocator, cc.scope_ids, scope_name, parent);
+        try scope.sealBlock(scope.currentBlock());
         cc.scope_ids += 1;
 
         // Every scope gets a "self" as a parameter
@@ -165,9 +166,13 @@ pub const Compiler = struct {
             if (requireds_list) |listptr| {
                 const list = listptr.*.nodes[0..listptr.*.size];
                 for (list, 0..) |param, i| {
-                    _ = (try cc.compileNode(scope, @ptrCast(param)));
-                    _ = try scope.pushGetParam(i + 1);
-                    @panic("FIXME");
+                    // We only expect required parameter nodes here.
+                    std.debug.assert(c.PM_NODE_TYPE(param) == c.PM_REQUIRED_PARAMETER_NODE);
+                    const p: *const c.pm_required_parameter_node_t = @ptrCast(param);
+
+                    const name = try cc.dedupString(cc.stringFromId(p.*.name));
+                    const value = try scope.pushGetParam(i + 1); // 0 is self
+                    try scope.writeVariable(name, scope.currentBlock(), value);
                 }
             }
         }
@@ -345,7 +350,10 @@ pub const Compiler = struct {
         // end while x > 0
         if ((node.*.base.flags & c.PM_LOOP_FLAGS_BEGIN_MODIFIER) == c.PM_LOOP_FLAGS_BEGIN_MODIFIER) {
             const body = try scope.newBlock();
+            const exit = try scope.newBlock();
+
             try scope.pushJump(body);
+            scope.blockFilled(scope.currentBlock());
             scope.setCurrentBlock(body);
 
             if (node.*.statements) |stmt| {
@@ -353,8 +361,10 @@ pub const Compiler = struct {
             }
 
             const cmp = try cc.compilePredicate(scope, node.*.predicate);
-            const exit = try scope.newBlock();
             try scope.pushCond(cmp, body, exit);
+            scope.blockFilled(scope.currentBlock());
+            try scope.sealBlock(body);
+            try scope.sealBlock(exit);
             scope.setCurrentBlock(exit);
         } else { // Regular while loops
             const header = try scope.newBlock();
@@ -362,20 +372,28 @@ pub const Compiler = struct {
             const exit = try scope.newBlock();
 
             try scope.pushJump(header);
+            scope.blockFilled(scope.currentBlock());
+
             scope.setCurrentBlock(header);
 
             // If predicate is false, jump to then label
             const predicate = try cc.compilePredicate(scope, node.*.predicate);
 
             try scope.pushCond(predicate, body, exit);
+            // Finished filling the header
+            scope.blockFilled(scope.currentBlock());
 
             // Compile the loop body
+            try scope.sealBlock(body);
             scope.setCurrentBlock(body);
             if (node.*.statements) |stmt| {
                 _ = try cc.compileNode(scope, @ptrCast(stmt));
             }
             try scope.pushJump(header);
+            scope.blockFilled(scope.currentBlock());
 
+            try scope.sealBlock(header);
+            try scope.sealBlock(exit);
             scope.setCurrentBlock(exit);
         }
 
@@ -397,6 +415,10 @@ pub const Compiler = struct {
         try self.scope.?.writeVariable(dedup, block, value);
     }
 };
+
+fn expectInstructionType(expected: ir.InstructionName, actual: ir.InstructionName) !void {
+    try std.testing.expectEqual(expected, actual);
+}
 
 pub fn compileString(allocator: std.mem.Allocator, globals: *Globals, code: []const u8) !*Scope {
     const parser = try prism.Prism.newParserCtx(allocator);
@@ -425,10 +447,6 @@ pub fn compileString(allocator: std.mem.Allocator, globals: *Globals, code: []co
 //     try std.testing.expect(insn != null);
 //     try expectInstructionType(ir.Instruction.getparam, @as(*ir.InstructionListNode, @fieldParentPtr("node", insn.?)).data);
 // }
-
-fn expectInstructionType(expected: ir.InstructionName, actual: ir.InstructionName) !void {
-    try std.testing.expectEqual(expected, actual);
-}
 
 // test "compile local set" {
 //     const allocator = std.testing.allocator;
