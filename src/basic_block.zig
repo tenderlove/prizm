@@ -133,19 +133,8 @@ pub const BasicBlock = struct {
         insn.data.deinit(mem);
     }
 
-    pub fn fallsThrough(self: *BasicBlock) bool {
-        return switch (self.finishInsn().?.data) {
-            .jump, .leave => false,
-            else => true,
-        };
-    }
-
     pub fn isTerminated(self: *BasicBlock) bool {
-        const last = self.finishInsn() orelse return false;
-        return switch (last.data) {
-            .jump, .cond, .leave => true,
-            else => false,
-        };
+        return self.filled;
     }
 
     pub fn addPredecessor(self: *BasicBlock, alloc: std.mem.Allocator, predecessor: *BasicBlock) !void {

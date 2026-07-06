@@ -116,6 +116,15 @@ pub const Scope = struct {
     }
 
     pub fn cfg(self: *Scope, mem: std.mem.Allocator) !*CFG {
+        // Well-formedness invariant at the frontend/CFG boundary: every block
+        // handed off must be sealed (no more predecessors coming) and filled
+        // (no more instructions coming). Fill is automatic on terminator
+        // push (pushJump/pushCond/pushLeave); this catches "forgot to seal"
+        // and "block never got a terminator" bugs at the earliest point.
+        for (self.blocks.items) |block| {
+            assert(block.sealed);
+            assert(block.filled);
+        }
         return try CFG.init(mem, self, self.entry_block, try self.blocks.toOwnedSlice(mem));
     }
 
@@ -148,12 +157,14 @@ pub const Scope = struct {
     pub fn pushJump(self: *Scope, target: *BasicBlock) !void {
         try self.pushVoidInsn(.{ .jump = .{ .target = target } });
         try target.addPredecessor(self.allocator, self.current_block);
+        self.current_block.filled = true;
     }
 
     pub fn pushCond(self: *Scope, cond: *Insn, truthy: *BasicBlock, falsy: *BasicBlock) !void {
         try self.pushVoidInsn(.{ .cond = .{ .condition = cond, .truthy = truthy, .falsy = falsy } });
         try truthy.addPredecessor(self.allocator, self.current_block);
         try falsy.addPredecessor(self.allocator, self.current_block);
+        self.current_block.filled = true;
     }
 
     pub fn pushTest(self: *Scope, in: *Insn) !*Insn {
@@ -161,7 +172,9 @@ pub const Scope = struct {
     }
 
     pub fn pushLeave(self: *Scope, in: *Insn) !*Insn {
-        return try self.pushInsn(.{ .leave = .{ .in = in } });
+        const insn = try self.pushInsn(.{ .leave = .{ .in = in } });
+        self.current_block.filled = true;
+        return insn;
     }
 
     pub fn pushLoadi(self: *Scope, val: u64) !*Insn {
@@ -199,10 +212,6 @@ pub const Scope = struct {
 
     pub fn currentBlock(self: *Scope) *BasicBlock {
         return self.current_block;
-    }
-
-    pub fn blockFilled(_: *Scope, block: *BasicBlock) void {
-        block.filled = true;
     }
 
     pub fn sealBlock(self: *Scope, block: *BasicBlock) !void {

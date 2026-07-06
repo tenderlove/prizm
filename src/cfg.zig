@@ -84,14 +84,19 @@ test "basic block one instruction" {
     const scope = try Scope.init(std.testing.allocator, 0, "empty", null);
     defer scope.deinit();
 
-    _ = try scope.pushLoadi(123);
+    const val = try scope.pushLoadi(123);
+    _ = try scope.pushLeave(val);  // auto-fills the block
+
+    // scope.cfg asserts every block is sealed + filled. Fill happens on the
+    // terminator push; seal has no automatic trigger, so do it here.
+    try scope.sealBlock(scope.currentBlock());
 
     const cfg = try buildCFG(std.testing.allocator, scope);
     defer cfg.deinit();
 
     const bb = cfg.head;
 
-    try std.testing.expectEqual(1, bb.insnCount());
+    try std.testing.expectEqual(2, bb.insnCount());
 }
 
 test "CFG from compiler" {

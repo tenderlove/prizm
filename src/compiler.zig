@@ -185,7 +185,6 @@ pub const Compiler = struct {
             try scope.pushLoadNil();
 
         _ = try scope.pushLeave(last_op);
-        scope.blockFilled(scope.currentBlock());
 
         return scope;
     }
@@ -198,7 +197,6 @@ pub const Compiler = struct {
         const if_exit = try scope.newBlock();
 
         try scope.pushCond(predicate, then_entry, else_entry);
-        scope.blockFilled(scope.currentBlock());
 
         // Nobody else can jump to these two blocks
         try scope.sealBlock(then_entry);
@@ -209,10 +207,11 @@ pub const Compiler = struct {
         const truthy = try cc.compileNode(scope, @ptrCast(node.*.statements));
         const then_terminated = scope.currentBlock().isTerminated();
 
-        // Check if someone put "return" in the if statement
+        // Check if someone put "return" in the if statement. If they did,
+        // compileReturnNode's pushLeave already filled the block; otherwise
+        // pushJump does so here.
         if (!then_terminated) {
             try scope.pushJump(if_exit);
-            scope.blockFilled(scope.currentBlock()); // Done pushing instructions
         }
 
         // Compile the false branch and get a return value
@@ -224,10 +223,10 @@ pub const Compiler = struct {
 
         const else_terminated = scope.currentBlock().isTerminated();
 
-        // Check if someone put a return in the else side
+        // Check if someone put a return in the else side. Same logic as
+        // the then arm — either compileReturnNode filled it or pushJump does.
         if (!else_terminated) {
             try scope.pushJump(if_exit);
-            scope.blockFilled(scope.currentBlock()); // Done pushing instructions
         }
 
         // Both sides got a return
@@ -390,7 +389,6 @@ pub const Compiler = struct {
             const exit = try scope.newBlock();
 
             try scope.pushJump(body);
-            scope.blockFilled(scope.currentBlock());
             scope.setCurrentBlock(body);
 
             if (node.*.statements) |stmt| {
@@ -399,7 +397,6 @@ pub const Compiler = struct {
 
             const cmp = try cc.compilePredicate(scope, node.*.predicate);
             try scope.pushCond(cmp, body, exit);
-            scope.blockFilled(scope.currentBlock());
             try scope.sealBlock(body);
             try scope.sealBlock(exit);
             scope.setCurrentBlock(exit);
@@ -409,7 +406,6 @@ pub const Compiler = struct {
             const exit = try scope.newBlock();
 
             try scope.pushJump(header);
-            scope.blockFilled(scope.currentBlock());
 
             scope.setCurrentBlock(header);
 
@@ -417,8 +413,6 @@ pub const Compiler = struct {
             const predicate = try cc.compilePredicate(scope, node.*.predicate);
 
             try scope.pushCond(predicate, body, exit);
-            // Finished filling the header
-            scope.blockFilled(scope.currentBlock());
 
             // Compile the loop body
             try scope.sealBlock(body);
@@ -427,7 +421,6 @@ pub const Compiler = struct {
                 _ = try cc.compileNode(scope, @ptrCast(stmt));
             }
             try scope.pushJump(header);
-            scope.blockFilled(scope.currentBlock());
 
             try scope.sealBlock(header);
             try scope.sealBlock(exit);
