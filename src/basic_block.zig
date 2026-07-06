@@ -140,6 +140,14 @@ pub const BasicBlock = struct {
         };
     }
 
+    pub fn isTerminated(self: *BasicBlock) bool {
+        const last = self.finishInsn() orelse return false;
+        return switch (last.data) {
+            .jump, .cond, .leave => true,
+            else => false,
+        };
+    }
+
     pub fn addPredecessor(self: *BasicBlock, alloc: std.mem.Allocator, predecessor: *BasicBlock) !void {
         try self.predecessors.append(alloc, predecessor);
     }
@@ -147,7 +155,9 @@ pub const BasicBlock = struct {
     pub fn pushVoidInsn(self: *BasicBlock, insn: ir.Instruction) !void {
         std.debug.assert(!self.filled);
         switch (insn) {
-            .jump, .cond, => {},
+            .jump,
+            .cond,
+            => {},
             else => unreachable,
         }
 
@@ -172,3 +182,22 @@ pub const BasicBlock = struct {
         alloc.destroy(self);
     }
 };
+
+test "isTerminated()" {
+    const alloc = std.testing.allocator;
+    const scope = try Scope.init(alloc, 0, "test", null);
+    defer scope.deinit();
+
+    const block = scope.entry_block;
+
+    // Empty block: no terminator.
+    try std.testing.expect(!block.isTerminated());
+
+    // Value-producing instructions don't terminate.
+    const val = try scope.pushLoadi(42);
+    try std.testing.expect(!block.isTerminated());
+
+    // .leave is a terminator.
+    _ = try scope.pushLeave(val);
+    try std.testing.expect(block.isTerminated());
+}

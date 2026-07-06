@@ -207,8 +207,13 @@ pub const Compiler = struct {
         // Compile the true branch and get a return value
         scope.setCurrentBlock(then_entry);
         const truthy = try cc.compileNode(scope, @ptrCast(node.*.statements));
-        try scope.pushJump(if_exit);
-        scope.blockFilled(scope.currentBlock()); // Done pushing instructions
+        const then_terminated = scope.currentBlock().isTerminated();
+
+        // Check if someone put "return" in the if statement
+        if (!then_terminated) {
+            try scope.pushJump(if_exit);
+            scope.blockFilled(scope.currentBlock()); // Done pushing instructions
+        }
 
         // Compile the false branch and get a return value
         scope.setCurrentBlock(else_entry);
@@ -216,16 +221,35 @@ pub const Compiler = struct {
             try cc.compileNode(scope, @ptrCast(sub))
         else
             try scope.pushLoadNil();
-        try scope.pushJump(if_exit);
-        scope.blockFilled(scope.currentBlock()); // Done pushing instructions
 
-        // Nobody else can jump to if_exit now.
-        try scope.sealBlock(if_exit);
-        scope.setCurrentBlock(if_exit);
+        const else_terminated = scope.currentBlock().isTerminated();
 
-        var phi_params: std.ArrayList(*Insn) = .empty;
-        try phi_params.appendSlice(cc.allocator, &.{ truthy, falsy });
-        return try scope.pushPhi(phi_params);
+        // Check if someone put a return in the else side
+        if (!else_terminated) {
+            try scope.pushJump(if_exit);
+            scope.blockFilled(scope.currentBlock()); // Done pushing instructions
+        }
+
+        // Both sides got a return
+        if (then_terminated and else_terminated) {
+            try scope.sealBlock(if_exit);
+            scope.setCurrentBlock(if_exit);
+            return try scope.pushLoadNil();
+        } else {
+            // Nobody else can jump to if_exit now.
+            try scope.sealBlock(if_exit);
+            scope.setCurrentBlock(if_exit);
+
+            if (then_terminated) {
+                return falsy;
+            } else if (else_terminated) {
+                return truthy;
+            } else {
+                var phi_params: std.ArrayList(*Insn) = .empty;
+                try phi_params.appendSlice(cc.allocator, &.{ truthy, falsy });
+                return try scope.pushPhi(phi_params);
+            }
+        }
     }
 
     fn compilePredicate(cc: *Compiler, scope: *Scope, node: *const c.pm_node_t) !*Insn {

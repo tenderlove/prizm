@@ -48,7 +48,7 @@ const MIRInstruction = struct {
     inputs: []const u32,
     uses: []const u32,
     memInputs: []const struct {} = &.{},
-    @"type": []const u8,
+    type: []const u8,
 };
 
 const LIRBlock = struct {
@@ -287,7 +287,7 @@ pub const IonGraph = struct {
                 .attributes = &.{},
                 .inputs = inputs[node.id].items,
                 .uses = uses[node.id].items,
-                .@"type" = "None",
+                .type = "None",
             });
             iter = raw.next;
         }

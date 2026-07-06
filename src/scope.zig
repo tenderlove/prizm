@@ -169,7 +169,9 @@ pub const Scope = struct {
     }
 
     pub fn pushLoadString(self: *Scope, val: []const u8) !*Insn {
-        return try self.pushInsn(.{ .loadstr = .{ .val = val, } });
+        return try self.pushInsn(.{ .loadstr = .{
+            .val = val,
+        } });
     }
 
     pub fn pushLoadNil(self: *Scope) !*Insn {

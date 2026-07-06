@@ -116,10 +116,10 @@ test "CFG from compiler" {
 
 test "complex loop with if" {
     const allocator = std.testing.allocator;
-    
+
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
-    
+
     const code =
         \\ def foo y, z
         \\   while y
@@ -138,13 +138,13 @@ test "complex loop with if" {
     ;
     const scope = try compileScope(allocator, globals, code);
     defer scope.deinit();
-    
+
     const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
-    
+
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
     const method_scope = insn.data.define_method.func;
-    
+
     const methodcfg = try buildCFG(allocator, method_scope);
     defer methodcfg.deinit();
 }
@@ -205,10 +205,10 @@ test "jumps targets get predecessors" {
 // crash. Skip until we handle the missing-else case.
 test "if without else evaluates to nil on false path" {
     const allocator = std.testing.allocator;
-    
+
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
-    
+
     const scope = try compileScope(allocator, globals,
         \\ x = if false then 1 end
     );
@@ -245,33 +245,277 @@ test "if without else evaluates to nil on false path" {
 // flow edge that can never fire. Skip until pushJump becomes a no-op
 // after a terminator (or compileNode signals early termination).
 test "return in a branch doesn't emit a jump after leave" {
-    return error.SkipZigTest;
-    // const allocator = std.testing.allocator;
-    //
-    // const globals = try Globals.init(allocator);
-    // defer globals.deinit(allocator);
-    //
-    // const scope = try compileScope(allocator, globals,
-    //     \\ def foo x
-    //     \\   if x
-    //     \\     return 42
-    //     \\   else
-    //     \\     99
-    //     \\   end
-    //     \\ end
-    // );
-    // defer scope.deinit();
-    //
-    // const insn = (try findInsn(try buildCFG(allocator, scope),
-    //                            ir.InstructionName.define_method)).?;
-    // const method_scope = insn.data.define_method.func;
-    // const method_cfg = try buildCFG(allocator, method_scope);
-    // defer method_cfg.deinit();
-    //
-    // Assertions to add:
-    //   - Find the block whose terminator is `.leave`. It must have exactly
-    //     one terminator instruction (leave), not leave-then-jump.
-    //   - if_exit has ONE predecessor (the else side only), not two.
+    const allocator = std.testing.allocator;
+
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
+
+    const scope = try compileScope(allocator, globals,
+        \\ def foo x
+        \\   if x
+        \\     return 42
+        \\   else
+        \\     99
+        \\   end
+        \\ end
+    );
+    defer scope.deinit();
+
+    const outer_cfg = try buildCFG(allocator, scope);
+    defer outer_cfg.deinit();
+    const insn = (try findInsn(outer_cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func;
+    const method_cfg = try buildCFG(allocator, method_scope);
+    defer method_cfg.deinit();
+
+    // compileIfNode creates blocks in this order: entry, then, else, if_exit.
+    const blocks = method_cfg.blockList();
+    try std.testing.expectEqual(4, blocks.len);
+
+    const entry_block = blocks[0];
+    const then_block = blocks[1];
+    const else_block = blocks[2];
+    const if_exit = blocks[3];
+
+    // The `then` block must end in `.leave` (from `return 42`) — the fix is
+    // that pushJump no-ops on an already-terminated block, so no spurious
+    // jump gets appended after the leave.
+    try std.testing.expectEqual(
+        ir.InstructionName.leave,
+        @as(ir.InstructionName, then_block.finishInsn().?.data),
+    );
+
+    // The else side reached the merge with a normal jump.
+    try std.testing.expectEqual(
+        ir.InstructionName.jump,
+        @as(ir.InstructionName, else_block.finishInsn().?.data),
+    );
+
+    // if_exit has ONE predecessor: only the else side actually falls through.
+    // The then side terminated with leave, so it does NOT contribute an edge.
+    try std.testing.expectEqual(1, if_exit.predecessors.items.len);
+    try std.testing.expectEqual(else_block, if_exit.predecessors.items[0]);
+
+    // Entry still splits into both branches — cond edges are eager, they
+    // don't retroactively vanish just because one arm ended up terminating.
+    try std.testing.expectEqual(
+        ir.InstructionName.cond,
+        @as(ir.InstructionName, entry_block.finishInsn().?.data),
+    );
+}
+
+// Both branches of an `if` return. compileIfNode currently leaves
+// `current_block` pointing at `else_entry` (which already ends in `.leave`
+// from the else-side return) and returns `truthy` — the `.leave` instruction
+// pushed by the then-side `compileReturnNode`.
+//
+// The caller (compileScopeNode) then does `pushLeave(last_op)` on
+// `else_entry`, appending a *second* `.leave` after the existing one AND
+// wrapping a terminator insn as an SSA value (`leave(leave)`).
+//
+// Skip until compileIfNode moves current_block to `if_exit` (and returns a
+// legitimate non-terminator value there — e.g., a fresh loadnil) when both
+// arms terminate.
+test "if with return in both branches doesn't double-terminate else" {
+    const allocator = std.testing.allocator;
+
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
+
+    const scope = try compileScope(allocator, globals,
+        \\ def foo x
+        \\   if x
+        \\     return 1
+        \\   else
+        \\     return 2
+        \\   end
+        \\ end
+    );
+    defer scope.deinit();
+
+    const outer_cfg = try buildCFG(allocator, scope);
+    defer outer_cfg.deinit();
+    const insn = (try findInsn(outer_cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func;
+    const method_cfg = try buildCFG(allocator, method_scope);
+    defer method_cfg.deinit();
+
+    const blocks = method_cfg.blockList();
+    try std.testing.expectEqual(4, blocks.len);
+
+    const then_block = blocks[1];
+    const else_block = blocks[2];
+
+    // The then arm is `loadi 1; leave` — nothing after the leave.
+    try std.testing.expectEqual(2, then_block.insnCount());
+    try std.testing.expectEqual(
+        ir.InstructionName.leave,
+        @as(ir.InstructionName, then_block.finishInsn().?.data),
+    );
+
+    // Same for the else arm. Currently fails: else_entry gets a third
+    // instruction, a second `.leave` from compileScopeNode's pushLeave.
+    try std.testing.expectEqual(2, else_block.insnCount());
+    try std.testing.expectEqual(
+        ir.InstructionName.leave,
+        @as(ir.InstructionName, else_block.finishInsn().?.data),
+    );
+
+    // Every `.leave.in` must be a real SSA value — never a terminator.
+    // Currently fails: the scope-level pushLeave receives `truthy` (a leave
+    // insn) as its operand, so we get `leave(leave(loadi 1))`.
+    for (blocks) |bb| {
+        var it = bb.instructionIter(.{});
+        while (it.next()) |i| {
+            if (i.data == .leave) {
+                try std.testing.expect(i.data.leave.in.data != .leave);
+                try std.testing.expect(i.data.leave.in.data != .jump);
+                try std.testing.expect(i.data.leave.in.data != .cond);
+            }
+        }
+    }
+}
+
+// Code after an `if` whose branches both `return` must not land in the
+// already-terminated else block. compileIfNode should park current_block on
+// `if_exit` even in the both-terminated case so downstream compilation
+// emits into an unreachable-but-well-formed merge block rather than
+// scribbling past a terminator.
+test "code after both-branch-return if lands in if_exit" {
+    const allocator = std.testing.allocator;
+
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
+
+    const scope = try compileScope(allocator, globals,
+        \\ def foo x
+        \\   if x
+        \\     return 1
+        \\   else
+        \\     return 2
+        \\   end
+        \\   99
+        \\ end
+    );
+    defer scope.deinit();
+
+    const outer_cfg = try buildCFG(allocator, scope);
+    defer outer_cfg.deinit();
+    const insn = (try findInsn(outer_cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func;
+    const method_cfg = try buildCFG(allocator, method_scope);
+    defer method_cfg.deinit();
+
+    const blocks = method_cfg.blockList();
+    try std.testing.expectEqual(4, blocks.len);
+
+    const else_block = blocks[2];
+    const if_exit = blocks[3];
+
+    // Else arm is exactly `loadi 2; leave`. The `99` must NOT land here.
+    try std.testing.expectEqual(2, else_block.insnCount());
+
+    // The trailing `99` (loadi 99) and scope-final `leave` must land in
+    // if_exit. If compileIfNode failed to move current_block there, this
+    // block would be empty.
+    try std.testing.expect(if_exit.insnCount() >= 2);
+    try std.testing.expectEqual(
+        ir.InstructionName.leave,
+        @as(ir.InstructionName, if_exit.finishInsn().?.data),
+    );
+}
+
+// When an inner `if` has `return` in both arms, the outer `if`'s then-arm
+// never falls through. In an ideal IR, the outer merge (outer_if_exit)
+// would end up with a single reachable predecessor (the outer else side)
+// and no phi, since only one arm actually reached it.
+//
+// Because compileIfNode's both-terminated case parks current_block on a
+// fresh `inner_if_exit` with a `loadnil` in it, the outer sees
+// `isTerminated() == false` on that block, pushes a `jump outer_if_exit`,
+// and outer_if_exit ends up with a phi whose then-arm operand traces back
+// to a value in an unreachable block (inner_if_exit has 0 preds).
+//
+// Semantically this is fine — inner_if_exit is dead, so its jump/phi
+// contribution is dead too, and an unreachable-block sweep would prune it.
+// But the emitted CFG is uglier than it needs to be. Test documents the
+// current behavior so a future propagation fix is a visible diff.
+test "nested if with both-branch returns leaves outer merge with dead pred" {
+    const allocator = std.testing.allocator;
+
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
+
+    const scope = try compileScope(allocator, globals,
+        \\ def foo x, y
+        \\   if x
+        \\     if y
+        \\       return 1
+        \\     else
+        \\       return 2
+        \\     end
+        \\   else
+        \\     3
+        \\   end
+        \\ end
+    );
+    defer scope.deinit();
+
+    const outer_cfg = try buildCFG(allocator, scope);
+    defer outer_cfg.deinit();
+    const insn = (try findInsn(outer_cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func;
+    const method_cfg = try buildCFG(allocator, method_scope);
+    defer method_cfg.deinit();
+
+    const blocks = method_cfg.blockList();
+    // entry, outer_then, outer_else, outer_if_exit, inner_then, inner_else,
+    // inner_if_exit — 7 total. Inner blocks are created inside outer_then's
+    // compileNode call, so ordering is:
+    //   0 entry
+    //   1 outer_then
+    //   2 outer_else
+    //   3 outer_if_exit
+    //   4 inner_then
+    //   5 inner_else
+    //   6 inner_if_exit
+    try std.testing.expectEqual(7, blocks.len);
+
+    const outer_if_exit = blocks[3];
+    const inner_then = blocks[4];
+    const inner_else = blocks[5];
+    const inner_if_exit = blocks[6];
+
+    // Both inner arms end in `.leave` — the returns.
+    try std.testing.expectEqual(
+        ir.InstructionName.leave,
+        @as(ir.InstructionName, inner_then.finishInsn().?.data),
+    );
+    try std.testing.expectEqual(
+        ir.InstructionName.leave,
+        @as(ir.InstructionName, inner_else.finishInsn().?.data),
+    );
+
+    // inner_if_exit is orphan: 0 predecessors (both inner arms terminated).
+    try std.testing.expectEqual(0, inner_if_exit.predecessors.items.len);
+
+    // But outer sees inner_if_exit as non-terminated (its terminator is a
+    // jump to outer_if_exit, added by outer's compileIfNode) — so
+    // outer_if_exit gets 2 predecessors and a phi.
+    try std.testing.expectEqual(
+        ir.InstructionName.jump,
+        @as(ir.InstructionName, inner_if_exit.finishInsn().?.data),
+    );
+    try std.testing.expectEqual(2, outer_if_exit.predecessors.items.len);
+
+    // outer_if_exit's first insn is a phi — documenting the dead-operand
+    // situation. A future fix would either propagate termination up (so
+    // outer_if_exit has 1 pred and no phi) or run a sweep that prunes
+    // unreachable blocks and simplifies trivial phis.
+    try std.testing.expectEqual(
+        ir.InstructionName.phi,
+        @as(ir.InstructionName, outer_if_exit.startInsn().?.data),
+    );
 }
 
 // Ruby's `next` (equivalent to C/JS `continue`) needs a compiler loop stack
@@ -358,4 +602,3 @@ fn compileScope(allocator: std.mem.Allocator, globals: *Globals, code: []const u
     defer cc.deinit(allocator);
     return try cc.compile(&scope_node);
 }
-

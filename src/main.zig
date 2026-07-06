@@ -53,7 +53,7 @@ pub fn main(init: std.process.Init) !void {
         return clap.helpToFile(init.io, .stderr(), clap.Help, &main_params, .{});
 
     const command = res.positionals[0] orelse return error.MissingCommand;
-    switch(command) {
+    switch (command) {
         .run => try runMain(init.io, init.gpa, &iter),
         .compile => try runCompile(init.io, init.gpa, &iter),
     }
@@ -76,10 +76,7 @@ fn runCompile(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterat
     };
 
     var diag = clap.Diagnostic{};
-    var res = clap.parseEx(clap.Help, &params, compile_parsers, iter, .{
-        .diagnostic = &diag,
-        .allocator = gpa
-    }) catch |err| {
+    var res = clap.parseEx(clap.Help, &params, compile_parsers, iter, .{ .diagnostic = &diag, .allocator = gpa }) catch |err| {
         try diag.reportToFile(io, .stderr(), err);
         return err;
     };
@@ -140,10 +137,7 @@ fn runMain(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     );
 
     var diag = clap.Diagnostic{};
-    var res = clap.parseEx(clap.Help, &params, clap.parsers.default, iter, .{
-        .diagnostic = &diag,
-        .allocator = gpa
-    }) catch |err| {
+    var res = clap.parseEx(clap.Help, &params, clap.parsers.default, iter, .{ .diagnostic = &diag, .allocator = gpa }) catch |err| {
         try diag.reportToFile(io, .stderr(), err);
         return err;
     };
