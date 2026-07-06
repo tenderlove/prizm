@@ -218,7 +218,7 @@ pub const IonGraph = struct {
             .leave => |l| try out.append(a, @intCast(l.in.id)),
             .tst => |t| try out.append(a, @intCast(t.in.id)),
             .phi => |p| for (p.params.items) |x| try out.append(a, @intCast(x.id)),
-            .define_method, .getparam, .jump, .loadi, .loadstr, .loadnil => {},
+            .define_method, .getparam, .jump, .loadi, .loadstr, .loadnil, .loadtrue, .loadfalse => {},
         }
     }
 
@@ -303,6 +303,8 @@ pub const IonGraph = struct {
             .loadi => "iconst",
             .loadstr => "sconst",
             .loadnil => "nil",
+            .loadtrue => "true",
+            .loadfalse => "false",
             .getparam => "param",
             .call => "call",
             .define_method => "def_method",
@@ -329,7 +331,7 @@ pub const IonGraph = struct {
         switch (insn) {
             .loadi => |i| try w.print(" {d}", .{i.val}),
             .loadstr => |i| try w.print(" \"{s}\"", .{i.val}),
-            .loadnil => {},
+            .loadtrue, .loadfalse, .loadnil => {},
             .getparam => |i| try w.print(" {d}", .{i.index}),
 
             .call => |i| {

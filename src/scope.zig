@@ -176,6 +176,14 @@ pub const Scope = struct {
         return try self.pushInsn(.{ .loadnil = .{} });
     }
 
+    pub fn pushLoadTrue(self: *Scope) !*Insn {
+        return try self.pushInsn(.{ .loadtrue = .{} });
+    }
+
+    pub fn pushLoadFalse(self: *Scope) !*Insn {
+        return try self.pushInsn(.{ .loadfalse = .{} });
+    }
+
     pub fn newBlock(self: *Scope) !*BasicBlock {
         defer self.block_name += 1;
         const bb = try BasicBlock.initBlock(self.allocator, self.block_name, self, false);

@@ -63,19 +63,6 @@ pub const CFG = struct {
         return self.blocks.len;
     }
 
-    pub fn replace(self: *CFG, block: *BasicBlock, old: *ir.InstructionListNode, new: *ir.InstructionListNode) void {
-        block.replace(self.scope, old, new);
-    }    pub fn liveBlockCount(self: *CFG) !usize {
-        var dfi = try self.depthFirstIterator(self.mem);
-        defer dfi.deinit(self.mem);
-
-        var count: usize = 0;
-        while (try dfi.next(self.mem)) |_| {
-            count += 1;
-        }
-        return count;
-    }
-
     pub fn deinit(self: *CFG) void {
         for (self.blocks) |blk| {
             blk.deinit(self.mem);
@@ -127,43 +114,39 @@ test "CFG from compiler" {
     try std.testing.expectEqual(ir.InstructionName.leave, finish_type);
 }
 
-// compileWhileNode doesn't yet seal the loop header after the back-edge is
-// pushed, so this trips Scope.deinit's incomplete_phis invariant. Skip
-// until compileWhileNode's Braun bookkeeping is finished.
 test "complex loop with if" {
-    return error.SkipZigTest;
-    // const allocator = std.testing.allocator;
-    //
-    // const globals = try Globals.init(allocator);
-    // defer globals.deinit(allocator);
-    //
-    // const code =
-    //     \\ def foo y, z
-    //     \\   while y
-    //     \\     if y < 3
-    //     \\       y + 1
-    //     \\     else
-    //     \\       if y > 5
-    //     \\         y + 1
-    //     \\       else
-    //     \\         z + 1
-    //     \\       end
-    //     \\     end
-    //     \\   end
-    //     \\   y
-    //     \\ end
-    // ;
-    // const scope = try compileScope(allocator, globals, code);
-    // defer scope.deinit();
-    //
-    // const cfg = try buildCFG(allocator, scope);
-    // defer cfg.deinit();
-    //
-    // const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    // const method_scope = insn.data.define_method.func;
-    //
-    // const methodcfg = try buildCFG(allocator, method_scope);
-    // defer methodcfg.deinit();
+    const allocator = std.testing.allocator;
+    
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
+    
+    const code =
+        \\ def foo y, z
+        \\   while y
+        \\     if y < 3
+        \\       y + 1
+        \\     else
+        \\       if y > 5
+        \\         y + 1
+        \\       else
+        \\         z + 1
+        \\       end
+        \\     end
+        \\   end
+        \\   y
+        \\ end
+    ;
+    const scope = try compileScope(allocator, globals, code);
+    defer scope.deinit();
+    
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+    
+    const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func;
+    
+    const methodcfg = try buildCFG(allocator, method_scope);
+    defer methodcfg.deinit();
 }
 
 test "jumps targets get predecessors" {
@@ -221,31 +204,38 @@ test "jumps targets get predecessors" {
 // compileIfNode does `@ptrCast(node.*.subsequent)` unconditionally and will
 // crash. Skip until we handle the missing-else case.
 test "if without else evaluates to nil on false path" {
-    return error.SkipZigTest;
-    // const allocator = std.testing.allocator;
-    //
-    // const globals = try Globals.init(allocator);
-    // defer globals.deinit(allocator);
-    //
-    // const scope = try compileScope(allocator, globals,
-    //     \\ x = if false then 1 end
-    // );
-    // defer scope.deinit();
-    //
-    // const cfg = try buildCFG(allocator, scope);
-    // defer cfg.deinit();
-    //
-    // Expected shape:
-    //   pre       → if_entry
-    //   if_entry  → then_entry, else_entry   (brif)
-    //   then_entry → if_exit                 (loadi 1, jump)
-    //   else_entry → if_exit                 (loadnil, jump)
-    //   if_exit                              (phi from then_entry, else_entry)
-    //
-    // Assertions to add once compileIfNode handles missing-else:
-    //   - if_exit has 2 predecessors.
-    //   - if_exit starts with a phi.
-    //   - one phi input traces back to a loadi(1), the other to a loadnil.
+    const allocator = std.testing.allocator;
+    
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
+    
+    const scope = try compileScope(allocator, globals,
+        \\ x = if false then 1 end
+    );
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    // We should have 4 blocks
+    const blocks = cfg.blockList();
+    try std.testing.expectEqual(4, blocks.len);
+    try std.testing.expectEqual(0, blocks[0].predecessors.items.len);
+    try std.testing.expectEqual(1, blocks[1].predecessors.items.len);
+    try std.testing.expectEqual(1, blocks[2].predecessors.items.len);
+    try std.testing.expectEqual(2, blocks[3].predecessors.items.len);
+
+    // Block 1 should point at block 0
+    try std.testing.expectEqual(blocks[0], blocks[1].predecessors.items[0]);
+
+    // Block 2 should point at block 0
+    try std.testing.expectEqual(blocks[0], blocks[2].predecessors.items[0]);
+
+    // Block 3 should point at block 1 and 2
+    const preds = blocks[3].predecessors.items;
+
+    try std.testing.expect(preds[0] == blocks[1] or preds[1] == blocks[1]);
+    try std.testing.expect(preds[0] == blocks[2] or preds[1] == blocks[2]);
 }
 
 // A `return` inside a branch terminates that branch's current block with

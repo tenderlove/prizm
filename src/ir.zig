@@ -15,6 +15,8 @@ pub const InstructionName = enum {
     loadi,
     loadstr,
     loadnil,
+    loadtrue,
+    loadfalse,
     phi,
     tst,
 };
@@ -67,6 +69,14 @@ pub const Instruction = union(InstructionName) {
     },
 
     loadnil: struct {
+        const Self = @This();
+    },
+
+    loadtrue: struct {
+        const Self = @This();
+    },
+
+    loadfalse: struct {
         const Self = @This();
     },
 

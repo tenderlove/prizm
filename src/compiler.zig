@@ -33,7 +33,7 @@ pub const Compiler = struct {
         return compileScopeNode(cc, null, node);
     }
 
-    fn compileNode(cc: *Compiler, scope: *Scope, node: *const c.pm_node_t) error{ NotImplementedError, OutOfMemory } !*Insn {
+    fn compileNode(cc: *Compiler, scope: *Scope, node: *const c.pm_node_t) error{ NotImplementedError, OutOfMemory }!*Insn {
         // std.debug.print("--> compiling type {s} {} op: {any}\n", .{c.pm_node_type_to_str(node.*.type), op});
         const opnd = switch (node.*.type) {
             c.PM_BEGIN_NODE => try cc.compileBeginNode(scope, @ptrCast(node)),
@@ -42,6 +42,8 @@ pub const Compiler = struct {
             c.PM_ELSE_NODE => try cc.compileElseNode(scope, @ptrCast(node)),
             c.PM_IF_NODE => try cc.compileIfNode(scope, @ptrCast(node)),
             c.PM_INTEGER_NODE => try cc.compileIntegerNode(scope, @ptrCast(node)),
+            c.PM_TRUE_NODE => try cc.compileTrueNode(scope, @ptrCast(node)),
+            c.PM_FALSE_NODE => try cc.compileFalseNode(scope, @ptrCast(node)),
             c.PM_LOCAL_VARIABLE_READ_NODE => try cc.compileLocalVariableReadNode(scope, @ptrCast(node)),
             c.PM_LOCAL_VARIABLE_OPERATOR_WRITE_NODE => try cc.compileLocalVariableOperatorWriteNode(scope, @ptrCast(node)),
             c.PM_LOCAL_VARIABLE_WRITE_NODE => try cc.compileLocalVariableWriteNode(scope, @ptrCast(node)),
@@ -210,7 +212,10 @@ pub const Compiler = struct {
 
         // Compile the false branch and get a return value
         scope.setCurrentBlock(else_entry);
-        const falsy = try cc.compileNode(scope, @ptrCast(node.*.subsequent));
+        const falsy = if (node.*.subsequent) |sub|
+            try cc.compileNode(scope, @ptrCast(sub))
+        else
+            try scope.pushLoadNil();
         try scope.pushJump(if_exit);
         scope.blockFilled(scope.currentBlock()); // Done pushing instructions
 
@@ -244,6 +249,14 @@ pub const Compiler = struct {
                 },
             }
         }
+    }
+
+    fn compileTrueNode(_: *Compiler, scope: *Scope, _: *const c.pm_true_node_t) !*Insn {
+        return try scope.pushLoadTrue();
+    }
+
+    fn compileFalseNode(_: *Compiler, scope: *Scope, _: *const c.pm_false_node_t) !*Insn {
+        return try scope.pushLoadFalse();
     }
 
     fn compileIntegerNode(_: *Compiler, scope: *Scope, node: *const c.pm_integer_node_t) !*Insn {
@@ -435,13 +448,13 @@ pub fn compileString(allocator: std.mem.Allocator, globals: *Globals, code: []co
 
 // test "compile math" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "5 + 7");
 //     defer scope.deinit();
-// 
+//
 //     try std.testing.expectEqual(null, scope.parent);
 //     const insn = scope.insns.first;
 //     try std.testing.expect(insn != null);
@@ -450,13 +463,13 @@ pub fn compileString(allocator: std.mem.Allocator, globals: *Globals, code: []co
 
 // test "compile local set" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "foo = 5; foo");
 //     defer scope.deinit();
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -464,16 +477,16 @@ pub fn compileString(allocator: std.mem.Allocator, globals: *Globals, code: []co
 //         ir.Instruction.leave,
 //     }, scope.insns);
 // }
-// 
+//
 // test "compile local get w/ return" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "foo = 5; return foo");
 //     defer scope.deinit();
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -481,29 +494,29 @@ pub fn compileString(allocator: std.mem.Allocator, globals: *Globals, code: []co
 //         ir.Instruction.leave,
 //     }, scope.insns);
 // }
-// 
+//
 // test "pushing instruction adds value" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const scope = try Scope.init(allocator, 0, "empty", null);
 //     defer scope.deinit();
-// 
+//
 //     _ = try scope.pushLoadi(null, 123);
 //     try std.testing.expectEqual(1, scope.insns.len());
-// 
+//
 //     const insn = @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?));
 //     try std.testing.expectEqual(123, insn.data.loadi.val);
 // }
-// 
+//
 // test "compile local get w/ nil return" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "foo = 5; return");
 //     defer scope.deinit();
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -512,7 +525,7 @@ pub fn compileString(allocator: std.mem.Allocator, globals: *Globals, code: []co
 //         ir.Instruction.leave,
 //     }, scope.insns);
 // }
- 
+
 fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.InstructionList) !void {
     var insn = actual.first;
     for (expected) |expected_insn| {
@@ -520,16 +533,16 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
         insn = insn.?.next;
     }
 }
- 
+
 // test "compile ternary statement" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "5 < 7 ? 123 : 456");
 //     defer scope.deinit();
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -548,16 +561,16 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.leave,
 //     }, scope.insns);
 // }
-// 
+//
 // test "compile def method" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "def foo; end");
 //     defer scope.deinit();
-// 
+//
 //     var scopes = try scope.childScopes(allocator);
 //     defer scopes.deinit(allocator);
 //     const method_scope = scopes.items[0];
@@ -566,16 +579,16 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //     try std.testing.expectEqual(0, method_scope.param_size);
 //     try std.testing.expectEqual(0, method_scope.local_storage);
 // }
-// 
+//
 // test "compile call no params" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "foo");
 //     defer scope.deinit();
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -585,16 +598,16 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.leave,
 //     }, scope.insns);
 // }
-// 
+//
 // test "compile def method 2 params" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "def foo(a, b); end");
 //     defer scope.deinit();
-// 
+//
 //     var scopes = try scope.childScopes(allocator);
 //     defer scopes.deinit(allocator);
 //     const method_scope = scopes.items[0];
@@ -603,39 +616,39 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //     try std.testing.expectEqual(2, method_scope.param_size);
 //     try std.testing.expectEqual(2, method_scope.local_storage);
 // }
-// 
+//
 // test "compile def method 2 params 3 locals" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "def foo(a, b); c = 123; d = a; e = d + b; end");
 //     defer scope.deinit();
-// 
+//
 //     var scopes = try scope.childScopes(allocator);
 //     defer scopes.deinit(allocator);
-// 
+//
 //     const method_scope = scopes.items[0];
-// 
+//
 //     try std.testing.expectEqual(2, method_scope.param_size);
 //     try std.testing.expectEqual(5, method_scope.local_storage);
 // }
-// 
+//
 // test "method returns param" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "def foo(a); a; end");
 //     defer scope.deinit();
-// 
+//
 //     var scopes = try scope.childScopes(allocator);
 //     defer scopes.deinit(allocator);
-// 
+//
 //     const method_scope = scopes.items[0];
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -644,16 +657,16 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.leave,
 //     }, method_scope.insns);
 // }
-// 
+//
 // test "always true ternary" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "6 ? 7 : 8");
 //     defer scope.deinit();
-// 
+//
 //     try std.testing.expectEqual(4, scope.insns.len());
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
@@ -661,38 +674,38 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.loadi,
 //         ir.Instruction.leave,
 //     }, scope.insns);
-// 
+//
 //     try std.testing.expectEqual(7, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?.next.?)).data.loadi.val);
 // }
-// 
+//
 // test "always false ternary" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "false ? 7 : 8");
 //     defer scope.deinit();
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
 //         ir.Instruction.loadi,
 //         ir.Instruction.leave,
 //     }, scope.insns);
-// 
+//
 //     try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?.next.?)).data.loadi.val);
 // }
-// 
+//
 // test "always nil ternary" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "nil ? 7 : 8");
 //     defer scope.deinit();
-// 
+//
 //     try std.testing.expectEqual(4, scope.insns.len());
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
@@ -700,23 +713,23 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.loadi,
 //         ir.Instruction.leave,
 //     }, scope.insns);
-// 
+//
 //     try std.testing.expectEqual(8, @as(*ir.InstructionListNode, @fieldParentPtr("node", scope.insns.first.?.next.?.next.?)).data.loadi.val);
 // }
-// 
+//
 // test "local ternary" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "def foo(x); x ? 7 : 8; end");
 //     defer scope.deinit();
-// 
+//
 //     var scopes = try scope.childScopes(allocator);
 //     defer scopes.deinit(allocator);
 //     const method_scope = scopes.items[0];
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -730,25 +743,25 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.putlabel,
 //         ir.Instruction.leave,
 //     }, method_scope.insns);
-// 
+//
 //     // Make sure the jump instruction is testing the second parameter (first is self)
 //     const test_reg = @as(*ir.InstructionListNode, @fieldParentPtr("node", method_scope.insns.first.?.next.?.next.?.next.?.next.?)).data.jumpunless.in;
 //     try std.testing.expectEqual(1, test_reg.data.local.id);
 // }
-// 
+//
 // test "popped if body" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "def foo(x); x ? 7 : 8; x; end");
 //     defer scope.deinit();
-// 
+//
 //     var scopes = try scope.childScopes(allocator);
 //     defer scopes.deinit(allocator);
 //     const method_scope = scopes.items[0];
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -761,21 +774,21 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.leave,
 //     }, method_scope.insns);
 // }
-// 
+//
 // test "simple function" {
 //     const mem = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(mem);
 //     defer globals.deinit(mem);
-// 
+//
 //     const scope = try compileString(mem, globals, "def foo(x); x; end");
 //     defer scope.deinit();
-// 
+//
 //     var scopes = try scope.childScopes(mem);
 //     defer scopes.deinit(mem);
-// 
+//
 //     const method_scope = scopes.items[0];
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -784,20 +797,20 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.leave,
 //     }, method_scope.insns);
 // }
-// 
+//
 // test "while loop" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "def foo(x); while x; puts x; end; end");
 //     defer scope.deinit();
-// 
+//
 //     var scopes = try scope.childScopes(allocator);
 //     defer scopes.deinit(allocator);
 //     const method_scope = scopes.items[0];
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -815,20 +828,20 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.leave,
 //     }, method_scope.insns);
 // }
-// 
+//
 // test "empty while loop" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "def foo; while true; end; end");
 //     defer scope.deinit();
-// 
+//
 //     var scopes = try scope.childScopes(allocator);
 //     defer scopes.deinit(allocator);
 //     const method_scope = scopes.items[0];
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -839,16 +852,16 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.leave,
 //     }, method_scope.insns);
 // }
-// 
+//
 // test "+=" {
 //     const allocator = std.testing.allocator;
-// 
+//
 //     const globals = try Globals.init(allocator);
 //     defer globals.deinit(allocator);
-// 
+//
 //     const scope = try compileString(allocator, globals, "x = 1; x += 1");
 //     defer scope.deinit();
-// 
+//
 //     try expectInstructionList(&[_]ir.InstructionName{
 //         ir.Instruction.getparam,
 //         ir.Instruction.mov,
@@ -861,4 +874,3 @@ fn expectInstructionList(expected: []const ir.InstructionName, actual: ir.Instru
 //         ir.Instruction.leave,
 //     }, scope.insns);
 // }
-

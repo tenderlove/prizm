@@ -68,6 +68,14 @@ fn printInsn(insn: *ir.InstructionListNode, w: *std.Io.Writer) !void {
             try printOpnd(insn, w);
             try w.print(" = nil", .{});
         },
+        .loadtrue => {
+            try printOpnd(insn, w);
+            try w.print(" = true", .{});
+        },
+        .loadfalse => {
+            try printOpnd(insn, w);
+            try w.print(" = false", .{});
+        },
         .getparam => |i| {
             try printOpnd(insn, w);
             try w.print(" = param {d}", .{i.index});
