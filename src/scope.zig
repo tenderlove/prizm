@@ -12,8 +12,21 @@ pub const Scope = struct {
     /// AutoHashMap uses block pointer identity.
     const DefMap = std.StringHashMapUnmanaged(std.AutoHashMapUnmanaged(*BasicBlock, *Insn));
 
+    /// Compile-time loop context. `break` jumps to `break_target` and
+    /// `next` jumps to `next_target`. `break_var` is a fake-local that
+    /// carries the loop's exit value through Braun's phi construction: each
+    /// break site does `writeVariable(break_var, current, value)` before
+    /// jumping, and the loop's natural cond-false predecessor seeds it with
+    /// nil. compileWhileNode reads it back at the exit block.
+    pub const LoopFrame = struct {
+        next_target: *BasicBlock,
+        break_target: *BasicBlock,
+        break_var: []const u8,
+    };
+
     insn_id: usize = 0,
     block_name: usize = 0,
+    loop_var_seq: u32 = 0,
     id: u32,
     name: []const u8,
     parent: ?*Scope,
@@ -25,6 +38,7 @@ pub const Scope = struct {
     blocks: std.ArrayList(*BasicBlock),
     currentDef: DefMap,
     incomplete_phis: std.AutoHashMapUnmanaged(*BasicBlock, std.StringHashMapUnmanaged(*Insn)) = .empty,
+    loop_stack: std.ArrayList(LoopFrame) = .empty,
 
     pub fn getName(self: *Scope) []const u8 {
         return self.name;
@@ -214,6 +228,32 @@ pub const Scope = struct {
         return self.current_block;
     }
 
+    /// Enter a loop context. Returns the frame's `break_var` name so the
+    /// caller can seed it into the natural cond-false predecessor.
+    pub fn pushLoopFrame(self: *Scope, next_target: *BasicBlock, break_target: *BasicBlock) ![]const u8 {
+        const name = try std.fmt.allocPrint(
+            self.arena.allocator(),
+            "__break_{d}",
+            .{self.loop_var_seq},
+        );
+        self.loop_var_seq += 1;
+        try self.loop_stack.append(self.allocator, .{
+            .next_target = next_target,
+            .break_target = break_target,
+            .break_var = name,
+        });
+        return name;
+    }
+
+    pub fn popLoopFrame(self: *Scope) void {
+        _ = self.loop_stack.pop();
+    }
+
+    pub fn currentLoopFrame(self: *Scope) ?LoopFrame {
+        if (self.loop_stack.items.len == 0) return null;
+        return self.loop_stack.items[self.loop_stack.items.len - 1];
+    }
+
     pub fn sealBlock(self: *Scope, block: *BasicBlock) !void {
         if (self.incomplete_phis.getPtr(block)) |inner| {
             var it = inner.iterator();
@@ -273,6 +313,11 @@ pub const Scope = struct {
         // A non-empty map here is a bug in the surrounding compiler flow.
         std.debug.assert(self.incomplete_phis.count() == 0);
         self.incomplete_phis.deinit(self.allocator);
+
+        // Every pushLoopFrame must have a matching popLoopFrame by the time
+        // the scope tears down.
+        std.debug.assert(self.loop_stack.items.len == 0);
+        self.loop_stack.deinit(self.allocator);
 
         for (self.children.items) |scope| {
             scope.deinit();

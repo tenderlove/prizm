@@ -523,44 +523,156 @@ test "nested if with both-branch returns leaves outer merge with dead pred" {
     );
 }
 
-// Ruby's `next` (equivalent to C/JS `continue`) needs a compiler loop stack
-// so break/next targets can be looked up when the AST node is compiled.
-// For regular `while cond do ... end`, `next` jumps to the loop header (the
-// block that evaluates the condition). For `begin ... end while cond` the
-// target is the *condition check* block, not the top of the body — a subtle
-// difference from a plain while that will need per-flavor handling.
-//
-// Skip until compileWhileNode maintains a loop stack and compileNextNode
-// exists.
+// Regular `while`: `next` jumps to the loop header (the block that
+// evaluates the condition), so on the next iteration the predicate runs
+// again. Body block ordering:
+//   0 entry
+//   1 header    ← 3 preds: entry, `next`'s block, natural body tail
+//   2 body
+//   3 exit
+//   4 next-if then (contains next)
+//   5 next-if else (empty, jumps to if_exit)
+//   6 next-if if_exit (contains `puts i`)
 test "next jumps to the loop header" {
-    return error.SkipZigTest;
-    // const allocator = std.testing.allocator;
-    //
-    // const globals = try Globals.init(allocator);
-    // defer globals.deinit(allocator);
-    //
-    // const scope = try compileScope(allocator, globals,
-    //     \\ i = 10
-    //     \\ while i > 0
-    //     \\   i -= 1
-    //     \\   next if i == 5
-    //     \\   puts i
-    //     \\ end
-    // );
-    // defer scope.deinit();
-    //
-    // const cfg = try buildCFG(allocator, scope);
-    // defer cfg.deinit();
-    //
-    // Assertions to add:
-    //   - The loop header has 3 predecessors: the pre-loop block, the
-    //     natural body-tail (falling through to header at loop end), and
-    //     the block containing the `next` jump.
-    //   - The block containing the `next` has exactly one terminator (jump
-    //     to the header) — no dead instructions after it, no fallthrough.
-    //   - `puts i` does not appear on the path taken by `next` — the block
-    //     after the `next if i == 5` conditional in the body is a fresh
-    //     block that only receives the "did not take next" arm.
+    const allocator = std.testing.allocator;
+
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
+
+    const scope = try compileScope(allocator, globals,
+        \\ i = 10
+        \\ while i > 0
+        \\   i -= 1
+        \\   next if i == 5
+        \\   puts i
+        \\ end
+    );
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const blocks = cfg.blockList();
+    try std.testing.expectEqual(7, blocks.len);
+
+    const header = blocks[1];
+    const then_of_next_if = blocks[4];
+    const if_exit_of_next_if = blocks[6];
+
+    // Header receives 3 edges: pre-loop, natural body-tail, `next`.
+    try std.testing.expectEqual(3, header.predecessors.items.len);
+
+    // The block containing `next` ends in exactly one terminator: a jump
+    // to the header.
+    try std.testing.expectEqual(
+        ir.InstructionName.jump,
+        @as(ir.InstructionName, then_of_next_if.finishInsn().?.data),
+    );
+    try std.testing.expectEqual(header, then_of_next_if.finishInsn().?.data.jump.target);
+
+    // `puts i` lives in the if_exit block (reached only when `next` wasn't
+    // taken), NOT in the `next` block.
+    var found_puts_in_then = false;
+    var then_iter = then_of_next_if.instructionIter(.{});
+    while (then_iter.next()) |insn| {
+        if (insn.data == .call and std.mem.eql(u8, insn.data.call.name, "puts")) {
+            found_puts_in_then = true;
+        }
+    }
+    try std.testing.expect(!found_puts_in_then);
+
+    var found_puts_in_if_exit = false;
+    var exit_iter = if_exit_of_next_if.instructionIter(.{});
+    while (exit_iter.next()) |insn| {
+        if (insn.data == .call and std.mem.eql(u8, insn.data.call.name, "puts")) {
+            found_puts_in_if_exit = true;
+        }
+    }
+    try std.testing.expect(found_puts_in_if_exit);
+}
+
+// `break VALUE` routes VALUE into the loop's exit block via a phi.
+//   0 entry (i = 0)
+//   1 header
+//   2 body
+//   3 exit    ← 2 preds: header (nil), then_of_if (loadi 42)
+//   4 then    (`break 42`)
+//   5 else    (empty)
+//   6 if_exit
+test "break with value flows into the loop exit via a phi" {
+    const allocator = std.testing.allocator;
+
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
+
+    const scope = try compileScope(allocator, globals,
+        \\ i = 0
+        \\ result = while i < 10
+        \\   break 42 if i == 5
+        \\   i += 1
+        \\ end
+    );
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const blocks = cfg.blockList();
+    const exit = blocks[3];
+
+    // exit reached from two predecessors: cond-false (header) with nil,
+    // and the break site with loadi(42).
+    try std.testing.expectEqual(2, exit.predecessors.items.len);
+
+    // exit starts with a phi merging the two contributions.
+    try std.testing.expectEqual(
+        ir.InstructionName.phi,
+        @as(ir.InstructionName, exit.startInsn().?.data),
+    );
+    try std.testing.expectEqual(2, exit.startInsn().?.data.phi.params.items.len);
+}
+
+// Bare `break` (no value) — both phi operands are `loadnil` instructions,
+// but they're two DIFFERENT insns (one seeded on the cond-false edge, one
+// pushed at the break site). Braun's tryRemoveTrivialPhi compares by pointer
+// identity, not semantic equality, so the phi survives. A future value-
+// numbering / constant-folding pass would collapse it.
+test "bare break emits a phi of two loadnil operands" {
+    const allocator = std.testing.allocator;
+
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
+
+    const scope = try compileScope(allocator, globals,
+        \\ i = 0
+        \\ while i < 10
+        \\   break if i == 5
+        \\   i += 1
+        \\ end
+    );
+    defer scope.deinit();
+
+    const cfg = try buildCFG(allocator, scope);
+    defer cfg.deinit();
+
+    const blocks = cfg.blockList();
+    const exit = blocks[3];
+
+    try std.testing.expectEqual(2, exit.predecessors.items.len);
+
+    // Phi survives — two operands, both loadnil.
+    const first = exit.startInsn().?;
+    try std.testing.expectEqual(
+        ir.InstructionName.phi,
+        @as(ir.InstructionName, first.data),
+    );
+    try std.testing.expectEqual(2, first.data.phi.params.items.len);
+    for (first.data.phi.params.items) |p| {
+        try std.testing.expectEqual(
+            ir.InstructionName.loadnil,
+            @as(ir.InstructionName, p.data),
+        );
+    }
 }
 
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {

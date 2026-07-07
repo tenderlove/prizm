@@ -37,6 +37,8 @@ pub const Compiler = struct {
         // std.debug.print("--> compiling type {s} {} op: {any}\n", .{c.pm_node_type_to_str(node.*.type), op});
         const opnd = switch (node.*.type) {
             c.PM_BEGIN_NODE => try cc.compileBeginNode(scope, @ptrCast(node)),
+            c.PM_BREAK_NODE => try cc.compileBreakNode(scope, @ptrCast(node)),
+            c.PM_NEXT_NODE => try cc.compileNextNode(scope, @ptrCast(node)),
             c.PM_DEF_NODE => try cc.compileDefNode(scope, @ptrCast(node)),
             c.PM_CALL_NODE => try cc.compileCallNode(scope, @ptrCast(node)),
             c.PM_ELSE_NODE => try cc.compileElseNode(scope, @ptrCast(node)),
@@ -345,6 +347,46 @@ pub const Compiler = struct {
         }
     }
 
+    fn compileBreakNode(cc: *Compiler, scope: *Scope, node: *const c.pm_break_node_t) !*Insn {
+        const frame = scope.currentLoopFrame() orelse @panic("`break` outside of a loop");
+
+        // Value: `break` == nil, `break EXPR` == EXPR. Multi-arg `break a, b`
+        // would be array-wrapped; not yet handled.
+        const val = if (node.*.arguments) |args_ptr| val_blk: {
+            const arg_size = args_ptr.*.arguments.size;
+            if (arg_size > 1) return error.NotImplementedError;
+            const arg = args_ptr.*.arguments.nodes[0..arg_size][0];
+            break :val_blk try cc.compileNode(scope, arg);
+        } else try scope.pushLoadNil();
+
+        // Route the value into break_target's phi via Braun.
+        try scope.writeVariable(frame.break_var, scope.currentBlock(), val);
+        try scope.pushJump(frame.break_target);
+
+        // Sentinel — callers who happen to use this value are on a dead path.
+        return val;
+    }
+
+    fn compileNextNode(cc: *Compiler, scope: *Scope, node: *const c.pm_next_node_t) !*Insn {
+        const frame = scope.currentLoopFrame() orelse @panic("`next` outside of a loop");
+
+        // Ruby: `next VALUE` in a `while` loop does NOT set the loop's
+        // value (that's `break`'s job). Compile for side effects, discard.
+        if (node.*.arguments) |args_ptr| {
+            const arg_size = args_ptr.*.arguments.size;
+            const args = args_ptr.*.arguments.nodes[0..arg_size];
+            for (args) |arg| {
+                _ = try cc.compileNode(scope, arg);
+            }
+        }
+
+        // pushJump fills the block, so any sentinel to hand back must be
+        // pushed BEFORE the jump.
+        const sentinel = try scope.pushLoadNil();
+        try scope.pushJump(frame.next_target);
+        return sentinel;
+    }
+
     fn compileRequiredParameterNode(cc: *Compiler, scope: *Scope, node: *const c.pm_required_parameter_node) !*Insn {
         _ = cc;
         _ = scope;
@@ -386,7 +428,13 @@ pub const Compiler = struct {
         // end while x > 0
         if ((node.*.base.flags & c.PM_LOOP_FLAGS_BEGIN_MODIFIER) == c.PM_LOOP_FLAGS_BEGIN_MODIFIER) {
             const body = try scope.newBlock();
+            const cond_check = try scope.newBlock();
             const exit = try scope.newBlock();
+
+            // `next` re-evaluates the condition in do-while, so its target
+            // is cond_check (NOT the top of body). `break` exits the loop.
+            const break_var = try scope.pushLoopFrame(cond_check, exit);
+            defer scope.popLoopFrame();
 
             try scope.pushJump(body);
             scope.setCurrentBlock(body);
@@ -394,22 +442,46 @@ pub const Compiler = struct {
             if (node.*.statements) |stmt| {
                 _ = try cc.compileNode(scope, @ptrCast(stmt));
             }
+            // Body may terminate via `return`/`break`/`next`; skip fallthrough
+            // if it did.
+            if (!scope.currentBlock().isTerminated()) {
+                try scope.pushJump(cond_check);
+            }
+
+            scope.setCurrentBlock(cond_check);
+
+            // Seed break_var with nil on the cond-false edge. Dead if no
+            // `break` occurs; picked up by Braun's phi otherwise.
+            const nil_natural = try scope.pushLoadNil();
+            try scope.writeVariable(break_var, cond_check, nil_natural);
 
             const cmp = try cc.compilePredicate(scope, node.*.predicate);
             try scope.pushCond(cmp, body, exit);
             try scope.sealBlock(body);
+            try scope.sealBlock(cond_check);
             try scope.sealBlock(exit);
             scope.setCurrentBlock(exit);
+
+            return try scope.readVariable(break_var, exit);
         } else { // Regular while loops
             const header = try scope.newBlock();
             const body = try scope.newBlock();
             const exit = try scope.newBlock();
 
+            // `next` jumps to header (which re-evaluates cond); `break`
+            // jumps to exit.
+            const break_var = try scope.pushLoopFrame(header, exit);
+            defer scope.popLoopFrame();
+
             try scope.pushJump(header);
 
             scope.setCurrentBlock(header);
 
-            // If predicate is false, jump to then label
+            // Seed break_var with nil on the cond-false edge from header.
+            const nil_natural = try scope.pushLoadNil();
+            try scope.writeVariable(break_var, header, nil_natural);
+
+            // If predicate is false, jump to exit
             const predicate = try cc.compilePredicate(scope, node.*.predicate);
 
             try scope.pushCond(predicate, body, exit);
@@ -420,14 +492,16 @@ pub const Compiler = struct {
             if (node.*.statements) |stmt| {
                 _ = try cc.compileNode(scope, @ptrCast(stmt));
             }
-            try scope.pushJump(header);
+            if (!scope.currentBlock().isTerminated()) {
+                try scope.pushJump(header);
+            }
 
             try scope.sealBlock(header);
             try scope.sealBlock(exit);
             scope.setCurrentBlock(exit);
-        }
 
-        return try scope.pushLoadNil();
+            return try scope.readVariable(break_var, exit);
+        }
     }
 
     fn stringFromId(cc: *Compiler, id: c.pm_constant_id_t) []const u8 {
