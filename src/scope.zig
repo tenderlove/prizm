@@ -119,7 +119,7 @@ pub const Scope = struct {
         return count;
     }
 
-    pub fn makeInsn(self: *Scope, insn: ir.Instruction) !*Insn {
+    fn makeInsn(self: *Scope, insn: ir.Instruction) !*Insn {
         const node = try self.arena.allocator().create(ir.InstructionListNode);
         node.* = .{ .node = .{}, .id = self.insn_id, .data = insn };
         self.insn_id += 1;
@@ -127,11 +127,11 @@ pub const Scope = struct {
     }
 
     fn pushVoidInsn(self: *Scope, insn: ir.Instruction) !void {
-        return self.current_block.pushVoidInsn(insn);
+        return self.current_block.pushVoidInsn(try self.makeInsn(insn));
     }
 
     fn pushInsn(self: *Scope, insn: ir.Instruction) !*Insn {
-        return self.current_block.pushInsn(insn);
+        return self.current_block.pushInsn(try self.makeInsn(insn));
     }
 
     /// Fixed-point trivial-phi elimination. Braun's algorithm cascades via
@@ -291,7 +291,7 @@ pub const Scope = struct {
 
     pub fn newBlock(self: *Scope) !*BasicBlock {
         defer self.block_name += 1;
-        const bb = try BasicBlock.initBlock(self.allocator, self.block_name, self, false);
+        const bb = try BasicBlock.initBlock(self.allocator, self.block_name, false);
         try self.blocks.append(self.allocator, bb);
         return bb;
     }
@@ -351,7 +351,7 @@ pub const Scope = struct {
     pub fn init(alloc: std.mem.Allocator, id: u32, name: []const u8, parent: ?*Scope) !*Scope {
         const scope = try alloc.create(Scope);
 
-        const entry_block = try BasicBlock.initBlock(alloc, 0, scope, true);
+        const entry_block = try BasicBlock.initBlock(alloc, 0, true);
 
         scope.* = Scope{
             .id = id,

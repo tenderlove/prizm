@@ -8,7 +8,6 @@ pub const BasicBlock = struct {
     name: u64,
     entry: bool,
     reachable: bool = false,
-    scope: *Scope,
     insns: ir.InstructionList,
     predecessors: std.ArrayList(*BasicBlock),
     sealed: bool = false,
@@ -39,13 +38,12 @@ pub const BasicBlock = struct {
         }
     };
 
-    pub fn initBlock(alloc: std.mem.Allocator, name: u64, scope: *Scope, entry: bool) !*BasicBlock {
+    pub fn initBlock(alloc: std.mem.Allocator, name: u64, entry: bool) !*BasicBlock {
         const block = try alloc.create(BasicBlock);
 
         block.* = .{
             .name = name,
             .entry = entry,
-            .scope = scope,
             .insns = ir.InstructionList{},
             .predecessors = .empty,
         };
@@ -141,22 +139,20 @@ pub const BasicBlock = struct {
         try self.predecessors.append(alloc, predecessor);
     }
 
-    pub fn pushVoidInsn(self: *BasicBlock, insn: ir.Instruction) !void {
+    pub fn pushVoidInsn(self: *BasicBlock, node: *Insn) void {
         std.debug.assert(!self.filled);
-        switch (insn) {
+        switch (node.data) {
             .jump,
             .cond,
             => {},
             else => unreachable,
         }
 
-        const node = try self.scope.makeInsn(insn);
         self.insns.append(&node.node);
     }
 
-    pub fn pushInsn(self: *BasicBlock, insn: ir.Instruction) !*Insn {
+    pub fn pushInsn(self: *BasicBlock, node: *Insn) *Insn {
         std.debug.assert(!self.filled);
-        const node = try self.scope.makeInsn(insn);
         self.insns.append(&node.node);
         return node;
     }
