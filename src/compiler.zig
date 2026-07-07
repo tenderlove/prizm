@@ -312,7 +312,7 @@ pub const Compiler = struct {
 
         if (op.len == 1) {
             const result = switch (op[0]) {
-                '+', '-' => try scope.pushCall(recv, op, params),
+                '+', '-', '*', '/' => try scope.pushCall(recv, op, params),
                 else => return error.NotImplementedError,
             };
             try scope.writeVariable(name, scope.currentBlock(), result);
@@ -525,7 +525,7 @@ fn expectInstructionType(expected: ir.InstructionName, actual: ir.InstructionNam
     try std.testing.expectEqual(expected, actual);
 }
 
-pub fn compileString(allocator: std.mem.Allocator, globals: *Globals, code: []const u8) !*Scope {
+pub fn compileString(allocator: std.mem.Allocator, globals: *Globals, code: []const u8) !*cfg.CFG {
     const parser = try prism.Prism.newParserCtx(allocator);
     defer parser.deinit();
     parser.init(code, code.len, null);

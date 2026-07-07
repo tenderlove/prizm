@@ -9,6 +9,8 @@ const CFG = cfg_z.CFG;
 const Scope = @import("scope.zig").Scope;
 const Allocator = std.mem.Allocator;
 const clap = @import("clap");
+const interpreter = @import("interpreter.zig");
+const Interpreter = interpreter.Interpreter;
 
 const SubCommands = enum {
     run,
@@ -168,5 +170,6 @@ fn compileFile(io: std.Io, alloc: std.mem.Allocator, path: []const u8, globals: 
 }
 
 test {
+    _ = @import("interpreter.zig");
     @import("std").testing.refAllDecls(@This());
 }
