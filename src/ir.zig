@@ -133,4 +133,17 @@ pub const InstructionListNode = struct {
     node: std.DoublyLinkedList.Node,
     id: usize,
     data: Instruction,
+    // Forwarding alias
+    alias: ?*InstructionListNode = null,
+
+    pub fn resolve(self: *InstructionListNode) *InstructionListNode {
+        var cur = self;
+        while (cur.alias) |a| cur = a;
+        var walker = self;
+        while (walker.alias) |a| {
+            walker.alias = cur;
+            walker = a;
+        }
+        return cur;
+    }
 };

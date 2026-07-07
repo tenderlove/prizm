@@ -675,6 +675,64 @@ test "bare break emits a phi of two loadnil operands" {
     }
 }
 
+// Both arms of the `if` read the same variable `y`, which is defined once
+// (`y = x`) in the entry block. Braun's construction reads back to entry
+// from both arm entries, so `truthy == falsy == getparam(1)`. compileIfNode
+// pushes phi(gp1, gp1) at if_exit — a textbook trivial phi. After canonicalize
+// runs, the phi should be marked as aliased to gp1, and any consumer of that
+// phi (here, the scope-final `leave`) should reference gp1 directly with no
+// phi in the operand chain.
+test "trivial phi from same-value branches is aliased away" {
+    const allocator = std.testing.allocator;
+
+    const globals = try Globals.init(allocator);
+    defer globals.deinit(allocator);
+
+    const scope = try compileScope(allocator, globals,
+        \\ def foo x
+        \\   y = x
+        \\   if x
+        \\     y
+        \\   else
+        \\     y
+        \\   end
+        \\ end
+    );
+    defer scope.deinit();
+
+    const outer_cfg = try buildCFG(allocator, scope);
+    defer outer_cfg.deinit();
+    const insn = (try findInsn(outer_cfg, ir.InstructionName.define_method)).?;
+    const method_scope = insn.data.define_method.func;
+    const method_cfg = try buildCFG(allocator, method_scope);
+    defer method_cfg.deinit();
+
+    const blocks = method_cfg.blockList();
+    const if_exit = blocks[3];
+
+    // The phi is still in the block (dead-code sweep is future work), but
+    // it's been marked as aliased.
+    const first = if_exit.startInsn().?;
+    try std.testing.expectEqual(
+        ir.InstructionName.phi,
+        @as(ir.InstructionName, first.data),
+    );
+    try std.testing.expect(first.alias != null);
+
+    // The scope-final `leave` references gp1 (Ruby's `x` parameter — self
+    // is param 0, so `x` is index 1) directly, NOT the phi.
+    const leave_insn = if_exit.finishInsn().?;
+    try std.testing.expectEqual(
+        ir.InstructionName.leave,
+        @as(ir.InstructionName, leave_insn.data),
+    );
+    try std.testing.expectEqual(
+        ir.InstructionName.getparam,
+        @as(ir.InstructionName, leave_insn.data.leave.in.data),
+    );
+    try std.testing.expectEqual(1, leave_insn.data.leave.in.data.getparam.index);
+}
+
 fn findBBWithInsn(cfg: *CFG, name: ir.InstructionName) !?*BasicBlock {
     var iter = try cfg.depthFirstIterator(cfg.mem);
     defer iter.deinit(cfg.mem);

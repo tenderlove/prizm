@@ -52,16 +52,21 @@ pub const Scope = struct {
 
     fn tryRemoveTrivialPhi(_: *Scope, phi: *Insn) !*Insn {
         var same: ?*Insn = null;
-        for (phi.data.phi.params.items) |op| {
-            if (op == same or op == phi)
-                continue; // Unique value or self-reference
-            if (same != null)
-                return phi; // The phi merges at least two values: not trivial
+        for (phi.data.phi.params.items) |raw_op| {
+            // Resolve through prior aliases so a phi whose operand-of-record
+            // is now forwarded compares equal to whatever it forwards to.
+            const op = raw_op.resolve();
+            if (op == same or op == phi) continue; // dup or self-ref
+            if (same != null) return phi;          // merges >=2 distinct values
             same = op;
         }
 
-        // FIXME: We need to finish this up with use lists.
-        return same orelse phi;
+        // Trivial: `same` is the sole real operand. Forward the phi via
+        // aliasing — no use-list walk needed. If `same` is null the phi has
+        // no non-self operands (undef case); leave it alone.
+        const target = same orelse return phi;
+        if (target != phi) phi.alias = target;
+        return target;
     }
 
     fn addPhiOperands(self: *Scope, name: []const u8, block: *BasicBlock, phi: *Insn) !*Insn {
@@ -129,7 +134,57 @@ pub const Scope = struct {
         return self.current_block.pushInsn(insn);
     }
 
+    /// Fixed-point trivial-phi elimination. Braun's algorithm cascades via
+    /// use-lists; we don't have those, so we re-scan every phi until no new
+    /// alias is created. Each phi can be aliased at most once, so this
+    /// terminates in O(phis * passes) with passes bounded by phi count.
+    fn simplifyPhis(self: *Scope) !void {
+        var changed = true;
+        while (changed) {
+            changed = false;
+            for (self.blocks.items) |block| {
+                var it = block.instructionIter(.{});
+                while (it.next()) |insn| {
+                    if (insn.data != .phi) continue;
+                    if (insn.alias != null) continue;
+                    _ = try self.tryRemoveTrivialPhi(insn);
+                    if (insn.alias != null) changed = true;
+                }
+            }
+        }
+    }
+
+    /// One-shot: rewrite every operand pointer through resolve(), so the
+    /// mid-end / interpreter / printer see a clean pointer graph with no
+    /// forwarding to chase. Aliased phis are left in the insn list as dead
+    /// code (nothing references them anymore) for a future sweep.
+    fn resolveAllOperands(self: *Scope) void {
+        for (self.blocks.items) |block| {
+            var it = block.instructionIter(.{});
+            while (it.next()) |insn| {
+                switch (insn.data) {
+                    .call => |*x| {
+                        x.recv = x.recv.resolve();
+                        for (x.params.items) |*p| p.* = p.*.resolve();
+                    },
+                    .cond => |*x| x.condition = x.condition.resolve(),
+                    .leave => |*x| x.in = x.in.resolve(),
+                    .phi => |*x| {
+                        for (x.params.items) |*p| p.* = p.*.resolve();
+                    },
+                    .tst => |*x| x.in = x.in.resolve(),
+                    // No instruction-typed operands.
+                    .define_method, .getparam, .jump, .loadi, .loadstr,
+                    .loadnil, .loadtrue, .loadfalse => {},
+                }
+            }
+        }
+    }
+
     pub fn cfg(self: *Scope, mem: std.mem.Allocator) !*CFG {
+        try self.simplifyPhis();
+        self.resolveAllOperands();
+
         // Well-formedness invariant at the frontend/CFG boundary: every block
         // handed off must be sealed (no more predecessors coming) and filled
         // (no more instructions coming). Fill is automatic on terminator
