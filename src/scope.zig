@@ -30,9 +30,9 @@ pub const Scope = struct {
     id: u32,
     name: []const u8,
     parent: ?*Scope,
-    children: std.ArrayList(*Scope),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
+    children: std.ArrayList(*CFG) = .empty,
     entry_block: *BasicBlock,
     current_block: *BasicBlock,
     blocks: std.ArrayList(*BasicBlock),
@@ -181,6 +181,9 @@ pub const Scope = struct {
         }
     }
 
+    /// Finalize this scope into a CFG. Transfers arena / blocks / children
+    /// into the new CFG, then calls the regular `deinit` on the now-empty
+    /// scope. No special teardown logic here — `deinit` handles everything.
     pub fn cfg(self: *Scope, mem: std.mem.Allocator) !*CFG {
         try self.simplifyPhis();
         self.resolveAllOperands();
@@ -194,14 +197,32 @@ pub const Scope = struct {
             assert(block.sealed);
             assert(block.filled);
         }
-        return try CFG.init(mem, self, self.entry_block, try self.blocks.toOwnedSlice(mem));
+
+        // Move the arena out. Replace with a fresh empty one so the
+        // subsequent `deinit()` finds nothing to free.
+        const arena_out = self.arena;
+        self.arena = std.heap.ArenaAllocator.init(self.allocator);
+
+        // toOwnedSlice on blocks/children leaves them as empty ArrayLists,
+        // so deinit's loops walk zero elements.
+        const cfg_ptr = try CFG.init(
+            mem,
+            self.name,
+            arena_out,
+            self.entry_block,
+            try self.blocks.toOwnedSlice(mem),
+            try self.children.toOwnedSlice(self.allocator),
+        );
+
+        self.deinit();
+        return cfg_ptr;
     }
 
-    pub fn pushDefineMethod(self: *Scope, name: []const u8, scope: *Scope) !*Insn {
-        try self.children.append(self.allocator, scope);
+    pub fn pushDefineMethod(self: *Scope, name: []const u8, func: *CFG) !*Insn {
+        try self.children.append(self.allocator, func);
         return try self.pushInsn(.{ .define_method = .{
             .name = name,
-            .func = scope,
+            .func = func,
         } });
     }
 
@@ -337,7 +358,6 @@ pub const Scope = struct {
             .name = name,
             .parent = parent,
             .currentDef = .empty,
-            .children = .empty,
             .blocks = .empty,
             .allocator = alloc,
             .entry_block = entry_block,
@@ -352,10 +372,6 @@ pub const Scope = struct {
         scope.block_name += 1;
 
         return scope;
-    }
-
-    pub fn childScopes(self: *Scope) std.ArrayList(*Scope) {
-        return self.children;
     }
 
     pub fn deinit(self: *Scope) void {
@@ -374,14 +390,15 @@ pub const Scope = struct {
         std.debug.assert(self.loop_stack.items.len == 0);
         self.loop_stack.deinit(self.allocator);
 
-        for (self.children.items) |scope| {
-            scope.deinit();
-        }
-        self.children.deinit(self.allocator);
+        // Blocks and children are typically owned by a CFG at this point
+        // (both moved out via toOwnedSlice in `cfg()`), leaving empty
+        // ArrayLists here. If cfg() never ran (e.g., a pre-CFG unit test),
+        // the scope still owns them and these loops free them.
         for (self.blocks.items) |block| {
             block.deinit(self.allocator);
         }
         self.blocks.deinit(self.allocator);
+        self.children.deinit(self.allocator);
         self.arena.deinit();
         self.allocator.destroy(self);
     }
@@ -403,25 +420,3 @@ test "instructions are numbered at push time" {
     try std.testing.expectEqual(@as(usize, 2), c.id);
 }
 
-test "child scope iterator" {
-    const allocator = std.testing.allocator;
-
-    // Create a scope with multiple child methods
-    const scope = try Scope.init(allocator, 0, "parent", null);
-    defer scope.deinit();
-
-    // Add some child method definitions
-    _ = try scope.pushDefineMethod("method1", try Scope.init(allocator, 1, "method1", scope));
-    _ = try scope.pushDefineMethod("method2", try Scope.init(allocator, 2, "method2", scope));
-    _ = try scope.pushDefineMethod("method3", try Scope.init(allocator, 3, "method3", scope));
-
-    // Test the iterator
-    var count: usize = 0;
-    for (scope.children.items) |child_scope| {
-        count += 1;
-        // Verify it's actually a child scope
-        try std.testing.expect(child_scope.parent == scope);
-    }
-
-    try std.testing.expectEqual(3, count);
-}

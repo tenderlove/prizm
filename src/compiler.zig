@@ -29,8 +29,9 @@ pub const Compiler = struct {
         allocator.destroy(self);
     }
 
-    pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{ EmptyInstructionSequence, NotImplementedError, OutOfMemory }!*Scope {
-        return compileScopeNode(cc, null, node);
+    pub fn compile(cc: *Compiler, node: *prism.pm_scope_node_t) error{ EmptyInstructionSequence, NotImplementedError, OutOfMemory }!*cfg.CFG {
+        const scope = try compileScopeNode(cc, null, node);
+        return try scope.cfg(cc.allocator);
     }
 
     fn compileNode(cc: *Compiler, scope: *Scope, node: *const c.pm_node_t) error{ NotImplementedError, OutOfMemory }!*Insn {
@@ -84,8 +85,8 @@ pub const Compiler = struct {
         const method_name = try cc.globals.getString(cc.stringFromId(node.*.name));
         const scope_node = try prism.pmNewScopeNode(@ptrCast(node));
         const method_scope = try cc.compileScopeNode(scope, &scope_node);
-
-        return try scope.pushDefineMethod(method_name, method_scope);
+        const method_cfg = try method_scope.cfg(cc.allocator);
+        return try scope.pushDefineMethod(method_name, method_cfg);
     }
 
     fn compileCallNode(cc: *Compiler, scope: *Scope, node: *const c.pm_call_node_t) !*Insn {

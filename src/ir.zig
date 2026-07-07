@@ -1,5 +1,5 @@
 const std = @import("std");
-const Scope = @import("scope.zig").Scope;
+const CFG = @import("cfg.zig").CFG;
 const BasicBlock = @import("basic_block.zig").BasicBlock;
 const Insn = @import("ir.zig").InstructionListNode;
 
@@ -33,7 +33,7 @@ pub const Instruction = union(InstructionName) {
     define_method: struct {
         const Self = @This();
         name: []const u8,
-        func: *Scope,
+        func: *CFG,
     },
 
     getparam: struct {
@@ -122,8 +122,6 @@ pub const Instruction = union(InstructionName) {
         switch (self.*) {
             .call => |*x| x.params.deinit(alloc),
             .phi => |*x| x.params.deinit(alloc),
-            // .define_method carries a *Scope reference; ownership lives in
-            // the parent Scope's `children` list, which handles its deinit.
             else => {},
         }
     }

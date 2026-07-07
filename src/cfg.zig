@@ -7,25 +7,40 @@ const Globals = @import("globals.zig").Globals;
 const BasicBlock = @import("basic_block.zig").BasicBlock;
 pub const CFG = struct {
     mem: std.mem.Allocator,
+    arena: std.heap.ArenaAllocator, // Owns insns
+    name: []const u8,
     head: *BasicBlock,
     blocks: []const *BasicBlock,
-    scope: *Scope,
+    children: []const *CFG,
 
     pub fn build(mem: std.mem.Allocator, scope: *Scope) !*CFG {
         return try scope.cfg(mem);
     }
 
-    pub fn init(mem: std.mem.Allocator, scope: *Scope, head: *BasicBlock, blocks: []const *BasicBlock) !*CFG {
+    pub fn init(
+        mem: std.mem.Allocator,
+        name: []const u8,
+        arena: std.heap.ArenaAllocator,
+        head: *BasicBlock,
+        blocks: []const *BasicBlock,
+        children: []const *CFG,
+    ) !*CFG {
         const cfg = try mem.create(CFG);
 
         cfg.* = CFG{
             .mem = mem,
+            .name = name,
+            .arena = arena,
             .head = head,
             .blocks = blocks,
-            .scope = scope,
+            .children = children,
         };
 
         return cfg;
+    }
+
+    pub fn getName(self: *CFG) []const u8 {
+        return self.name;
     }
 
     pub fn depthFirstIterator(self: *CFG, alloc: std.mem.Allocator) !BasicBlock.DepthFirstIterator {
@@ -64,10 +79,13 @@ pub const CFG = struct {
     }
 
     pub fn deinit(self: *CFG) void {
+        for (self.children) |child| child.deinit();
+        self.mem.free(self.children);
         for (self.blocks) |blk| {
             blk.deinit(self.mem);
         }
         self.mem.free(self.blocks);
+        self.arena.deinit();
         self.mem.destroy(self);
     }
 };
@@ -82,7 +100,7 @@ fn buildCFG(mem: std.mem.Allocator, scope: *Scope) !*CFG {
 
 test "basic block one instruction" {
     const scope = try Scope.init(std.testing.allocator, 0, "empty", null);
-    defer scope.deinit();
+    // No `defer scope.deinit()` — cfg.deinit below cascades into scope.
 
     const val = try scope.pushLoadi(123);
     _ = try scope.pushLeave(val);  // auto-fills the block
@@ -105,10 +123,7 @@ test "CFG from compiler" {
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, globals, "5 + 7");
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
+    const cfg = try compileScope(allocator, globals, "5 + 7");
     defer cfg.deinit();
 
     const bb = cfg.head;
@@ -141,17 +156,11 @@ test "complex loop with if" {
         \\   y
         \\ end
     ;
-    const scope = try compileScope(allocator, globals, code);
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
+    const cfg = try compileScope(allocator, globals, code);
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func;
-
-    const methodcfg = try buildCFG(allocator, method_scope);
-    defer methodcfg.deinit();
+    _ = insn.data.define_method.func;
 }
 
 test "jumps targets get predecessors" {
@@ -169,17 +178,11 @@ test "jumps targets get predecessors" {
         \\   end
         \\ end
     ;
-    const scope = try compileScope(allocator, globals, code);
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
+    const cfg = try compileScope(allocator, globals, code);
     defer cfg.deinit();
 
     const insn = (try findInsn(cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func;
-
-    const methodcfg = try buildCFG(allocator, method_scope);
-    defer methodcfg.deinit();
+    const methodcfg = insn.data.define_method.func;
 
     // We should have 4 blocks
     const blocks = methodcfg.blockList();
@@ -214,12 +217,9 @@ test "if without else evaluates to nil on false path" {
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, globals,
+    const cfg = try compileScope(allocator, globals,
         \\ x = if false then 1 end
     );
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
     // We should have 4 blocks
@@ -255,7 +255,7 @@ test "return in a branch doesn't emit a jump after leave" {
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, globals,
+    const outer_cfg = try compileScope(allocator, globals,
         \\ def foo x
         \\   if x
         \\     return 42
@@ -264,14 +264,9 @@ test "return in a branch doesn't emit a jump after leave" {
         \\   end
         \\ end
     );
-    defer scope.deinit();
-
-    const outer_cfg = try buildCFG(allocator, scope);
     defer outer_cfg.deinit();
     const insn = (try findInsn(outer_cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func;
-    const method_cfg = try buildCFG(allocator, method_scope);
-    defer method_cfg.deinit();
+    const method_cfg = insn.data.define_method.func;
 
     // compileIfNode creates blocks in this order: entry, then, else, if_exit.
     const blocks = method_cfg.blockList();
@@ -327,7 +322,7 @@ test "if with return in both branches doesn't double-terminate else" {
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, globals,
+    const outer_cfg = try compileScope(allocator, globals,
         \\ def foo x
         \\   if x
         \\     return 1
@@ -336,14 +331,9 @@ test "if with return in both branches doesn't double-terminate else" {
         \\   end
         \\ end
     );
-    defer scope.deinit();
-
-    const outer_cfg = try buildCFG(allocator, scope);
     defer outer_cfg.deinit();
     const insn = (try findInsn(outer_cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func;
-    const method_cfg = try buildCFG(allocator, method_scope);
-    defer method_cfg.deinit();
+    const method_cfg = insn.data.define_method.func;
 
     const blocks = method_cfg.blockList();
     try std.testing.expectEqual(4, blocks.len);
@@ -392,7 +382,7 @@ test "code after both-branch-return if lands in if_exit" {
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, globals,
+    const outer_cfg = try compileScope(allocator, globals,
         \\ def foo x
         \\   if x
         \\     return 1
@@ -402,14 +392,9 @@ test "code after both-branch-return if lands in if_exit" {
         \\   99
         \\ end
     );
-    defer scope.deinit();
-
-    const outer_cfg = try buildCFG(allocator, scope);
     defer outer_cfg.deinit();
     const insn = (try findInsn(outer_cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func;
-    const method_cfg = try buildCFG(allocator, method_scope);
-    defer method_cfg.deinit();
+    const method_cfg = insn.data.define_method.func;
 
     const blocks = method_cfg.blockList();
     try std.testing.expectEqual(4, blocks.len);
@@ -451,7 +436,7 @@ test "nested if with both-branch returns leaves outer merge with dead pred" {
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, globals,
+    const outer_cfg = try compileScope(allocator, globals,
         \\ def foo x, y
         \\   if x
         \\     if y
@@ -464,14 +449,9 @@ test "nested if with both-branch returns leaves outer merge with dead pred" {
         \\   end
         \\ end
     );
-    defer scope.deinit();
-
-    const outer_cfg = try buildCFG(allocator, scope);
     defer outer_cfg.deinit();
     const insn = (try findInsn(outer_cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func;
-    const method_cfg = try buildCFG(allocator, method_scope);
-    defer method_cfg.deinit();
+    const method_cfg = insn.data.define_method.func;
 
     const blocks = method_cfg.blockList();
     // entry, outer_then, outer_else, outer_if_exit, inner_then, inner_else,
@@ -539,7 +519,7 @@ test "next jumps to the loop header" {
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, globals,
+    const cfg = try compileScope(allocator, globals,
         \\ i = 10
         \\ while i > 0
         \\   i -= 1
@@ -547,9 +527,6 @@ test "next jumps to the loop header" {
         \\   puts i
         \\ end
     );
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
     const blocks = cfg.blockList();
@@ -605,16 +582,13 @@ test "break with value flows into the loop exit via a phi" {
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, globals,
+    const cfg = try compileScope(allocator, globals,
         \\ i = 0
         \\ result = while i < 10
         \\   break 42 if i == 5
         \\   i += 1
         \\ end
     );
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
     const blocks = cfg.blockList();
@@ -643,16 +617,13 @@ test "bare break emits a phi of two loadnil operands" {
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, globals,
+    const cfg = try compileScope(allocator, globals,
         \\ i = 0
         \\ while i < 10
         \\   break if i == 5
         \\   i += 1
         \\ end
     );
-    defer scope.deinit();
-
-    const cfg = try buildCFG(allocator, scope);
     defer cfg.deinit();
 
     const blocks = cfg.blockList();
@@ -688,7 +659,7 @@ test "trivial phi from same-value branches is aliased away" {
     const globals = try Globals.init(allocator);
     defer globals.deinit(allocator);
 
-    const scope = try compileScope(allocator, globals,
+    const outer_cfg = try compileScope(allocator, globals,
         \\ def foo x
         \\   y = x
         \\   if x
@@ -698,14 +669,9 @@ test "trivial phi from same-value branches is aliased away" {
         \\   end
         \\ end
     );
-    defer scope.deinit();
-
-    const outer_cfg = try buildCFG(allocator, scope);
     defer outer_cfg.deinit();
     const insn = (try findInsn(outer_cfg, ir.InstructionName.define_method)).?;
-    const method_scope = insn.data.define_method.func;
-    const method_cfg = try buildCFG(allocator, method_scope);
-    defer method_cfg.deinit();
+    const method_cfg = insn.data.define_method.func;
 
     const blocks = method_cfg.blockList();
     const if_exit = blocks[3];
@@ -765,7 +731,7 @@ fn findInsn(cfg: *CFG, name: ir.InstructionName) !?*ir.InstructionListNode {
     return null;
 }
 
-fn compileScope(allocator: std.mem.Allocator, globals: *Globals, code: []const u8) !*Scope {
+fn compileScope(allocator: std.mem.Allocator, globals: *Globals, code: []const u8) !*CFG {
     const parser = try prism.Prism.newParserCtx(allocator);
     defer parser.deinit();
     parser.init(code, code.len, null);

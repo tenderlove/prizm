@@ -16,8 +16,7 @@ const ir = @import("../ir.zig");
 /// Values are `v<id>` where id is the instruction's push-time id. Terminators
 /// use `jump` / `brif` / `return`.
 pub fn print(cfg: *CFG, w: *std.Io.Writer) !void {
-    const scope = cfg.scope;
-    try w.print("function %{s}() {{\n", .{scope.getName()});
+    try w.print("function %{s}() {{\n", .{cfg.getName()});
 
     for (cfg.blocks, 0..) |bb, i| {
         if (i > 0) try w.print("\n", .{});

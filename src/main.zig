@@ -109,10 +109,7 @@ fn runCompile(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterat
     const cc = try Compiler.init(gpa, globals, parser);
     defer cc.deinit(gpa);
 
-    const scope = try cc.compile(&scope_node);
-    defer scope.deinit();
-
-    const cfg = try scope.cfg(gpa);
+    const cfg = try cc.compile(&scope_node);
     defer cfg.deinit();
 
     if (res.args.cfg) |format| {
@@ -150,7 +147,7 @@ fn runMain(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     std.debug.print("run file {s}\n", .{path});
 }
 
-fn compileFile(io: std.Io, alloc: std.mem.Allocator, path: []const u8, globals: *g.Globals) !*Scope {
+fn compileFile(io: std.Io, alloc: std.mem.Allocator, path: []const u8, globals: *g.Globals) !*CFG {
     const src = try std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .unlimited);
 
     // Parse the file

@@ -378,7 +378,7 @@ pub const IonGraph = struct {
         const blocks = try buildMIRBlocks(cfg, a);
         const doc = IonJSON{
             .functions = try a.dupe(Func, &.{.{
-                .name = cfg.scope.name,
+                .name = cfg.name,
                 .passes = try a.dupe(Pass, &.{.{
                     .name = "CFG built",
                     .mir = .{ .blocks = blocks },
